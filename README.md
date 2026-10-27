@@ -26,6 +26,8 @@ the bass and chords can also go out over USB MIDI, per part: **internal**, **mid
 
 **dub.** the echo is a ping-pong tape delay with filtering, saturation and wow inside the feedback loop. its time is tempo-synced and glides when the tempo changes. at the end of some phrases the conductor throws the echo: feedback and stab send jump for one bar, then fall back.
 
+**listening.** with **LISTEN > follow input key** on, gradient tracks the key of whatever is coming into the norns inputs and keeps following it. the engine runs SuperCollider's `KeyTrack` (a pitch-class profile over a 4096 FFT, matched against major and minor templates). the script turns that into a decaying vote: a major key counts for its relative minor, since gradient's harmony is minor-modal and they share the same notes. a new key has to lead the vote for **hold** seconds (default 10) with a clear share before gradient moves, and the move lands on the next phrase edge. quiet input below the **gate** doesn't vote, so the key holds through silence. while following, gradient stops making its own key moves (set-mode modulation, next-track key shifts). the screen shows `in Em 64%` (what it hears and how sure it is), `>Dm` when a move is pending, and `listening` when the input is below the gate.
+
 ---
 
 ## controls
@@ -49,6 +51,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 ## params
 
 - **GRADIENT:** play mode, track length, track end (stop / next track), kick (auto / always / never), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
+- **LISTEN:** follow input key, input gate (dB), hold before move (s)
 - **KEY:** root, mode, chord voicing, bass octave
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, echo wow
 - **LEVELS:** kick, hat, rim, bass, chord, arp, wash, noise, crackle

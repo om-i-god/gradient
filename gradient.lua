@@ -10,6 +10,10 @@
 -- hold K3: E2 bpm  E3 set/track
 -- hold K1: E1 visual theme
 --
+-- params > LISTEN > follow input key:
+-- tracks the key of the audio input
+-- and moves with it on phrase edges
+--
 -- v0.1
 
 engine.name = "Gradient"
@@ -18,6 +22,7 @@ local T   = include("lib/theory")
 local G   = include("lib/gen")
 local C   = include("lib/conductor")
 local VIS = include("lib/visuals")
+local L   = include("lib/listen")
 
 local ECHO_DIVS      = {0.5, 0.75, 1, 1.5}          -- in beats
 local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
@@ -38,9 +43,11 @@ local S = {
   on_kick = false, on_pump = false, kickless = false,
   drop_phrases = 0, force_mutate = false, freeze = false, throw = false,
   cycle_bars = 96,
+  follow = false, pending_root = nil,
 }
 
-local main_clock, draw_clock
+local main_clock, draw_clock, listen_clock
+local in_key, in_amp = nil, 0
 local loop_gen = 0        -- bumps on each start; stale step loops exit
 local k1, k2, k3 = false, false, false
 local k2_used, k3_used = false, false
@@ -166,7 +173,10 @@ local function play_step()
       params:set("root", S.root_pc + 1, true)
       params:set("mode", S.mode, true)
       params:set("seed", S.seed or params:get("seed"), true)
-      flash(r == "next" and ("new track " .. S.seed) or T.name(S.root_pc, S.mode))
+      local label = T.name(S.root_pc, S.mode)
+      if r == "next" then label = "new track " .. S.seed
+      elseif S.follow then label = "in key " .. label end
+      flash(label)
     end
     apply_bar()
     if r == "stop" then
@@ -252,6 +262,33 @@ local function play_step()
   end
 
   S.step = S.step + 1
+end
+
+------------------------------------------------------------------------
+-- input key follow
+------------------------------------------------------------------------
+
+local function listen_loop()
+  while true do
+    clock.sleep(0.25)
+    if S.follow then
+      local now  = util.time()
+      local gate = 10 ^ (params:get("listen_gate") / 20)
+      L.tick(in_key, in_amp, gate, now)
+      local pc = L.proposal(S.root_pc, params:get("listen_hold"), now)
+      if pc and pc ~= S.pending_root then
+        if S.playing then
+          S.pending_root = pc           -- conductor lands it on the next phrase
+        else
+          S.root_pc, S.mode = pc, 1
+          C.update_chord(S)
+          params:set("root", pc + 1, true)
+          params:set("mode", 1, true)
+          flash("in key " .. T.name(pc, 1))
+        end
+      end
+    end
+  end
 end
 
 ------------------------------------------------------------------------
@@ -411,6 +448,20 @@ local function draw_hud()
   if S.kickless and S.playing then sec = sec .. " ~" end
   text_box(127, 7, sec, S.playing and 8 or 3, true)
 
+  -- listening: what the input sounds like, and where we're headed
+  if S.follow then
+    local s
+    if not L.heard then
+      s = "listening"
+    elseif L.leader then
+      s = "in " .. T.NOTE_NAMES[L.leader + 1] .. "m " .. math.floor(L.share * 100) .. "%"
+    else
+      s = "in ?"
+    end
+    if S.pending_root then s = s .. " >" .. T.NOTE_NAMES[S.pending_root + 1] .. "m" end
+    text_box(127, 15, s, L.heard and 7 or 3, true)
+  end
+
   -- bottom: energy bar + parts
   screen.level(0)
   screen.rect(0, 55, 128, 9)
@@ -515,6 +566,17 @@ local function setup_params()
   params:set_action("voicing", function(v) S.voicing = v; C.update_chord(S) end)
   params:add_number("bass_oct", "bass octave", 0, 2, 1)
 
+  params:add_separator("LISTEN")
+  params:add_option("listen_on", "follow input key", {"off", "on"}, 1)
+  params:set_action("listen_on", function(v)
+    S.follow = v == 2
+    S.pending_root = nil
+    L.reset()
+    engine.listen(S.follow and 1 or 0)
+  end)
+  params:add_number("listen_gate", "input gate (dB)", -70, -10, -45)
+  params:add_number("listen_hold", "hold before move (s)", 2, 60, 10)
+
   params:add_separator("MIX")
   params:add_number("dub", "dub", 0, 100, 50)
   params:add_number("tone", "tone", 0, 100, 50)
@@ -596,6 +658,14 @@ function init()
   amp_poll.time = 1 / 30
   amp_poll:start()
 
+  local key_poll = poll.set("in_key", function(v) in_key = v end)
+  key_poll.time = 1 / 4
+  key_poll:start()
+  local in_amp_poll = poll.set("in_amp", function(v) in_amp = v end)
+  in_amp_poll.time = 1 / 4
+  in_amp_poll:start()
+  listen_clock = clock.run(listen_loop)
+
   clock.transport.start = function() start() end
   clock.transport.stop  = function() stop() end
 
@@ -605,4 +675,5 @@ end
 function cleanup()
   stop()
   if draw_clock then clock.cancel(draw_clock) end
+  if listen_clock then clock.cancel(listen_clock) end
 end

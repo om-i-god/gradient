@@ -23,11 +23,17 @@
 //   pump  (dummy f)
 //   wash_chord f1 f2 f3 f4
 //   tweak key val   -- see `st` defaults / fxMap below
+//   listen on       -- 1 runs the input key tracker, 0 pauses it
+//
+// polls
+//   in_key  KeyTrack estimate of the audio input: 0-11 C..B major, 12-23 C..B minor
+//   in_amp  input amplitude
 
 Engine_Gradient : CroneEngine {
   var voiceGroup, fxGroup;
   var dryBus, pumpBus, echoBus, verbBus;
   var washSynth, noiseSynth, echoSynth, verbSynth, masterSynth;
+  var listenSynth, keyBus, inAmpBus;
   var st, fxMap;
 
   *new { arg context, doneCallback;
@@ -41,6 +47,8 @@ Engine_Gradient : CroneEngine {
     pumpBus = Bus.audio(s, 2);
     echoBus = Bus.audio(s, 2);
     verbBus = Bus.audio(s, 2);
+    keyBus   = Bus.control(s, 1);
+    inAmpBus = Bus.control(s, 1);
 
     voiceGroup = Group.head(context.xg);
     fxGroup    = Group.after(voiceGroup);
@@ -207,6 +215,16 @@ Engine_Gradient : CroneEngine {
       Out.ar(out, sig);
     }).add;
 
+    // input key tracker: pitch-class profile over a 4096 FFT matched against
+    // major/minor templates (KeyTrack has tables for 44.1k and 48k)
+    SynthDef(\grad_listen, {
+      arg in_l, in_r, keyOut, ampOut, keydecay=4;
+      var sig   = (In.ar(in_l) + In.ar(in_r)) * 0.5;
+      var chain = FFT(LocalBuf(4096), sig);
+      Out.kr(keyOut, KeyTrack.kr(chain, keydecay, 0.5));
+      Out.kr(ampOut, Amplitude.kr(sig, 0.05, 0.5));
+    }).add;
+
     s.sync;
 
     washSynth = Synth(\grad_wash, [
@@ -222,6 +240,12 @@ Engine_Gradient : CroneEngine {
     verbSynth = Synth(\grad_verb, [
       \in, verbBus.index, \out, pumpBus.index
     ], fxGroup, \addToTail);
+    listenSynth = Synth(\grad_listen, [
+      \in_l, context.in_b[0].index, \in_r, context.in_b[1].index,
+      \keyOut, keyBus.index, \ampOut, inAmpBus.index
+    ], fxGroup, \addToHead);
+    listenSynth.run(false);
+
     masterSynth = Synth(\grad_master, [
       \dry, dryBus.index, \pump, pumpBus.index, \out, context.out_b.index
     ], fxGroup, \addToTail);
@@ -302,6 +326,13 @@ Engine_Gradient : CroneEngine {
       washSynth.set(\f1, msg[1], \f2, msg[2], \f3, msg[3], \f4, msg[4]);
     });
 
+    this.addCommand(\listen, "f", { |msg|
+      listenSynth.run(msg[1] > 0);
+    });
+
+    this.addPoll(\in_key, { keyBus.getSynchronous });
+    this.addPoll(\in_amp, { inAmpBus.getSynchronous });
+
     this.addCommand(\tweak, "sf", { |msg|
       var key = msg[1].asSymbol;
       var val = msg[2];
@@ -321,5 +352,7 @@ Engine_Gradient : CroneEngine {
     pumpBus.free;
     echoBus.free;
     verbBus.free;
+    keyBus.free;
+    inAmpBus.free;
   }
 }

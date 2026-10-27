@@ -50,7 +50,7 @@ end
 function C.new_track(S, seed, move_key)
   math.randomseed(seed)
   S.seed = seed
-  if move_key then
+  if move_key and not S.follow then
     S.root_pc = (S.root_pc + G.pick({0, 5, 7, -5, 3})) % 12
     S.mode    = G.pick({1, 1, 2, 3})
   end
@@ -166,7 +166,8 @@ function C.bar(S)
     end
   end
   -- set mode: modulate at a cycle trough now and then
-  if S.mode_play == 1 and S.track_bar % S.cycle_bars == 0 and math.random() < 0.5 then
+  if S.mode_play == 1 and not S.follow
+     and S.track_bar % S.cycle_bars == 0 and math.random() < 0.5 then
     S.root_pc = (S.root_pc + G.pick({5, 7, -5, 3})) % 12
     S.pair = G.pick(T.PAIRS)
     S.cycle_bars = G.pick({64, 96, 128})
@@ -177,6 +178,13 @@ end
 
 -- phrase boundary: roll the dice once, then decide + mutate
 function C.phrase(S)
+  -- a followed input key lands on the phrase edge
+  if S.pending_root then
+    S.root_pc, S.mode = S.pending_root, 1
+    S.pending_root = nil
+    S.key_moved = true
+    C.update_chord(S)
+  end
   -- fresh jitter so parts don't enter in lockstep every time
   for k, _ in pairs(TH) do
     S.jitter[k] = (math.random() - 0.5) * 0.16

@@ -5,6 +5,7 @@
 local BARS    = tonumber(arg[1]) or 300
 local PMODE   = tonumber(arg[2]) or 2
 local MINUTES = tonumber(arg[3]) or 4
+local LISTEN  = arg[4] == "listen"
 
 calls = {}
 engine = setmetatable({}, {__index = function(_, k)
@@ -63,10 +64,12 @@ midi = {vports = {{name = "fake synth"}}, connect = function()
           note_off = function() calls.midi_off = (calls.midi_off or 0) + 1 end,
           cc = function() end}
 end}
-poll = {set = function() return {start = function() end} end}
+polls = {}
+poll = {set = function(name, fn) polls[name] = fn; return {start = function() end} end}
 screen = setmetatable({text_extents = function() return 20, 6 end},
   {__index = function() return function() end end})
-util = {time = os.clock}
+VT = 0   -- virtual seconds, advanced one 16th per drive tick
+util = {time = function() return VT end}
 _menu = {mode = false}
 
 dofile("gradient.lua")
@@ -75,6 +78,17 @@ params:set("play_mode", PMODE)
 params:set("track_minutes", MINUTES)
 params:set("bass_out", 3)
 params:set("bass_dev", 2)
+if LISTEN then params:set("listen_on", 2) end
+
+-- fake KeyTrack feed by bar: E minor (16), G major (7 -> rel. E minor),
+-- silence, then D minor (14)
+local function feed(bar)
+  if bar < 24 then return 16, 0.1
+  elseif bar < 48 then return 7, 0.1
+  elseif bar < 60 then return 0, 0.0001
+  else return 14, 0.1 end
+end
+local last_root
 
 -- K2+K3 = play
 key(2, 1); key(3, 1); key(3, 0); key(2, 0)
@@ -83,6 +97,7 @@ key(2, 1); key(3, 1); key(3, 0); key(2, 0)
 -- step clock is thread 2 (draw loop is 1); note-off threads come and go.
 local last_bar, steps = -1, 0
 local function tick_all()
+  VT = VT + 60 / 128 / 4
   for id, co in pairs(threads) do
     if coroutine.status(co) == "dead" then threads[id] = nil
     else
@@ -103,6 +118,16 @@ for i = 1, BARS * 16 * 3 do
     local name, val = debug.getupvalue(key, j)
     if not name then break end
     if name == "S" then S = val end
+  end
+  if LISTEN and S then
+    local k, a = feed(S.track_bar)
+    if math.random() < 0.15 then k = math.random(0, 23) end   -- tracker noise
+    polls.in_key(k); polls.in_amp(a)
+    if S.root_pc ~= last_root then
+      print(string.format("  >> root now %d at bar %d (bar-in-phrase %d)  pending=%s",
+        S.root_pc, S.track_bar, S.track_bar % 8, tostring(S.pending_root)))
+      last_root = S.root_pc
+    end
   end
   if S and S.track_bar ~= last_bar then
     last_bar = S.track_bar

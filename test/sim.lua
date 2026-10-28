@@ -126,6 +126,10 @@ polls = {}
 poll = {set = function(name, fn) polls[name] = fn; return {start = function() end} end}
 screen = setmetatable({text_extents = function() return 20, 6 end},
   {__index = function() return function() end end})
+-- SNAP=dir: draw into a real raster and save a frame per theme
+local SNAP = os.getenv("SNAP")
+local RAST
+if SNAP then RAST = dofile("test/raster.lua"); screen = RAST.screen end
 _path = {audio = "/home/we/dust/audio/"}
 VT = 0   -- virtual seconds, advanced one 16th per drive tick
 util = {time = function() return VT end}
@@ -266,21 +270,21 @@ end
 for i = 1, 16 * 8 do tick_all() end
 print("grid leds lit (cumulative):", grid_dev.leds)
 
--- visuals: every theme drawn and triggered under each react setting and
--- overlay, with the level up so audio-reactive branches run
+-- visuals: every theme drawn under each overlay with the level moving,
+-- long enough for echoes, drops and the arc's history to build up
 local VISM = include("lib/visuals")
 for th = 1, #VISM.names do
   params:set("theme", th)
-  for r = 1, 6 do
-    params:set("vis_react", r)
-    params:set("hud", (r % 3) + 1)
-    polls.amp_out_l(r / 6 * 0.3)
-    for i = 1, 16 do tick_all() end
+  for h = 1, 3 do
+    params:set("hud", h)
+    polls.amp_out_l(h / 3 * 0.3)
+    for i = 1, 16 * 4 do tick_all() end
+    if RAST and h == 3 then RAST.snap(string.format("%s/%d_%s.pgm", SNAP, th, VISM.names[th])) end
   end
 end
 print("themes drawn:", #VISM.names)
 -- theme cycle actually moves
-params:set("vis_react", 1); params:set("hud", 1)
+params:set("hud", 1)
 for c = 2, 3 do
   params:set("vis_cycle", c)
   local t0, moved = params:get("theme"), false

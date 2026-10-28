@@ -76,21 +76,6 @@ local note_id  = 0
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 local function mtof(n) return 440 * 2 ^ ((n - 69) / 12) end
 
--- what makes the visuals jump (VISUALS > react to)
-local VIS_REACT = {"kick + stabs", "kick", "stabs", "arps", "bass", "everything"}
-local REACT_TO = {
-  {kick = true, stab = true}, {kick = true}, {stab = true}, {arp = true}, {bass = true},
-  {kick = true, stab = true, arp = true, bass = true},
-}
-local function vis_hit(src)
-  local r = params:get("vis_react")
-  if not REACT_TO[r][src] then return end
-  -- terrain rolls on the kick; on the default setting stabs only push it
-  -- when the kick is out
-  if r == 1 and src == "stab" and theme == 1 and S.on_kick then return end
-  VIS.trigger(theme)
-end
-
 -- VISUALS > theme cycle: a new random theme on a bar edge / phrase / track
 local function cycle_theme(edge)
   if params:get("vis_cycle") ~= edge or #VIS.names < 2 then return end
@@ -233,6 +218,7 @@ local function play_step()
     end
     apply_bar()
     O.bar(S, (S.track_bar - 1) % S.phrase_len == 0)
+    VIS.event("bar", S)
     if (S.track_bar - 1) % 8 == 0 then cycle_theme(2) end
     if (S.track_bar - 1) % S.phrase_len == 0 then cycle_theme(3) end
     if r == "next" then cycle_theme(4) end
@@ -251,11 +237,12 @@ local function play_step()
     if S.on_pump then
       engine.pump(1)
       O.pump(beat)
+      VIS.event("pump")
     end
     if S.on_kick then
       engine.kick(0.9, params:get("kick_tune"), params:get("kick_decay") / 100, 0.15 + e * 0.2)
       O.kick()
-      vis_hit("kick")
+      VIS.event("kick")
     end
   end
 
@@ -288,7 +275,7 @@ local function play_step()
     if ext then
       for i = 1, 4 do midi_note("chord", c[i], cv * cg, beat * 0.5) end
     end
-    vis_hit("stab")
+    VIS.event("stab", c)
     O.note("chord", 48 + S.root_pc + S.chord_root_pc, dur)
   end
 
@@ -304,7 +291,7 @@ local function play_step()
     if internal then engine.bass(mtof(note), bv[1] * bg * 0.55, dur) end
     if ext then midi_note("bass", note, bv[1] * bg, dur) end
     O.note("bass", note, dur)
-    vis_hit("bass")
+    VIS.event("bass", note)
   end
 
   -- phasing arp lanes: always tick so phase relationships persist in silence
@@ -326,7 +313,7 @@ local function play_step()
         local vel = g * (0.7 + math.random() * 0.3)
         local dur = l.decay * (0.6 + e * 0.6)
         O.note("lead", note, dur, i)
-        vis_hit("arp")
+        VIS.event("arp", i, note, l.pos)
         local ext = arp_ext and (arp_sel == 1 or arp_sel == 6 or arp_sel == i + 1)
         if ext then
           local ch = (arp_sel == 6) and math.min(16, params:get("arp_ch") + i - 1) or nil
@@ -685,7 +672,7 @@ local function draw_loop()
     if not _menu.mode then
       screen.clear()
       screen.aa(0)
-      VIS.draw(theme)
+      VIS.draw(theme, S)
       draw_hud()
       screen.update()
     end
@@ -871,14 +858,11 @@ local function setup_params()
 
   params:add_separator("VISUALS")
   params:add_option("theme", "theme", VIS.names, 1)
-  params:set_action("theme", function(v) theme = v; VIS.init(v) end)
+  params:set_action("theme", function(v) theme = v end)
   params:add_option("vis_cycle", "theme cycle", {"off", "every 8 bars", "every phrase", "each track"}, 1)
-  params:add_option("vis_react", "react to", VIS_REACT, 1)
   params:add_option("hud", "overlay", {"full", "minimal", "off"}, 1)
   params:add_number("vis_speed",      "speed",      1, 10,  3)
   params:add_number("vis_brightness", "brightness", 1, 15, 10)
-  params:add_number("num_particles",  "particles",  5, 40, 20)
-  params:set_action("num_particles",  function() VIS.init(theme) end)
 end
 
 ------------------------------------------------------------------------
@@ -891,7 +875,7 @@ function init()
 
   math.randomseed(os.time())
   new_track(math.random(1, 9999), false)
-  VIS.init(theme)
+  VIS.init()
 
   local amp_poll = poll.set("amp_out_l", function(val)
     if val > audio_level_smooth then

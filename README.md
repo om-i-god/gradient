@@ -121,11 +121,18 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 - **CROW:** four outputs, each assignable: bass pitch, bass gate, lead pitch, lead gate, chord root, energy (0–5V, slewed), kick trig, pump env (5V ar per beat, follows the ghost sidechain even when the kick is out). pitches are 1V/oct with C3 at 0V, gates 8V. **lead lane** picks which arp lane is the lead; **pitch slew** adds glide; **pitch octave** shifts every pitch output. crow follows the parts as they play, whatever their internal / midi routing
 - **CC OUT:** a midi device and channel (default 16) for the arc as CCs: energy, dub, tone (0 = off), and a phrase pulse (127 on the first bar of each phrase, then 0). sent once a bar, only when the value changes
 - **VISUALS:**
-  - **theme:** all twenty from causeway (terrain, tunnel, field, lattice, pulse, drift, hex, stars, wave, rain, spiral, liss, bounce, grid, flow, morph, shatter, code, orbit, kaleido), drawing code ported verbatim
+  - **theme:** eight, each drawn from what the music is doing rather than just how loud it is:
+    - **gradient:** the chord as soft bands of light at each voice's pitch, the bass glowing underneath; calm sections widen and soften the bands
+    - **voices:** the four chord voices scrolling right to left, so voice leading and morphs are drawn as they happen; stabs flash as stems
+    - **lanes:** each arp lane as a ring of its steps, playheads circling at their own lengths; a line joins the four heads and tightens when the lanes line up
+    - **phase:** two line gratings turned by the phase gap between lanes 1 and 2, so the moiré swims as they drift apart
+    - **echo:** every stab leaves copies drifting off at the echo time, fading by the feedback, wobbling like tape; throws leave long trails
+    - **fall:** arp notes fall from their pitch; stabs fall slower and heavier; the bass glows on the floor
+    - **pump:** horizon lines squeezed by the ghost sidechain each beat; in kickless stretches they turn to water
+    - **arc:** the energy of the last 60 bars. columns go hollow where the kick was out, dots mark chord changes, a line marks pedal bass; in track mode a progress line runs along the bottom
   - **theme cycle:** off / every 8 bars / every phrase / each track; jumps to a random other theme
-  - **react to:** what makes the picture jump: kick + stabs (default; terrain rolls on the kick, stabs only push it in kickless stretches) / kick / stabs / arps / bass / everything. every theme also follows the output level
   - **overlay:** full / minimal (key and chord only) / off (just the picture, plus held-key hints and messages)
-  - **speed, brightness, particles**
+  - **speed, brightness**
 
 **seeds.** a seed fixes a track's material: patterns, lanes, progression, harmonic rhythm. the moment-to-moment dice (which notes skip, when mutations land) run live, so a rebuilt seed is the same track played a different night.
 
@@ -139,7 +146,7 @@ copy the folder to `~/dust/code/gradient/` on norns. it ships its own engine (`l
 
 ## dev
 
-`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars. `HARM=1|2|3` picks the harmony mode; `HTRACE=1` prints every bar's chord, notes and bass, and the run ends with how far the voices moved per change. it fails on doubled or out-of-range stab notes.
+`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars. `HARM=1|2|3` picks the harmony mode; `SNAP=dir` renders each visual theme to a PGM in `dir` through a small rasterizer (`test/raster.lua`); `HTRACE=1` prints every bar's chord, notes and bass, and the run ends with how far the voices moved per change. it fails on doubled or out-of-range stab notes.
 
 ## license
 

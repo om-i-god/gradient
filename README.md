@@ -4,7 +4,7 @@ generative dub / kickless techno for norns. press play and let it ride.
 
 gradient makes whole tracks by itself: phasing arpeggios, dub chord stabs into a tape echo, a sub bass, a kick you can drop out while its sidechain pump keeps breathing, hats, rims, a pad wash and a hiss/crackle bed. a conductor above the notes decides, bar by bar, what plays, how hard, and when things change. you can steer it, but you don't have to.
 
-the bass and chords can also go out over USB MIDI, per part: **internal**, **midi**, or **both**.
+the bass, chords and arps can also go out over USB MIDI, per part: **internal**, **midi**, or **both**.
 
 ---
 
@@ -68,7 +68,8 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, echo wow
 - **LEVELS:** kick, hat, rim, bass, chord, arp, wash, noise, crackle
 - **SOUND:** kick tune / decay, stab cutoff / resonance / detune, bass cutoff
-- **BASS OUT / CHORD OUT:** output (internal / midi / both), midi device, channel (default bass ch 1, chords ch 2)
+- **BASS OUT / CHORD OUT / ARP OUT:** output (internal / midi / both), midi device, channel (default bass ch 1, chords ch 2, arps ch 3)
+- **ARP OUT > lanes to midi:** all four lanes on one channel, a single lane (for a mono synth: the other lanes keep playing on norns), or each lane on its own channel starting at the arp channel (ch, ch+1, ch+2, ch+3). velocity follows the lane's fade and accent; note length follows its decay
 - **VISUALS:** theme (terrain, tunnel, field, lattice: ported from causeway), speed, brightness, particles
 
 **seeds.** a seed fixes a track's material: patterns, lanes, chord pair, harmonic rhythm. the moment-to-moment dice (which notes skip, when mutations land) run live, so a rebuilt seed is the same track played a different night.

@@ -61,9 +61,12 @@ function clock.get_tempo() return 128 end
 
 -- misc -------------------------------------------------------------------
 midi = {vports = {{name = "fake synth"}}, connect = function()
-  return {note_on = function() calls.midi_on = (calls.midi_on or 0) + 1 end,
+  return {note_on = function(_, n, v, ch)
+            calls.midi_on = (calls.midi_on or 0) + 1
+            local k = "ch" .. ch; calls[k] = (calls[k] or 0) + 1
+          end,
           note_off = function() calls.midi_off = (calls.midi_off or 0) + 1 end,
-          cc = function() end}
+          cc = function() calls.midi_cc = (calls.midi_cc or 0) + 1 end}
 end}
 polls = {}
 poll = {set = function(name, fn) polls[name] = fn; return {start = function() end} end}
@@ -79,6 +82,9 @@ params:set("play_mode", PMODE)
 params:set("track_minutes", MINUTES)
 params:set("bass_out", 3)
 params:set("bass_dev", 2)
+if os.getenv("ARP") then
+  params:set("arp_out", 2); params:set("arp_dev", 2); params:set("arp_lanes", tonumber(os.getenv("ARP")))
+end
 if LISTEN then params:set("listen_on", 2) end
 if MODE then params:set("mode", MODE) end
 

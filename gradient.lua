@@ -82,10 +82,10 @@ end
 -- midi out
 ------------------------------------------------------------------------
 
-local function midi_note(part, note, vel, dur)
+local function midi_note(part, note, vel, dur, ch)
   local dev = midi_dev[part]
   if not dev then return end
-  local ch  = params:get(part .. "_ch")
+  ch = ch or params:get(part .. "_ch")
   local v   = clamp(math.floor(vel * 127), 1, 127)
   local key = part .. ":" .. ch .. ":" .. note
   note_id = note_id + 1
@@ -106,9 +106,14 @@ local function all_notes_off()
     h[1]:note_off(h[3], 0, h[2])
     hanging[k] = nil
   end
-  for _, part in ipairs({"bass", "chord"}) do
+  for _, part in ipairs({"bass", "chord", "arp"}) do
     local dev = midi_dev[part]
-    if dev then dev:cc(123, 0, params:get(part .. "_ch")) end
+    if dev then
+      local ch = params:get(part .. "_ch")
+      -- arp "own ch each" spans ch..ch+3
+      local n = (part == "arp" and params:get("arp_lanes") == 6) and 3 or 0
+      for c = ch, math.min(16, ch + n) do dev:cc(123, 0, c) end
+    end
   end
 end
 
@@ -244,6 +249,8 @@ local function play_step()
   -- phasing arp lanes: always tick so phase relationships persist in silence
   local tone = params:get("tone") / 100
   local bar_f = S.track_bar + (s - 1) / 16
+  local arp_int, arp_ext = routes("arp")
+  local arp_sel = params:get("arp_lanes")   -- 1 all, 2-5 one lane, 6 own ch each
   for i = 1, 4 do
     local l = S.lanes[i]
     l.tick = l.tick + 1
@@ -255,8 +262,17 @@ local function play_step()
         local note = G.lane_note(l, S.chord, idx)
         local lfo  = math.sin(bar_f / l.lfo_bars * 2 * math.pi + l.lfo_phase)
         local cut  = l.cutoff * (0.4 + tone * 1.2) * (0.65 + 0.35 * lfo) * (0.6 + e * 0.6)
-        engine.arp(mtof(note), 0.13 * g * (0.7 + math.random() * 0.3),
-          l.decay * (0.6 + e * 0.6), clamp(cut, 150, 12000), l.pan, l.shapeX)
+        local vel = g * (0.7 + math.random() * 0.3)
+        local dur = l.decay * (0.6 + e * 0.6)
+        local ext = arp_ext and (arp_sel == 1 or arp_sel == 6 or arp_sel == i + 1)
+        if ext then
+          local ch = (arp_sel == 6) and math.min(16, params:get("arp_ch") + i - 1) or nil
+          midi_note("arp", note, vel, dur, ch)
+        end
+        -- lanes not picked for midi keep sounding on norns
+        if arp_int or not ext then
+          engine.arp(mtof(note), 0.13 * vel, dur, clamp(cut, 150, 12000), l.pan, l.shapeX)
+        end
       end
     end
   end
@@ -625,7 +641,7 @@ local function setup_params()
   params:set_action("chord_detune", function(v) engine.tweak("chord_detune", v) end)
   params:add_number("bass_cutoff", "bass cutoff", 80, 1200, 260)
 
-  for _, part in ipairs({"bass", "chord"}) do
+  for _, part in ipairs({"bass", "chord", "arp"}) do
     params:add_separator(string.upper(part) .. " OUT")
     params:add_option(part .. "_out", "output", OUT_NAMES, 1)
     params:set_action(part .. "_out", function() all_notes_off() end)
@@ -635,8 +651,11 @@ local function setup_params()
       local id = vport_ids[v]
       midi_dev[part] = (id and id > 0) and midi.connect(id) or nil
     end)
-    params:add_number(part .. "_ch", "midi channel", 1, 16, part == "bass" and 1 or 2)
+    params:add_number(part .. "_ch", "midi channel", 1, 16, ({bass = 1, chord = 2, arp = 3})[part])
   end
+  params:add_option("arp_lanes", "lanes to midi",
+    {"all (one ch)", "lane 1", "lane 2", "lane 3", "lane 4", "own ch each"}, 1)
+  params:set_action("arp_lanes", function() all_notes_off() end)
 
   params:add_separator("VISUALS")
   params:add_option("theme", "theme", VIS.names, 1)

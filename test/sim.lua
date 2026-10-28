@@ -93,8 +93,30 @@ midi = {vports = {{name = "fake synth"}}, connect = function()
             local k = "ch" .. ch; calls[k] = (calls[k] or 0) + 1
           end,
           note_off = function() calls.midi_off = (calls.midi_off or 0) + 1 end,
-          cc = function() calls.midi_cc = (calls.midi_cc or 0) + 1 end}
+          cc = function(_, num, val, ch)
+            assert(num >= 0 and num <= 127 and val >= 0 and val <= 127 and ch >= 1 and ch <= 16)
+            calls.midi_cc = (calls.midi_cc or 0) + 1
+          end,
+          start = function() calls.midi_start = (calls.midi_start or 0) + 1 end,
+          stop = function() calls.midi_stop = (calls.midi_stop or 0) + 1 end}
 end}
+-- crow: four outputs that record what they're asked to do
+local function crow_out(n)
+  local store = {}
+  return setmetatable({}, {
+    __index = store,
+    __newindex = function(_, k, v)
+      if k == "volts" then
+        assert(type(v) == "number" and v > -5.1 and v < 10.1, "crow volts out of range: " .. tostring(v))
+        calls["crow" .. n .. "_v"] = (calls["crow" .. n .. "_v"] or 0) + 1
+      end
+      store[k] = v
+    end,
+    __call = function() calls["crow" .. n .. "_fire"] = (calls["crow" .. n .. "_fire"] or 0) + 1 end,
+  })
+end
+crow = {connected = function() return true end,
+        output = {crow_out(1), crow_out(2), crow_out(3), crow_out(4)}}
 grid_dev = {cols = 16, rows = 8, leds = 0}
 function grid_dev:all() end
 function grid_dev:led() self.leds = self.leds + 1 end
@@ -118,6 +140,14 @@ params:set("bass_dev", 2)
 params:set("bed_file", "/home/we/dust/audio/hermit_leaves.wav")
 params:set("verb_type", 2)
 params:set("lane2_voice", 3)
+if os.getenv("OUTS") then
+  params:set("transport_dev", 2)
+  params:set("cc_dev", 2); params:set("cc_energy", 20); params:set("cc_phrase", 21)
+  params:set("cc_dub", 22)
+  -- crow: bass pitch, lead gate, energy, then pump env / kick trig
+  params:set("crow_1", 2); params:set("crow_2", 5); params:set("crow_3", 7)
+  params:set("crow_4", tonumber(os.getenv("OUTS")) == 2 and 8 or 9)
+end
 if os.getenv("ARP") then
   params:set("arp_out", 2); params:set("arp_dev", 2); params:set("arp_lanes", tonumber(os.getenv("ARP")))
 end

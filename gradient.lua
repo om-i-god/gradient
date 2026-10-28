@@ -29,6 +29,7 @@ local C   = include("lib/conductor")
 local VIS = include("lib/visuals")
 local L   = include("lib/listen")
 local GU  = include("lib/gridui")
+local O   = include("lib/outs")
 
 local ECHO_DIVS      = {0.5, 0.75, 1, 1.5}          -- in beats
 local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
@@ -206,6 +207,7 @@ local function play_step()
       flash(label)
     end
     apply_bar()
+    O.bar(S, (S.track_bar - 1) % S.phrase_len == 0)
     if r == "stop" then
       stop(true)
       flash("track end")
@@ -218,9 +220,13 @@ local function play_step()
 
   -- kick + ghost pump
   if S.pat.kick[s] > 0 then
-    if S.on_pump then engine.pump(1) end
+    if S.on_pump then
+      engine.pump(1)
+      O.pump(beat)
+    end
     if S.on_kick then
       engine.kick(0.9, params:get("kick_tune"), params:get("kick_decay") / 100, 0.15 + e * 0.2)
+      O.kick()
       VIS.trigger(theme)
     end
   end
@@ -255,6 +261,7 @@ local function play_step()
     if ext then
       for i = 1, 4 do midi_note("chord", c[i], cv * cg, beat * 0.5) end
     end
+    O.note("chord", c[1], dur)
   end
 
   -- bass follows the chord root
@@ -266,6 +273,7 @@ local function play_step()
     local internal, ext = routes("bass")
     if internal then engine.bass(mtof(note), bv[1] * bg * 0.55, dur) end
     if ext then midi_note("bass", note, bv[1] * bg, dur) end
+    O.note("bass", note, dur)
   end
 
   -- phasing arp lanes: always tick so phase relationships persist in silence
@@ -286,6 +294,7 @@ local function play_step()
         local cut  = l.cutoff * (0.4 + tone * 1.2) * (0.65 + 0.35 * lfo) * (0.6 + e * 0.6)
         local vel = g * (0.7 + math.random() * 0.3)
         local dur = l.decay * (0.6 + e * 0.6)
+        O.note("lead", note, dur, i)
         local ext = arp_ext and (arp_sel == 1 or arp_sel == 6 or arp_sel == i + 1)
         if ext then
           local ch = (arp_sel == 6) and math.min(16, params:get("arp_ch") + i - 1) or nil
@@ -339,6 +348,7 @@ end
 
 local function loop(my)
   clock.sync(4)
+  if S.playing and my == loop_gen then O.start() end
   S.step = 0
   while true do
     clock.sync(1 / 4)
@@ -367,6 +377,7 @@ stop = function(from_loop)
   if main_clock and not from_loop then clock.cancel(main_clock) end
   main_clock = nil
   all_notes_off()
+  O.stop()
   tweak("wash_amp", 0)
   tweak("noise_amp", 0)
   tweak("bed_amp", 0)
@@ -807,6 +818,8 @@ local function setup_params()
   params:add_option("arp_lanes", "lanes to midi",
     {"all (one ch)", "lane 1", "lane 2", "lane 3", "lane 4", "own ch each"}, 1)
   params:set_action("arp_lanes", function() all_notes_off() end)
+
+  O.setup_params(vport_names, vport_ids)
 
   params:add_separator("VISUALS")
   params:add_option("theme", "theme", VIS.names, 1)

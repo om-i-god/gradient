@@ -242,7 +242,9 @@ function C.decide(S)
   S.want.chords = over("chords")
   S.want.rim    = over("rim")
   S.want.hats   = over("hats") and not (drop and S.roll_hats)
-  S.want.bass   = over("bass") and not (kickless and S.roll_bass)
+  -- bass: auto sits out some kickless stretches; always stays in; never
+  S.want.bass   = over("bass") and S.bass_style ~= 3
+                  and (S.bass_style == 2 or not (kickless and S.roll_bass))
   S.on_kick     = over("kick") and not kickless
   S.on_pump     = over("pump")
 

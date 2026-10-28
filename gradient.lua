@@ -48,7 +48,7 @@ local S = {
   energy = 0, nudge = 0, dub = 0.5,
   section = "-", progress = 0, total_bars = nil,
   root_pc = 9, mode = 1, voicing = 1, harmony = 3,
-  mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 1,
+  mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 1, bass_style = 1,
   pat = {}, lanes = {}, gain = {}, want = {}, jitter = {},
   chord = {57, 60, 64, 67}, chord_degree = 1, pair = {1, 1}, harm_bars = 4,
   bass_pc = 0, bass_free = true, chord_root_pc = 0, chord_label = "i",
@@ -75,6 +75,29 @@ local note_id  = 0
 
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 local function mtof(n) return 440 * 2 ^ ((n - 69) / 12) end
+
+-- what makes the visuals jump (VISUALS > react to)
+local VIS_REACT = {"kick + stabs", "kick", "stabs", "arps", "bass", "everything"}
+local REACT_TO = {
+  {kick = true, stab = true}, {kick = true}, {stab = true}, {arp = true}, {bass = true},
+  {kick = true, stab = true, arp = true, bass = true},
+}
+local function vis_hit(src)
+  local r = params:get("vis_react")
+  if not REACT_TO[r][src] then return end
+  -- terrain rolls on the kick; on the default setting stabs only push it
+  -- when the kick is out
+  if r == 1 and src == "stab" and theme == 1 and S.on_kick then return end
+  VIS.trigger(theme)
+end
+
+-- VISUALS > theme cycle: a new random theme on a bar edge / phrase / track
+local function cycle_theme(edge)
+  if params:get("vis_cycle") ~= edge or #VIS.names < 2 then return end
+  local n = theme
+  while n == theme do n = math.random(#VIS.names) end
+  params:set("theme", n)
+end
 
 local function flash(text)
   msg, msg_t = text, util.time()
@@ -210,6 +233,9 @@ local function play_step()
     end
     apply_bar()
     O.bar(S, (S.track_bar - 1) % S.phrase_len == 0)
+    if (S.track_bar - 1) % 8 == 0 then cycle_theme(2) end
+    if (S.track_bar - 1) % S.phrase_len == 0 then cycle_theme(3) end
+    if r == "next" then cycle_theme(4) end
     if r == "stop" then
       stop(true)
       flash("track end")
@@ -229,7 +255,7 @@ local function play_step()
     if S.on_kick then
       engine.kick(0.9, params:get("kick_tune"), params:get("kick_decay") / 100, 0.15 + e * 0.2)
       O.kick()
-      VIS.trigger(theme)
+      vis_hit("kick")
     end
   end
 
@@ -258,11 +284,11 @@ local function play_step()
     local c = S.chord
     if internal then
       engine.chord(mtof(c[1]), mtof(c[2]), mtof(c[3]), mtof(c[4]), amp, dur)
-      if theme ~= 1 or not S.on_kick then VIS.trigger(theme) end
     end
     if ext then
       for i = 1, 4 do midi_note("chord", c[i], cv * cg, beat * 0.5) end
     end
+    vis_hit("stab")
     O.note("chord", 48 + S.root_pc + S.chord_root_pc, dur)
   end
 
@@ -278,6 +304,7 @@ local function play_step()
     if internal then engine.bass(mtof(note), bv[1] * bg * 0.55, dur) end
     if ext then midi_note("bass", note, bv[1] * bg, dur) end
     O.note("bass", note, dur)
+    vis_hit("bass")
   end
 
   -- phasing arp lanes: always tick so phase relationships persist in silence
@@ -299,6 +326,7 @@ local function play_step()
         local vel = g * (0.7 + math.random() * 0.3)
         local dur = l.decay * (0.6 + e * 0.6)
         O.note("lead", note, dur, i)
+        vis_hit("arp")
         local ext = arp_ext and (arp_sel == 1 or arp_sel == 6 or arp_sel == i + 1)
         if ext then
           local ch = (arp_sel == 6) and math.min(16, params:get("arp_ch") + i - 1) or nil
@@ -569,62 +597,67 @@ local function text_box(x, y, s, lvl, right)
 end
 
 local function draw_hud()
+  -- overlay: 1 full, 2 minimal (key + chord), 3 off (hints and messages only)
+  local hud = params:get("hud")
+
   -- top: key / section
   local top = T.name(S.root_pc, S.mode, true)
   if k1 then top = VIS.names[theme] .. " " .. theme .. "/" .. #VIS.names end
-  text_box(1, 7, top, S.playing and 12 or 4)
+  if hud < 3 or k1 then text_box(1, 7, top, S.playing and 12 or 4) end
   -- second line: the chord (roman, "/i" = over a tonic pedal), then the page
-  if not k1 then
+  if not k1 and (hud < 3 or page ~= 1) then
     local sub = S.chord_label
     if page ~= 1 then sub = sub .. "  " .. PAGES[page].name end
     text_box(1, 15, sub, page ~= 1 and 6 or 5)
   end
 
-  local sec = S.section or "-"
-  if S.mode_play == 2 and S.total_bars then
-    sec = sec .. " " .. math.floor(S.progress * 100) .. "%"
-  end
-  if S.kickless and S.playing then sec = sec .. " ~" end
-  text_box(127, 7, sec, S.playing and 8 or 3, true)
-
-  -- listening: what the input sounds like, and where we're headed
-  if S.follow then
-    local s
-    if not L.heard then
-      s = "listening"
-    elseif L.leader then
-      s = "in " .. T.NOTE_NAMES[L.leader + 1] .. "m " .. math.floor(L.share * 100) .. "%"
-    else
-      s = "in ?"
+  if hud == 1 then
+    local sec = S.section or "-"
+    if S.mode_play == 2 and S.total_bars then
+      sec = sec .. " " .. math.floor(S.progress * 100) .. "%"
     end
-    if S.pending_root then s = s .. " >" .. T.NOTE_NAMES[S.pending_root + 1] end
-    text_box(127, 15, s, L.heard and 7 or 3, true)
-  end
+    if S.kickless and S.playing then sec = sec .. " ~" end
+    text_box(127, 7, sec, S.playing and 8 or 3, true)
 
-  -- bottom: energy bar + parts
-  screen.level(0)
-  screen.rect(0, 55, 128, 9)
-  screen.fill()
-  screen.level(2)
-  screen.rect(1, 59, 40, 3)
-  screen.fill()
-  local ew = math.floor(S.energy * 40 + 0.5)
-  if ew > 0 then
-    screen.level(S.nudge ~= 0 and 15 or 10)
-    screen.rect(1, 59, ew, 3)
+    -- listening: what the input sounds like, and where we're headed
+    if S.follow then
+      local s
+      if not L.heard then
+        s = "listening"
+      elseif L.leader then
+        s = "in " .. T.NOTE_NAMES[L.leader + 1] .. "m " .. math.floor(L.share * 100) .. "%"
+      else
+        s = "in ?"
+      end
+      if S.pending_root then s = s .. " >" .. T.NOTE_NAMES[S.pending_root + 1] end
+      text_box(127, 15, s, L.heard and 7 or 3, true)
+    end
+
+    -- bottom: energy bar + parts
+    screen.level(0)
+    screen.rect(0, 55, 128, 9)
     screen.fill()
-  end
-
-  for i, k in ipairs(PART_KEYS) do
-    local on
-    if k == "kick" then
-      on = S.on_kick and 1 or (S.on_pump and 0.3 or 0)
-    else
-      on = S.gain[k] or 0
+    screen.level(2)
+    screen.rect(1, 59, 40, 3)
+    screen.fill()
+    local ew = math.floor(S.energy * 40 + 0.5)
+    if ew > 0 then
+      screen.level(S.nudge ~= 0 and 15 or 10)
+      screen.rect(1, 59, ew, 3)
+      screen.fill()
     end
-    screen.level(math.floor(1 + on * 13))
-    screen.move(46 + (i - 1) * 9, 63)
-    screen.text(PART_GLYPH[i])
+
+    for i, k in ipairs(PART_KEYS) do
+      local on
+      if k == "kick" then
+        on = S.on_kick and 1 or (S.on_pump and 0.3 or 0)
+      else
+        on = S.gain[k] or 0
+      end
+      screen.level(math.floor(1 + on * 13))
+      screen.move(46 + (i - 1) * 9, 63)
+      screen.text(PART_GLYPH[i])
+    end
   end
 
   -- held-key hints, then transient messages
@@ -692,6 +725,8 @@ local function setup_params()
   params:set_action("end_action", function(v) S.end_action = v end)
   params:add_option("kick_style", "kick", {"auto", "always", "never"}, 1)
   params:set_action("kick_style", function(v) S.kick_style = v end)
+  params:add_option("bass_style", "bass", {"auto", "always", "never"}, 1)
+  params:set_action("bass_style", function(v) S.bass_style = v end)
   params:add_option("freeze", "freeze material", {"off", "on"}, 1)
   params:set_action("freeze", function(v) S.freeze = v == 2 end)
   params:add_number("seed", "seed", 1, 9999, 1)
@@ -836,11 +871,14 @@ local function setup_params()
 
   params:add_separator("VISUALS")
   params:add_option("theme", "theme", VIS.names, 1)
-  params:set_action("theme", function(v) theme = v end)
+  params:set_action("theme", function(v) theme = v; VIS.init(v) end)
+  params:add_option("vis_cycle", "theme cycle", {"off", "every 8 bars", "every phrase", "each track"}, 1)
+  params:add_option("vis_react", "react to", VIS_REACT, 1)
+  params:add_option("hud", "overlay", {"full", "minimal", "off"}, 1)
   params:add_number("vis_speed",      "speed",      1, 10,  3)
   params:add_number("vis_brightness", "brightness", 1, 15, 10)
   params:add_number("num_particles",  "particles",  5, 40, 20)
-  params:set_action("num_particles",  function() VIS.init() end)
+  params:set_action("num_particles",  function() VIS.init(theme) end)
 end
 
 ------------------------------------------------------------------------
@@ -853,7 +891,7 @@ function init()
 
   math.randomseed(os.time())
   new_track(math.random(1, 9999), false)
-  VIS.init()
+  VIS.init(theme)
 
   local amp_poll = poll.set("amp_out_l", function(val)
     if val > audio_level_smooth then

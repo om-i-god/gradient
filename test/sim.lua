@@ -265,6 +265,43 @@ for _, id in ipairs({"p_throw", "p_lead_throw", "p_build", "p_break", "p_mutate"
 end
 for i = 1, 16 * 8 do tick_all() end
 print("grid leds lit (cumulative):", grid_dev.leds)
+
+-- visuals: every theme drawn and triggered under each react setting and
+-- overlay, with the level up so audio-reactive branches run
+local VISM = include("lib/visuals")
+for th = 1, #VISM.names do
+  params:set("theme", th)
+  for r = 1, 6 do
+    params:set("vis_react", r)
+    params:set("hud", (r % 3) + 1)
+    polls.amp_out_l(r / 6 * 0.3)
+    for i = 1, 16 do tick_all() end
+  end
+end
+print("themes drawn:", #VISM.names)
+-- theme cycle actually moves
+params:set("vis_react", 1); params:set("hud", 1)
+for c = 2, 3 do
+  params:set("vis_cycle", c)
+  local t0, moved = params:get("theme"), false
+  for i = 1, 16 * 40 do tick_all(); if params:get("theme") ~= t0 then moved = true end end
+  assert(moved, "theme cycle " .. c .. " never moved")
+end
+params:set("vis_cycle", 1)
+-- bass never: no bass anywhere (engine, midi, crow) once it has faded out
+params:set("bass_style", 3)
+for i = 1, 16 * 8 do tick_all() end
+local b0 = calls.bass or 0
+for i = 1, 16 * 64 do tick_all() end
+assert((calls.bass or 0) == b0, "bass still playing with bass = never")
+print("bass never: silent for 64 bars")
+params:set("bass_style", 2)
+-- always still waits for the energy; hold it up from the grid's energy row
+for bar = 1, 32 do
+  grid_dev.key(16, 2, 1)
+  for i = 1, 16 do tick_all() end
+end
+assert((calls.bass or 0) > b0, "bass = always never played")
 local ls = {}
 for k, n in pairs(labels) do ls[#ls + 1] = k .. "=" .. n end
 table.sort(ls)

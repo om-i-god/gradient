@@ -26,11 +26,11 @@ C.SECTIONS = {
 
 -- part -> energy threshold to enter
 local TH = {
-  noise = -1, wash = -1,
+  noise = -1, wash = -1, bed = -1,
   lane1 = 0.08, lane2 = 0.28, lane3 = 0.50, lane4 = 0.70,
   chords = 0.22, rim = 0.35, hats = 0.42, bass = 0.45, kick = 0.50, pump = 0.25,
 }
-C.FADED = {"noise", "wash", "lane1", "lane2", "lane3", "lane4", "chords", "rim", "hats", "bass"}
+C.FADED = {"noise", "wash", "bed", "lane1", "lane2", "lane3", "lane4", "chords", "rim", "hats", "bass"}
 
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 
@@ -227,6 +227,7 @@ function C.decide(S)
 
   S.want.noise  = true
   S.want.wash   = true
+  S.want.bed    = true
   S.want.lane1  = over("lane1")
   S.want.lane2  = over("lane2")
   S.want.lane3  = over("lane3")

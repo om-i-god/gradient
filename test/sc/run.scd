@@ -13,6 +13,17 @@ s.waitForBoot {
   "ENGINE ALLOCATED".postln;
   ~eng = eng;
   ~script = thisProcess.argv[1];
+  // ~seg.("name") prints the peak of the output since the last call
+  ~mbus = Bus.control(s, 1);
+  ~meter = { arg t_reset = 0;
+    Out.kr(~mbus.index, Peak.ar(Mix(In.ar(0, 2)).abs, Delay1.kr(t_reset)));
+  }.play(s, addAction: \addToTail);
+  ~seg = { |name|
+    s.sync;
+    ("SEG " ++ name ++ " peak " ++ ~mbus.getSynchronous.round(0.001)).postln;
+    ~meter.set(\t_reset, 1);
+  };
+  s.sync;
   s.recHeaderFormat = "wav"; s.recSampleFormat = "float";
   s.record(out, numChannels: 2);
   0.3.wait;

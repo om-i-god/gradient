@@ -130,6 +130,7 @@ function G.lane(i)
     lfo_bars  = pick({4, 8, 12, 16, 24}),
     lfo_phase = math.random() * math.pi * 2,
     prob   = 0.8 + math.random() * 0.2,
+    voice  = pick({1, 1, 1, 2, 3, 4}),     -- classic, bell, pluck, soft
     pos    = 0,
     tick   = 0,
   }

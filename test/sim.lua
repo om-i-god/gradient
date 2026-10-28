@@ -9,8 +9,33 @@ local LISTEN  = arg[4] == "listen"
 local MODE    = tonumber(arg[5])
 
 calls = {}
+-- engine stub: every command's arg count is checked against the format
+-- string in lib/Engine_Gradient.sc
+local FMT = {}
+do
+  local f = assert(io.open("lib/Engine_Gradient.sc"))
+  local src = f:read("a")
+  f:close()
+  for name, fmt in src:gmatch('addCommand%(\\([%w_]+), "(%w*)"') do FMT[name] = fmt end
+  -- tweak keys the engine knows: `st` defaults and fxMap entries (\\key -> ...)
+  TWEAKS = {}
+  for k in src:gmatch('\\([%w_]+) %->') do TWEAKS[k] = true end
+end
 engine = setmetatable({}, {__index = function(_, k)
-  return function(...) calls[k] = (calls[k] or 0) + 1 end
+  if k == "name" then return nil end
+  return function(...)
+    local fmt = FMT[k]
+    if not fmt then error("engine has no command '" .. k .. "'", 2) end
+    local n = select("#", ...)
+    if n ~= #fmt then error(string.format("engine.%s: %d args, engine wants %d (%s)", k, n, #fmt, fmt), 2) end
+    for i = 1, n do
+      local v, t = select(i, ...), fmt:sub(i, i)
+      if (t == "f" or t == "i") and type(v) ~= "number" then error("engine." .. k .. " arg " .. i .. " not a number", 2) end
+      if t == "s" and type(v) ~= "string" then error("engine." .. k .. " arg " .. i .. " not a string", 2) end
+    end
+    if k == "tweak" and not TWEAKS[(...)] then error("engine.tweak: unknown key '" .. (...) .. "'", 2) end
+    calls[k] = (calls[k] or 0) + 1
+  end
 end})
 
 function include(p) return dofile(p .. ".lua") end
@@ -23,6 +48,7 @@ function params:add_separator() end
 function params:add_option(id, _, opts, d) add(id, {v = d, lo = 1, hi = #opts, opts = opts}) end
 function params:add_number(id, _, lo, hi, d) add(id, {v = d, lo = lo, hi = hi}) end
 function params:add_control(id, _, spec) add(id, {v = spec.default, lo = spec.min, hi = spec.max, f = true}) end
+function params:add_file(id, _, d) add(id, {v = d}) end
 function params:add_trigger(id) add(id, {v = 0, trig = true}) end
 function params:set_action(id, fn) P.defs[id].action = fn end
 function params:get(id)
@@ -78,6 +104,7 @@ polls = {}
 poll = {set = function(name, fn) polls[name] = fn; return {start = function() end} end}
 screen = setmetatable({text_extents = function() return 20, 6 end},
   {__index = function() return function() end end})
+_path = {audio = "/home/we/dust/audio/"}
 VT = 0   -- virtual seconds, advanced one 16th per drive tick
 util = {time = function() return VT end}
 _menu = {mode = false}
@@ -88,6 +115,9 @@ params:set("play_mode", PMODE)
 params:set("track_minutes", MINUTES)
 params:set("bass_out", 3)
 params:set("bass_dev", 2)
+params:set("bed_file", "/home/we/dust/audio/hermit_leaves.wav")
+params:set("verb_type", 2)
+params:set("lane2_voice", 3)
 if os.getenv("ARP") then
   params:set("arp_out", 2); params:set("arp_dev", 2); params:set("arp_lanes", tonumber(os.getenv("ARP")))
 end

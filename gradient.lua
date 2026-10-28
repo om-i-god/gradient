@@ -35,6 +35,7 @@ local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
 local LEAD_DIVS      = {0.25, 1/3, 0.5, 0.75, 2/3, 1, 1.5, 2}
 local LEAD_DIV_NAMES = {"1/16", "1/8T", "1/8", "3/16", "1/4T", "1/4", "3/8", "1/2"}
 local OUT_NAMES      = {"internal", "midi", "both"}
+local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft"}
 
 ------------------------------------------------------------------------
 -- state
@@ -171,6 +172,8 @@ local function apply_bar()
   tweak("wash_cutoff", 350 + tone * 900 + e * 600)
   local noise = params:get("noise_lvl") / 100 * (S.gain.noise or 0)
   tweak("noise_amp", noise * (0.05 + (1 - e) * 0.06))
+  local bed = params:get("bed_lvl") / 100 * (S.gain.bed or 0)
+  tweak("bed_amp", bed * (0.3 + (1 - e) * 0.3 + (S.kickless and 0.2 or 0)))
 
   if S.chord_changed then
     S.chord_changed = false
@@ -290,7 +293,9 @@ local function play_step()
         end
         -- lanes not picked for midi keep sounding on norns
         if arp_int or not ext then
-          engine.arp(mtof(note), 0.13 * vel, dur, clamp(cut, 150, 12000), l.pan, l.shapeX)
+          local v = params:get("lane" .. i .. "_voice")
+          engine.arp(mtof(note), 0.13 * vel, dur, clamp(cut, 150, 12000), l.pan, l.shapeX,
+            v == 1 and (l.voice or 1) or v - 1)
         end
       end
     end
@@ -364,6 +369,7 @@ stop = function(from_loop)
   all_notes_off()
   tweak("wash_amp", 0)
   tweak("noise_amp", 0)
+  tweak("bed_amp", 0)
   flash("stop")
 end
 
@@ -718,6 +724,8 @@ local function setup_params()
   params:set_action("drive", function(v) engine.tweak("drive", v) end)
   params:add_control("verb_size", "reverb size", controlspec.new(0, 1, "lin", 0.01, 0.88))
   params:set_action("verb_size", function(v) engine.tweak("verb_size", v) end)
+  params:add_option("verb_type", "reverb type", {"hall", "plate", "spring"}, 1)
+  params:set_action("verb_type", function(v) engine.verb_type(v) end)
   params:add_control("echo_wow", "echo wow", controlspec.new(0, 1, "lin", 0.01, 0.3))
   params:set_action("echo_wow", function(v) engine.tweak("echo_wow", v) end)
 
@@ -741,6 +749,19 @@ local function setup_params()
   params:set_action("lead_verb", function(v) engine.tweak("lead_verb", v) end)
   params:add_option("lead_dub", "arps also to dub echo", {"off", "on"}, 2)
 
+  params:add_separator("BED")
+  params:add_file("bed_file", "file", _path.audio)
+  params:set_action("bed_file", function(path)
+    if path and path ~= "" and path ~= "-" and path:sub(-1) ~= "/" then engine.bed(path) end
+  end)
+  params:add_number("bed_lvl", "level", 0, 150, 60)
+  params:add_control("bed_tone", "tone", controlspec.new(300, 12000, "exp", 0, 4000, "Hz"))
+  params:set_action("bed_tone", function(v) engine.tweak("bed_lpf", v) end)
+  params:add_control("bed_speed", "speed", controlspec.new(0.25, 2, "exp", 0, 1, "x"))
+  params:set_action("bed_speed", function(v) engine.tweak("bed_rate", v) end)
+  params:add_control("bed_verb", "to reverb", controlspec.new(0, 1, "lin", 0.01, 0.35))
+  params:set_action("bed_verb", function(v) engine.tweak("bed_verb", v) end)
+
   params:add_separator("LEVELS")
   for _, p in ipairs({{"kick", 100}, {"hat", 100}, {"rim", 100}, {"bass", 100},
                       {"chord", 100}, {"arp", 100}}) do
@@ -758,6 +779,8 @@ local function setup_params()
     return string.format("%s%d  %.1f Hz", T.NOTE_NAMES[n % 12 + 1], n // 12 - 1,
       440 * 2 ^ ((n - 69) / 12))
   end)
+  params:add_option("kick_type", "kick type", {"sub", "dusty"}, 1)
+  params:set_action("kick_type", function(v) engine.tweak("kick_type", v) end)
   params:add_number("kick_decay", "kick decay", 15, 120, 45)
   params:add_number("chord_cutoff", "stab cutoff", 300, 5000, 1400)
   params:add_control("chord_res", "stab resonance", controlspec.new(0, 1, "lin", 0.01, 0.35))
@@ -765,6 +788,9 @@ local function setup_params()
   params:add_control("chord_detune", "stab detune", controlspec.new(0, 1, "lin", 0.01, 0.18))
   params:set_action("chord_detune", function(v) engine.tweak("chord_detune", v) end)
   params:add_number("bass_cutoff", "bass cutoff", 80, 1200, 260)
+  for i = 1, 4 do
+    params:add_option("lane" .. i .. "_voice", "lane " .. i .. " voice", VOICE_NAMES, 1)
+  end
 
   for _, part in ipairs({"bass", "chord", "arp"}) do
     params:add_separator(string.upper(part) .. " OUT")

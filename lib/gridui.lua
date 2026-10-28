@@ -4,7 +4,7 @@
 --
 -- row 1    phrase: where we are in the phrase (8-bar blocks marked)
 -- row 2    energy: lit to the current level; press to pull energy there
--- row 3    parts: K H R B C 1 2 3 4 . wash noise   (press = mute)
+-- row 3    parts: K H R B C 1 2 3 4 . wash noise bed   (press = mute)
 -- row 4-7  arp lanes 1-4: the lane's steps, playhead bright
 --          press a step to toggle it; col 15 = mute, col 16 = new lane
 -- row 8    actions: 1 drop  2 mutate  3 throw  4 lead throw
@@ -13,7 +13,7 @@
 local GU = {}
 
 GU.PARTS = {"kick", "hats", "rim", "bass", "chords", "lane1", "lane2", "lane3", "lane4",
-            false, "wash", "noise"}
+            false, "wash", "noise", "bed"}
 
 local g, A
 local flash = {}          -- "x,y" -> time of last press, for a press blink

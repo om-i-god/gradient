@@ -20,11 +20,13 @@
 //   rim   amp freq pan
 //   bass  hz amp dur
 //   chord f1 f2 f3 f4 amp dur
-//   arp   hz amp decay cutoff pan shape
+//   arp   hz amp decay cutoff pan shape voice   (voice 1 classic 2 bell 3 pluck 4 soft)
 //   pump  (dummy f)
 //   wash_chord f1 f2 f3 f4
 //   tweak key val   -- see `st` defaults / fxMap below
 //   listen on       -- 1 runs the input key tracker, 0 pauses it
+//   verb_type n     -- 1 hall 2 plate 3 spring (swaps the reverb synth in place)
+//   bed path        -- load a sound file as the looping field-recording bed
 //
 // polls
 //   in_key  KeyTrack estimate of the audio input: 0-11 C..B major, 12-23 C..B minor
@@ -35,7 +37,8 @@ Engine_Gradient : CroneEngine {
   var dryBus, pumpBus, echoBus, verbBus, leadBus;
   var washSynth, noiseSynth, echoSynth, leadSynth, verbSynth, masterSynth;
   var listenSynth, keyBus, inAmpBus;
-  var st, fxMap;
+  var bedBuf;
+  var st, fx, fxMap, fxVals;
 
   *new { arg context, doneCallback;
     ^super.new(context, doneCallback);
@@ -63,7 +66,8 @@ Engine_Gradient : CroneEngine {
       \bass_lvl -> 1.0,  \bass_cutoff -> 260, \bass_drive -> 0.3,
       \chord_lvl -> 1.0, \chord_echo -> 0.55, \chord_verb -> 0.35,
       \chord_cutoff -> 1400, \chord_res -> 0.35, \chord_env -> 1.6, \chord_detune -> 0.18,
-      \arp_lvl -> 1.0,   \arp_echo -> 0.22, \arp_verb -> 0.40, \arp_lead -> 0.3
+      \arp_lvl -> 1.0,   \arp_echo -> 0.22, \arp_verb -> 0.40, \arp_lead -> 0.3,
+      \kick_type -> 1
     ];
 
     // ---------------------------------------------------------------- voices
@@ -76,6 +80,21 @@ Engine_Gradient : CroneEngine {
       var body = SinOsc.ar(penv, 0.5pi) * aenv;
       var clk  = HPF.ar(WhiteNoise.ar, 2500) * EnvGen.ar(Env.perc(0.0005, 0.006)) * click;
       var sig  = ((body + clk) * 1.4).tanh * amp;
+      Out.ar(out, sig ! 2);
+    }).add;
+
+    // dusty: a 909-ish thud, band-limited and sample-rate crushed
+    SynthDef(\grad_kick_dusty, {
+      arg out, amp=0.8, tune=33, decay=0.45, click=0.3;
+      var base = tune.midicps;
+      var penv = EnvGen.ar(Env([base * 6, base * 1.4, base], [0.008, 0.06], [-5, -2]));
+      var aenv = EnvGen.ar(Env.perc(0.001, decay * 0.85, 1, -4), doneAction: 2);
+      var body = SinOsc.ar(penv, 0.5pi) * aenv;
+      var nz   = BPF.ar(WhiteNoise.ar, 1800, 0.6) * EnvGen.ar(Env.perc(0.0005, 0.025)) * (click * 2);
+      var sig  = ((body * 1.8) + nz).softclip;
+      sig = Latch.ar(sig, Impulse.ar(14000));
+      sig = LPF.ar(sig, 3800);
+      sig = (sig * 1.3).tanh * amp;
       Out.ar(out, sig ! 2);
     }).add;
 
@@ -141,6 +160,52 @@ Engine_Gradient : CroneEngine {
       Out.ar(leadOut, sig * lead);
     }).add;
 
+    // the other lead voices share grad_arp's args and sends
+    SynthDef(\grad_arp_bell, {
+      arg out, echoOut, verbOut, leadOut, freq=440, amp=0.2, decay=0.25, cutoff=3000,
+          shape=0.5, pan=0, echo=0.2, verb=0.4, lead=0.3;
+      var len  = (decay * 2.5) + 0.1;
+      var env  = EnvGen.ar(Env.perc(0.001, len, 1, -6), doneAction: 2);
+      var ienv = EnvGen.ar(Env.perc(0.001, len * 0.4, 1, -4));
+      var ratio = shape.linlin(0, 1, 1.4, 3.5);
+      var mod  = SinOsc.ar(freq * ratio) * freq * (0.5 + (ienv * 3));
+      var sig  = SinOsc.ar(freq + mod) * 1.25;
+      sig = LPF.ar(sig, (cutoff * 2).clip(200, 16000));
+      sig = Pan2.ar(sig * env * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+      Out.ar(leadOut, sig * lead);
+    }).add;
+
+    SynthDef(\grad_arp_pluck, {
+      arg out, echoOut, verbOut, leadOut, freq=440, amp=0.2, decay=0.25, cutoff=3000,
+          shape=0.5, pan=0, echo=0.2, verb=0.4, lead=0.3;
+      var len = (decay * 3) + 0.2;
+      var env = EnvGen.ar(Env.linen(0, len, 0.05), doneAction: 2);
+      var exc = WhiteNoise.ar * EnvGen.ar(Env.perc(0.0005, 0.01));
+      var sig = Pluck.ar(exc, Impulse.ar(0), 0.05, freq.reciprocal, len, shape.linlin(0, 1, 0.15, 0.6));
+      sig = LPF.ar(sig * 3.4, cutoff.clip(200, 16000));
+      sig = Pan2.ar(sig * env * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+      Out.ar(leadOut, sig * lead);
+    }).add;
+
+    SynthDef(\grad_arp_soft, {
+      arg out, echoOut, verbOut, leadOut, freq=440, amp=0.2, decay=0.25, cutoff=3000,
+          shape=0.5, pan=0, echo=0.2, verb=0.4, lead=0.3;
+      var env = EnvGen.ar(Env.perc(0.012, (decay * 1.5) + 0.05, 1, -3), doneAction: 2);
+      var sig = SinOsc.ar(freq) + (LFTri.ar(freq * 2) * 0.12 * shape);
+      sig = LPF.ar(sig, (cutoff * 0.7).clip(200, 8000));
+      sig = Pan2.ar(sig * env * amp * 1.1, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+      Out.ar(leadOut, sig * lead);
+    }).add;
+
     // persistent pad under the chords; glides between voicings, swells in
     // the kickless stretches
     SynthDef(\grad_wash, {
@@ -170,6 +235,21 @@ Engine_Gradient : CroneEngine {
       Out.ar(out, sig);
       Out.ar(verbOut, sig * verb);
     }).add;
+
+    // field-recording bed: a loaded file looping slowly, drifting in speed,
+    // filter and pan. one def per channel count
+    [1, 2].do { |nc|
+      SynthDef(("grad_bed" ++ nc).asSymbol, {
+        arg out, verbOut, buf, amp=0, lpf=4000, rate=1, verb=0.4;
+        var drift = 1 + (LFNoise2.kr(0.05) * 0.01);
+        var sig = PlayBuf.ar(nc, buf, BufRateScale.kr(buf) * Lag.kr(rate, 2) * drift, loop: 1);
+        if(nc == 1, { sig = Pan2.ar(sig, LFNoise2.kr(0.03) * 0.5) });
+        sig = LPF.ar(sig, (Lag.kr(lpf, 2) * (1 + (LFNoise2.kr(0.04) * 0.25))).clip(100, 16000));
+        sig = HPF.ar(sig, 60) * Lag.kr(amp, 4);
+        Out.ar(out, sig);
+        Out.ar(verbOut, sig * verb);
+      }).add;
+    };
 
     // ------------------------------------------------------------------- fx
 
@@ -204,6 +284,44 @@ Engine_Gradient : CroneEngine {
       sig = FreeVerb2.ar(sig[0], sig[1], 1, Lag.kr(size, 1).clip(0, 1), damp);
       sig = HPF.ar(sig, 150);
       Out.ar(out, sig * level);
+    }).add;
+
+    // plate: short dense diffusion into a cross-fed modulated tank
+    SynthDef(\grad_verb_plate, {
+      arg in, out, size=0.85, damp=0.5, level=0.8;
+      var sig = DelayN.ar(In.ar(in, 2), 0.02, 0.008);
+      var dec = Lag.kr(size, 1).linlin(0, 1, 0.45, 0.92);
+      var fb  = LocalIn.ar(2);
+      var l, r;
+      sig = Mix(sig) * 0.5;
+      [0.0048, 0.0036, 0.0127, 0.0093].do { |dt| sig = AllpassN.ar(sig, 0.02, dt, 0.08) };
+      l = sig + (fb[1] * dec);
+      r = sig + (fb[0] * dec);
+      l = AllpassC.ar(l, 0.05, 0.0225 + (SinOsc.kr(0.6) * 0.0006), 0.5);
+      r = AllpassC.ar(r, 0.05, 0.0305 + (SinOsc.kr(0.71, 1) * 0.0006), 0.5);
+      l = LPF.ar(DelayC.ar(l, 0.2, 0.1415), damp.linexp(0, 1, 12000, 2500));
+      r = LPF.ar(DelayC.ar(r, 0.2, 0.1061), damp.linexp(0, 1, 12000, 2500));
+      LocalOut.ar([l, r]);
+      sig = HPF.ar([l, r], 180);
+      Out.ar(out, sig * level * 0.9);
+    }).add;
+
+    // spring: a chain of tiny allpasses for the chirp, a short wobbling
+    // feedback delay for the drip
+    SynthDef(\grad_verb_spring, {
+      arg in, out, size=0.85, damp=0.5, level=0.8;
+      var sig = HPF.ar(In.ar(in, 2), 220);
+      var dec = Lag.kr(size, 1).linlin(0, 1, 0.4, 0.86);
+      var fb  = LocalIn.ar(2);
+      var y   = sig + (fb * dec);
+      12.do { |i|
+        y = AllpassC.ar(y, 0.01, [0.0011, 0.0013] * (1 + (i * 0.07)), 0.025);
+      };
+      y = DelayC.ar(y, 0.1, [0.037, 0.043] + (LFNoise2.kr([3.1, 2.7]) * 0.0008));
+      y = LPF.ar(y, damp.linexp(0, 1, 6500, 2500));
+      y = HPF.ar(y, 300);
+      LocalOut.ar(y);
+      Out.ar(out, y * level * 1.2);
     }).add;
 
     SynthDef(\grad_master, {
@@ -258,30 +376,40 @@ Engine_Gradient : CroneEngine {
       \dryIn, dryBus.index, \pumpIn, pumpBus.index, \out, context.out_b.index
     ], fxGroup, \addToTail);
 
+    // persistent synths by name; the reverb and bed get swapped in place,
+    // so tweaks look the synth up at send time and remember their values
+    fx = IdentityDictionary[
+      \echo -> echoSynth, \lead -> leadSynth, \verb -> verbSynth,
+      \master -> masterSynth, \wash -> washSynth, \noise -> noiseSynth
+    ];
+    fxVals = IdentityDictionary.new;
+
     // tweak keys that route straight to a persistent synth arg
     fxMap = IdentityDictionary[
-      \echo_time -> [echoSynth, \time],   \echo_fb -> [echoSynth, \fb],
-      \echo_lpf -> [echoSynth, \lpf],     \echo_hpf -> [echoSynth, \hpf],
-      \echo_wow -> [echoSynth, \wow],     \echo_sat -> [echoSynth, \sat],
-      \echo_pp -> [echoSynth, \pp],       \echo_verb -> [echoSynth, \verb],
-      \lead_time -> [leadSynth, \time],   \lead_fb -> [leadSynth, \fb],
-      \lead_lpf -> [leadSynth, \lpf],     \lead_hpf -> [leadSynth, \hpf],
-      \lead_wow -> [leadSynth, \wow],     \lead_sat -> [leadSynth, \sat],
-      \lead_pp -> [leadSynth, \pp],       \lead_verb -> [leadSynth, \verb],
-      \verb_size -> [verbSynth, \size],   \verb_damp -> [verbSynth, \damp],
-      \verb_level -> [verbSynth, \level],
-      \pump_depth -> [masterSynth, \pumpDepth], \pump_rel -> [masterSynth, \pumpRel],
-      \level -> [masterSynth, \level],    \drive -> [masterSynth, \drive],
-      \wash_amp -> [washSynth, \amp],     \wash_cutoff -> [washSynth, \cutoff],
-      \wash_echo -> [washSynth, \echo],   \wash_verb -> [washSynth, \verb],
-      \noise_amp -> [noiseSynth, \amp],   \noise_tone -> [noiseSynth, \tone],
-      \noise_crackle -> [noiseSynth, \crackle]
+      \echo_time -> [\echo, \time],   \echo_fb -> [\echo, \fb],
+      \echo_lpf -> [\echo, \lpf],     \echo_hpf -> [\echo, \hpf],
+      \echo_wow -> [\echo, \wow],     \echo_sat -> [\echo, \sat],
+      \echo_pp -> [\echo, \pp],       \echo_verb -> [\echo, \verb],
+      \lead_time -> [\lead, \time],   \lead_fb -> [\lead, \fb],
+      \lead_lpf -> [\lead, \lpf],     \lead_hpf -> [\lead, \hpf],
+      \lead_wow -> [\lead, \wow],     \lead_sat -> [\lead, \sat],
+      \lead_pp -> [\lead, \pp],       \lead_verb -> [\lead, \verb],
+      \verb_size -> [\verb, \size],   \verb_damp -> [\verb, \damp],
+      \verb_level -> [\verb, \level],
+      \pump_depth -> [\master, \pumpDepth], \pump_rel -> [\master, \pumpRel],
+      \level -> [\master, \level],    \drive -> [\master, \drive],
+      \wash_amp -> [\wash, \amp],     \wash_cutoff -> [\wash, \cutoff],
+      \wash_echo -> [\wash, \echo],   \wash_verb -> [\wash, \verb],
+      \noise_amp -> [\noise, \amp],   \noise_tone -> [\noise, \tone],
+      \noise_crackle -> [\noise, \crackle],
+      \bed_amp -> [\bed, \amp],       \bed_lpf -> [\bed, \lpf],
+      \bed_rate -> [\bed, \rate],     \bed_verb -> [\bed, \verb]
     ];
 
     // ------------------------------------------------------------- commands
 
     this.addCommand(\kick, "ffff", { |msg|
-      Synth(\grad_kick, [
+      Synth([\grad_kick, \grad_kick_dusty].clipAt(st[\kick_type].asInteger - 1), [
         \out, dryBus.index, \amp, msg[1] * st[\kick_lvl],
         \tune, msg[2], \decay, msg[3], \click, msg[4]
       ], voiceGroup);
@@ -321,8 +449,9 @@ Engine_Gradient : CroneEngine {
       ], voiceGroup);
     });
 
-    this.addCommand(\arp, "ffffff", { |msg|
-      Synth(\grad_arp, [
+    this.addCommand(\arp, "fffffff", { |msg|
+      var def = [\grad_arp, \grad_arp_bell, \grad_arp_pluck, \grad_arp_soft].clipAt(msg[7].asInteger - 1);
+      Synth(def, [
         \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
         \leadOut, leadBus.index,
         \freq, msg[1], \amp, msg[2] * st[\arp_lvl], \decay, msg[3],
@@ -339,6 +468,36 @@ Engine_Gradient : CroneEngine {
       washSynth.set(\f1, msg[1], \f2, msg[2], \f3, msg[3], \f4, msg[4]);
     });
 
+    // swap the reverb in place, then re-send its remembered settings
+    this.addCommand(\verb_type, "f", { |msg|
+      var def = [\grad_verb, \grad_verb_plate, \grad_verb_spring].clipAt(msg[1].asInteger - 1);
+      var vals = fxVals[\verb] ? IdentityDictionary.new;
+      var args = [\in, verbBus.index, \out, pumpBus.index];
+      vals.keysValuesDo { |k, v| args = args ++ [k, v] };
+      fx[\verb] = Synth.replace(fx[\verb], def, args);
+    });
+
+    // load a sound file as the bed; the bed synth is rebuilt to match its
+    // channel count and keeps its remembered settings
+    this.addCommand(\bed, "s", { |msg|
+      var path = msg[1].asString;
+      if(File.exists(path), {
+        Buffer.read(context.server, path, action: { |b|
+          var nc = b.numChannels.clip(1, 2);
+          var vals = fxVals[\bed] ? IdentityDictionary.new;
+          var args = [\out, pumpBus.index, \verbOut, verbBus.index, \buf, b.bufnum];
+          var old = bedBuf;
+          vals.keysValuesDo { |k, v| args = args ++ [k, v] };
+          if(fx[\bed].notNil, { fx[\bed].free });
+          fx[\bed] = Synth(("grad_bed" ++ nc).asSymbol, args, voiceGroup, \addToTail);
+          bedBuf = b;
+          if(old.notNil, { old.free });
+        });
+      }, {
+        ("gradient: bed file not found: " ++ path).postln;
+      });
+    });
+
     this.addCommand(\listen, "f", { |msg|
       listenSynth.run(msg[1] > 0);
     });
@@ -351,7 +510,10 @@ Engine_Gradient : CroneEngine {
       var val = msg[2];
       var dest = fxMap[key];
       if(dest.notNil, {
-        dest[0].set(dest[1], val);
+        var node = fx[dest[0]];
+        if(fxVals[dest[0]].isNil, { fxVals[dest[0]] = IdentityDictionary.new });
+        fxVals[dest[0]][dest[1]] = val;
+        if(node.notNil, { node.set(dest[1], val) });
       }, {
         st[key] = val;
       });
@@ -368,5 +530,6 @@ Engine_Gradient : CroneEngine {
     leadBus.free;
     keyBus.free;
     inAmpBus.free;
+    if(bedBuf.notNil, { bedBuf.free });
   }
 }

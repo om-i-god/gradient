@@ -20,6 +20,8 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 
 **kickless.** the pump (ghost sidechain on every quarter) keeps running when the kick drops out, so pads, arps, echo and reverb tails still breathe on the beat. that happens in breakdowns, when you press drop, and sometimes on its own at mid energy (kick: auto). set **kick → never** for a fully kickless set.
 
+**lead voices.** each arp lane plays one of four voices: **classic** (triangle/pulse), **bell** (two-operator FM), **pluck** (karplus string) or **soft** (sine). on **auto** (the default) the seed picks, mostly classic. set a lane's voice in SOUND to fix it.
+
 **phasing arps.** four lanes, each with its own odd length (3, 5, 7, 9, 11, 13 steps...), its own rate (16th, 8th, dotted 8th), register, pan, decay and slow filter LFO. lanes keep stepping even while silent, so when one fades back in it lands in a new phase against the others. lanes are written as chord-tone indices, so when the harmony moves, the arps move with it.
 
 **mutation.** on every phrase, each lane might rotate, swap a note, or grow or shrink by a step, which shifts its phase. stab, hat, bass and rim patterns regenerate occasionally. very rarely a lane is replaced or the chord pair changes.
@@ -95,10 +97,11 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 - **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
 - **LISTEN:** follow input key, input gate (dB), hold before move (s)
 - **KEY:** root, mode, chord voicing, bass octave
-- **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, echo wow
+- **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, reverb type (hall / plate / spring), echo wow
 - **LEAD DELAY:** a second tape echo fed only by the arps, apart from the dub echo and untouched by the dub knob and throws: send, time (1/16, 1/8T, 1/8, 3/16, 1/4T, 1/4, 3/8, 1/2; tempo-synced), feedback, tone, low cut, ping-pong, wow, saturation, to reverb, and whether the arps also feed the dub echo
+- **BED:** a sound file from `dust/audio` looping under everything as a field-recording layer: file, level, tone, speed, to reverb. it drifts slowly in speed, filter and pan, rises in the kickless stretches, and fades with the arc like the wash
 - **LEVELS:** kick, hat, rim, bass, chord, arp, wash, noise, crackle
-- **SOUND:** kick tune / decay, stab cutoff / resonance / detune, bass cutoff
+- **SOUND:** kick tune (shown as note + Hz), kick type (**sub**: clean sine / **dusty**: 909-ish thud, crushed and band-limited), kick decay, stab cutoff / resonance / detune, bass cutoff, lane 1–4 voice
 - **BASS OUT / CHORD OUT / ARP OUT:** output (internal / midi / both), midi device, channel (default bass ch 1, chords ch 2, arps ch 3)
 - **ARP OUT > lanes to midi:** all four lanes on one channel, a single lane (for a mono synth: the other lanes keep playing on norns), or each lane on its own channel starting at the arp channel (ch, ch+1, ch+2, ch+3). velocity follows the lane's fade and accent; note length follows its decay
 - **VISUALS:** theme (terrain, tunnel, field, lattice: ported from causeway), speed, brightness, particles

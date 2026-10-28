@@ -48,6 +48,12 @@ T.VOICINGS = {
   {name = "m9",     degs = {2, 4, 6, 8}},   -- rootless, floaty
   {name = "quartal", degs = {0, 3, 6, 9}},  -- open, Barker-ish shimmer
   {name = "add9",   degs = {0, 2, 4, 8}},
+  -- colours the harmony picks from by energy (new ones go on the end)
+  {name = "sus2",    degs = {0, 1, 4, 7}},
+  {name = "sus4",    degs = {0, 3, 4, 7}},
+  {name = "m11",     degs = {0, 2, 6, 10}},
+  {name = "cluster", degs = {0, 1, 2, 4}},
+  {name = "6/9",     degs = {0, 4, 5, 8}},
 }
 T.VOICING_NAMES = {}
 for i, v in ipairs(T.VOICINGS) do T.VOICING_NAMES[i] = v.name end

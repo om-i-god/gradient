@@ -26,6 +26,7 @@ engine.name = "Gradient"
 local T   = include("lib/theory")
 local G   = include("lib/gen")
 local C   = include("lib/conductor")
+local H   = include("lib/harmony")
 local VIS = include("lib/visuals")
 local L   = include("lib/listen")
 local GU  = include("lib/gridui")
@@ -46,10 +47,11 @@ local S = {
   playing = false, step = 0, track_bar = 0,
   energy = 0, nudge = 0, dub = 0.5,
   section = "-", progress = 0, total_bars = nil,
-  root_pc = 9, mode = 1, voicing = 1,
+  root_pc = 9, mode = 1, voicing = 1, harmony = 3,
   mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 1,
   pat = {}, lanes = {}, gain = {}, want = {}, jitter = {},
-  chord = {57, 60, 64, 67}, chord_degree = 1, pair = {1, 1}, pair_i = 1, harm_bars = 4,
+  chord = {57, 60, 64, 67}, chord_degree = 1, pair = {1, 1}, harm_bars = 4,
+  bass_pc = 0, bass_free = true, chord_root_pc = 0, chord_label = "i",
   on_kick = false, on_pump = false, kickless = false,
   drop_bars = 0, phrase_len = 32, force_mutate = false, freeze = false, throw = false,
   cycle_bars = 96,
@@ -261,14 +263,16 @@ local function play_step()
     if ext then
       for i = 1, 4 do midi_note("chord", c[i], cv * cg, beat * 0.5) end
     end
-    O.note("chord", c[1], dur)
+    O.note("chord", 48 + S.root_pc + S.chord_root_pc, dur)
   end
 
-  -- bass follows the chord root
+  -- bass: chord root, its 3rd / 5th, or a tonic pedal (lib/harmony)
   local bg, bv = S.gain.bass or 0, S.pat.bass[s]
   if bg > 0 and bv[1] > 0 then
     local base = 12 * (params:get("bass_oct") + 1) + S.root_pc
-    local note = T.degree(base, S.mode, S.chord_degree) + bv[2]
+    local iv = bv[2]
+    if not S.bass_free and (iv == 7 or iv == 10) then iv = 12 end
+    local note = base + S.bass_pc + iv
     local dur  = beat * 0.25 * (1.2 + (1 - e) * 1.2)
     local internal, ext = routes("bass")
     if internal then engine.bass(mtof(note), bv[1] * bg * 0.55, dur) end
@@ -569,7 +573,12 @@ local function draw_hud()
   local top = T.name(S.root_pc, S.mode, true)
   if k1 then top = VIS.names[theme] .. " " .. theme .. "/" .. #VIS.names end
   text_box(1, 7, top, S.playing and 12 or 4)
-  if page ~= 1 and not k1 then text_box(1, 15, PAGES[page].name, 6) end
+  -- second line: the chord (roman, "/i" = over a tonic pedal), then the page
+  if not k1 then
+    local sub = S.chord_label
+    if page ~= 1 then sub = sub .. "  " .. PAGES[page].name end
+    text_box(1, 15, sub, page ~= 1 and 6 or 5)
+  end
 
   local sec = S.section or "-"
   if S.mode_play == 2 and S.total_bars then
@@ -708,8 +717,12 @@ local function setup_params()
   params:set_action("root", function(v) S.root_pc = v - 1; C.update_chord(S) end)
   params:add_option("mode", "mode", T.MODE_NAMES, 1)
   params:set_action("mode", function(v) S.mode = v; C.update_chord(S) end)
-  params:add_option("voicing", "chord voicing", T.VOICING_NAMES, 1)
-  params:set_action("voicing", function(v) S.voicing = v; C.update_chord(S) end)
+  params:add_option("harmony", "harmony", H.NAMES, 3)
+  params:set_action("harmony", function(v) S.harmony = v; C.reharm(S) end)
+  local vnames = {table.unpack(T.VOICING_NAMES)}
+  vnames[H.AUTO] = "auto (energy)"
+  params:add_option("voicing", "chord voicing", vnames, H.AUTO)
+  params:set_action("voicing", function(v) S.voicing = v; C.reharm(S) end)
   params:add_number("bass_oct", "bass octave", 0, 2, 1)
 
   params:add_separator("LISTEN")

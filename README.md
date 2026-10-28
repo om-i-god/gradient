@@ -24,9 +24,22 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 
 **phasing arps.** four lanes, each with its own odd length (3, 5, 7, 9, 11, 13 steps...), its own rate (16th, 8th, dotted 8th), register, pan, decay and slow filter LFO. lanes keep stepping even while silent, so when one fades back in it lands in a new phase against the others. lanes are written as chord-tone indices, so when the harmony moves, the arps move with it.
 
-**mutation.** on every phrase, each lane might rotate, swap a note, or grow or shrink by a step, which shifts its phase. stab, hat, bass and rim patterns regenerate occasionally. very rarely a lane is replaced or the chord pair changes.
+**mutation.** on every phrase, each lane might rotate, swap a note, or grow or shrink by a step, which shifts its phase. stab, hat, bass and rim patterns regenerate occasionally. very rarely a lane is replaced or a new progression arrives (it lands on the next 8-bar edge).
 
-**harmony.** one key and one mode, and a two-chord world: i–VI, i–iv, i–VII and so on, or just i. chords swap every 2–8 bars. voicings: m7 (the classic stab), rootless m9, quartal, add9. the voicing names assume minor; in a major mode the same shape gives maj7, maj9 and so on.
+**harmony.** one key and one mode, three ways to move through it (PARAMS > KEY > harmony):
+
+- **simple:** the old two-chord world: i–VI, i–iv, i–VII and so on, or just i, swapping every 2–8 bars with one voicing.
+- **rich:** 2–5 chord loops (i–VI–III–VII, i–iv–VI–v, dorian's i–IV, phrygian's i–bII...) with uneven bar lengths such as 3+3+2 or 4+2+4+6. the loop restarts every phrase. each new chord is **voice-led**: every voice moves to the nearest note of the next chord, so the stabs and the arps glide instead of jumping. calm stretches hold chords twice as long; peaks change twice as fast.
+- **drifting** (default): rich, plus chords **morph** in one voice at a time across their first bars, so the in-between chords sound too. key changes from the input follower drift in the same way.
+
+in rich and drifting:
+
+- **pedal bass:** in the intro, build and breakdown (and set mode's drift and rise), the bass often holds the tonic while the chords move above. the release when it finally follows is the lift into the peak.
+- **inversions:** outside a pedal, the bass sometimes sits on the chord's 3rd or 5th.
+- **colour by energy:** with chord voicing on **auto**, low energy picks open shapes (quartal, sus2, rootless m9, 6/9), the middle picks m7, add9 and sus4, and the peaks pick dense ones (m11, clusters).
+- **outside chords:** about one loop in three ends on a borrowed chord for a bar: bII, bVI, bVII, a major IV or V, or the last chord's shape slid down a semitone or up a tone. then it's home again.
+
+the screen shows the chord as a roman numeral under the key; `bVII/i` means bVII over a tonic pedal. voicing names assume minor; in a major mode the same shape gives maj7, maj9 and so on.
 
 **modes.** twelve, all seven-note:
 
@@ -96,7 +109,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 
 - **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
 - **LISTEN:** follow input key, input gate (dB), hold before move (s)
-- **KEY:** root, mode, chord voicing, bass octave
+- **KEY:** root, mode, harmony (simple / rich / drifting), chord voicing (m7, m9, quartal, add9, sus2, sus4, m11, cluster, 6/9, or auto by energy), bass octave
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, reverb type (hall / plate / spring), echo wow
 - **LEAD DELAY:** a second tape echo fed only by the arps, apart from the dub echo and untouched by the dub knob and throws: send, time (1/16, 1/8T, 1/8, 3/16, 1/4T, 1/4, 3/8, 1/2; tempo-synced), feedback, tone, low cut, ping-pong, wow, saturation, to reverb, and whether the arps also feed the dub echo
 - **BED:** a sound file from `dust/audio` looping under everything as a field-recording layer: file, level, tone, speed, to reverb. it drifts slowly in speed, filter and pan, rises in the kickless stretches, and fades with the arc like the wash
@@ -109,7 +122,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 - **CC OUT:** a midi device and channel (default 16) for the arc as CCs: energy, dub, tone (0 = off), and a phrase pulse (127 on the first bar of each phrase, then 0). sent once a bar, only when the value changes
 - **VISUALS:** theme (terrain, tunnel, field, lattice: ported from causeway), speed, brightness, particles
 
-**seeds.** a seed fixes a track's material: patterns, lanes, chord pair, harmonic rhythm. the moment-to-moment dice (which notes skip, when mutations land) run live, so a rebuilt seed is the same track played a different night.
+**seeds.** a seed fixes a track's material: patterns, lanes, progression, harmonic rhythm. the moment-to-moment dice (which notes skip, when mutations land) run live, so a rebuilt seed is the same track played a different night.
 
 **clock.** gradient follows the norns clock, so Link / MIDI clock sync works from the system CLOCK menu, and transport start/stop is honoured.
 
@@ -121,7 +134,7 @@ copy the folder to `~/dust/code/gradient/` on norns. it ships its own engine (`l
 
 ## dev
 
-`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars.
+`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars. `HARM=1|2|3` picks the harmony mode; `HTRACE=1` prints every bar's chord, notes and bass, and the run ends with how far the voices moved per change. it fails on doubled or out-of-range stab notes.
 
 ## license
 

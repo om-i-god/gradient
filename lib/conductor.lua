@@ -5,6 +5,7 @@
 
 local T = include("lib/theory")
 local G = include("lib/gen")
+local H = include("lib/harmony")
 
 local C = {}
 
@@ -47,7 +48,7 @@ function C.regen_material(S)
   for i = 1, 4 do S.lanes[i] = G.lane(i) end
   S.pair       = G.pick(T.PAIRS)
   S.harm_bars  = G.pick({2, 4, 4, 8})
-  S.pair_i     = 1
+  H.new_prog(S)
 end
 
 -- new track: seed drives the material; key moves to a neighbour if asked
@@ -65,14 +66,21 @@ function C.new_track(S, seed, move_key)
   for _, k in ipairs(C.FADED) do S.gain[k] = 0 end
   S.jitter = {}
   S.drop_bars = 0
-  C.update_chord(S)
+  S.h.voices = nil
+  C.update_chord(S, true)
 end
 
-function C.update_chord(S)
-  local degree = S.pair[S.pair_i]
-  S.chord_degree = degree
-  S.chord = T.chord(48 + S.root_pc, S.mode, degree, S.voicing)
-  S.chord_changed = true
+-- re-sound the current chord after a key / mode / voicing change; in
+-- drifting it morphs there unless `instant`
+function C.update_chord(S, instant)
+  H.retarget(S, instant)
+end
+
+-- harmony mode or voicing changed: rebuild the loop from step 1
+function C.reharm(S)
+  if not S.h then return end
+  H.new_prog(S)
+  H.retarget(S)
 end
 
 ------------------------------------------------------------------------
@@ -156,11 +164,9 @@ function C.bar(S)
     C.decide(S)
   end
 
-  -- harmony
-  if S.track_bar > 0 and S.track_bar % S.harm_bars == 0 and e > 0.2 then
-    S.pair_i = (S.pair_i % 2) + 1
-    C.update_chord(S)
-  end
+  -- harmony: progression, voice leading, morphs, pedal (lib/harmony)
+  if bar_in_phrase == 1 and S.track_bar > 0 then H.phrase(S) end
+  H.bar(S, bar_in_block)
 
   -- fades: each faded part moves 1/4 of the way per bar -> ~4-bar fades
   for _, k in ipairs(C.FADED) do
@@ -189,6 +195,7 @@ function C.bar(S)
      and S.track_bar % S.cycle_bars == 0 and math.random() < 0.5 then
     S.root_pc = (S.root_pc + G.pick({5, 7, -5, 3})) % 12
     S.pair = G.pick(T.PAIRS)
+    H.new_prog(S)
     S.cycle_bars = G.pick({8, 12, 16}) * plen(S)
     S.key_moved = true
     C.update_chord(S)
@@ -265,6 +272,7 @@ function C.mutate(S)
   if math.random() < 0.08 * m then
     S.pair = G.pick(T.PAIRS)
     S.harm_bars = G.pick({2, 4, 4, 8})
+    H.next_prog(S)
   end
 end
 

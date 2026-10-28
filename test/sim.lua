@@ -151,6 +151,7 @@ end
 if os.getenv("ARP") then
   params:set("arp_out", 2); params:set("arp_dev", 2); params:set("arp_lanes", tonumber(os.getenv("ARP")))
 end
+if os.getenv("HARM") then params:set("harmony", tonumber(os.getenv("HARM"))) end
 if LISTEN then params:set("listen_on", 2) end
 if MODE then params:set("mode", MODE) end
 
@@ -183,6 +184,26 @@ end
 
 local log_every = 8
 local bars_seen = 0
+-- harmony trace: semitones the stab voices move per bar, labels heard
+local HTRACE = os.getenv("HTRACE")
+local prev_chord, moves, changes, max_leap, labels = nil, 0, 0, 0, {}
+local function trace_harmony(S)
+  local c = S.chord
+  for i = 1, 4 do assert(c[i] >= 40 and c[i] <= 88, "stab voice out of range: " .. c[i]) end
+  for i = 2, 4 do assert(c[i] > c[i - 1], "doubled stab note at bar " .. S.track_bar) end
+  assert(S.bass_pc >= 0 and S.bass_pc < 12, "bass_pc out of range")
+  if prev_chord then
+    local d = 0
+    for i = 1, 4 do d = d + math.abs(c[i] - prev_chord[i]) end
+    if d > 0 then changes = changes + 1; moves = moves + d; max_leap = math.max(max_leap, d) end
+  end
+  prev_chord = {c[1], c[2], c[3], c[4]}
+  labels[S.chord_label] = (labels[S.chord_label] or 0) + 1
+  if HTRACE then
+    print(string.format("  bar %3d %-9s e=%.2f %-8s [%d %d %d %d] bass+%d%s", S.track_bar, S.section,
+      S.energy, S.chord_label, c[1], c[2], c[3], c[4], S.bass_pc, S.bass_free and "" or " (inv)"))
+  end
+end
 for i = 1, BARS * 16 * 3 do
   tick_all()
   if bars_seen >= BARS then break end
@@ -206,6 +227,7 @@ for i = 1, BARS * 16 * 3 do
   if S and S.track_bar ~= last_bar then
     last_bar = S.track_bar
     bars_seen = bars_seen + 1
+    trace_harmony(S)
     if S.track_bar % log_every == 0 then
       local parts = {}
       for _, k in ipairs({"lane1","lane2","lane3","lane4","chords","rim","hats","bass"}) do
@@ -243,6 +265,11 @@ for _, id in ipairs({"p_throw", "p_lead_throw", "p_build", "p_break", "p_mutate"
 end
 for i = 1, 16 * 8 do tick_all() end
 print("grid leds lit (cumulative):", grid_dev.leds)
+local ls = {}
+for k, n in pairs(labels) do ls[#ls + 1] = k .. "=" .. n end
+table.sort(ls)
+print(string.format("harmony: %d bars changed, avg %.1f semitones moved, max %d;  %s",
+  changes, changes > 0 and moves / changes or 0, max_leap, table.concat(ls, " ")))
 
 local keys = {}
 for k in pairs(calls) do keys[#keys+1] = k end

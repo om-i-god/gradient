@@ -56,7 +56,7 @@ function C.new_track(S, seed, move_key)
   S.seed = seed
   if move_key and not S.follow then
     S.root_pc = (S.root_pc + G.pick({0, 5, 7, -5, 3})) % 12
-    S.mode    = G.pick({1, 1, 2, 3})
+    S.mode    = G.pick(T.MODE_POOL)
   end
   C.regen_material(S)
   S.track_bar = 0
@@ -142,7 +142,7 @@ function C.bar(S)
 
   -- a followed input key lands on the next 8-bar edge
   if bar_in_block == 1 and S.pending_root then
-    S.root_pc, S.mode = S.pending_root, 1
+    S.root_pc = S.pending_root
     S.pending_root = nil
     S.key_moved = true
     C.update_chord(S)

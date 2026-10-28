@@ -24,11 +24,21 @@ the bass and chords can also go out over USB MIDI, per part: **internal**, **mid
 
 **mutation.** on every phrase, each lane might rotate, swap a note, or grow or shrink by a step, which shifts its phase. stab, hat, bass and rim patterns regenerate occasionally. very rarely a lane is replaced or the chord pair changes.
 
-**harmony.** one key and one mode (aeolian, dorian, phrygian), and a two-chord world: i–VI, i–iv, i–VII and so on, or just i. chords swap every 2–8 bars. voicings: m7 (the classic stab), rootless m9, quartal, add9.
+**harmony.** one key and one mode, and a two-chord world: i–VI, i–iv, i–VII and so on, or just i. chords swap every 2–8 bars. voicings: m7 (the classic stab), rootless m9, quartal, add9. the voicing names assume minor; in a major mode the same shape gives maj7, maj9 and so on.
+
+**modes.** twelve, all seven-note:
+
+| | |
+|---|---|
+| dark dub minors | aeolian, dorian, phrygian, locrian |
+| bright | mixolydian, ionian, lydian |
+| minor colours | harmonic minor, melodic minor, phrygian dominant, dorian #4, hungarian minor |
+
+new tracks (and next-track key moves) mostly land on aeolian, dorian or phrygian, with harmonic minor, melodic minor, phrygian dominant, mixolydian and dorian #4 as occasional visits. set the mode by hand (hold K2 + E3) to go anywhere. the screen shows a short name (`A dor`, `E phrdom`).
 
 **dub.** the echo is a ping-pong tape delay with filtering, saturation and wow inside the feedback loop. its time is tempo-synced and glides when the tempo changes. at the end of some 8-bar blocks the conductor throws the echo: feedback and stab send jump for one bar, then fall back.
 
-**listening.** with **LISTEN > follow input key** on, gradient tracks the key of whatever is coming into the norns inputs and keeps following it. the engine runs SuperCollider's `KeyTrack` (a pitch-class profile over a 4096 FFT, matched against major and minor templates). the script turns that into a decaying vote: a major key counts for its relative minor, since gradient's harmony is minor-modal and they share the same notes. a new key has to lead the vote for **hold** seconds (default 10) with a clear share before gradient moves, and the move lands on the next 8-bar edge. quiet input below the **gate** doesn't vote, so the key holds through silence. while following, gradient stops making its own key moves (set-mode modulation, next-track key shifts). the screen shows `in Em 64%` (what it hears and how sure it is), `>Dm` when a move is pending, and `listening` when the input is below the gate.
+**listening.** with **LISTEN > follow input key** on, gradient tracks the key of whatever is coming into the norns inputs and keeps following it. the engine runs SuperCollider's `KeyTrack` (a pitch-class profile over a 4096 FFT, matched against major and minor templates). the script turns that into a decaying vote: a major key counts for its relative minor, since they share the same notes. gradient keeps whatever mode you're in and moves its root onto the heard notes: hearing A minor puts dorian on D, lydian on F, phrygian on E. the harmonic and melodic colours sit on the heard minor root (or, for phrygian dominant, its 5th). a new key has to lead the vote for **hold** seconds (default 10) with a clear share before gradient moves, and the move lands on the next 8-bar edge. quiet input below the **gate** doesn't vote, so the key holds through silence. while following, gradient stops making its own key moves (set-mode modulation, next-track key shifts). the screen shows `in Em 64%` (what it hears and how sure it is), `>D` when a move is pending, and `listening` when the input is below the gate.
 
 ---
 

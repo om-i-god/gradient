@@ -275,16 +275,18 @@ local function listen_loop()
       local now  = util.time()
       local gate = 10 ^ (params:get("listen_gate") / 20)
       L.tick(in_key, in_amp, gate, now)
-      local pc = L.proposal(S.root_pc, params:get("listen_hold"), now)
+      -- the vote is in minor roots; keep the chosen mode and move its root
+      -- onto the heard notes
+      local m  = L.proposal(T.minor_of(S.root_pc, S.mode), params:get("listen_hold"), now)
+      local pc = m and T.root_for(m, S.mode)
       if pc and pc ~= S.pending_root then
         if S.playing then
           S.pending_root = pc           -- conductor lands it on the next 8-bar edge
         else
-          S.root_pc, S.mode = pc, 1
+          S.root_pc = pc
           C.update_chord(S)
           params:set("root", pc + 1, true)
-          params:set("mode", 1, true)
-          flash("in key " .. T.name(pc, 1))
+          flash("in key " .. T.name(pc, S.mode))
         end
       end
     end
@@ -437,7 +439,7 @@ end
 
 local function draw_hud()
   -- top: key / section
-  local top = T.name(S.root_pc, S.mode)
+  local top = T.name(S.root_pc, S.mode, true)
   if k1 then top = VIS.names[theme] .. " " .. theme .. "/" .. #VIS.names end
   text_box(1, 7, top, S.playing and 12 or 4)
 
@@ -458,7 +460,7 @@ local function draw_hud()
     else
       s = "in ?"
     end
-    if S.pending_root then s = s .. " >" .. T.NOTE_NAMES[S.pending_root + 1] .. "m" end
+    if S.pending_root then s = s .. " >" .. T.NOTE_NAMES[S.pending_root + 1] end
     text_box(127, 15, s, L.heard and 7 or 3, true)
   end
 

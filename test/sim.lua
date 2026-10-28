@@ -1,11 +1,12 @@
 -- headless sim: stubs the norns APIs gradient touches, then drives the step
 -- clock through several bars and prints the conductor's arc.
--- run from repo root:  lua test/sim.lua [bars] [play_mode] [minutes]
+-- run from repo root:  lua test/sim.lua [bars] [play_mode] [minutes] [listen] [mode]
 
 local BARS    = tonumber(arg[1]) or 300
 local PMODE   = tonumber(arg[2]) or 2
 local MINUTES = tonumber(arg[3]) or 4
 local LISTEN  = arg[4] == "listen"
+local MODE    = tonumber(arg[5])
 
 calls = {}
 engine = setmetatable({}, {__index = function(_, k)
@@ -79,6 +80,7 @@ params:set("track_minutes", MINUTES)
 params:set("bass_out", 3)
 params:set("bass_dev", 2)
 if LISTEN then params:set("listen_on", 2) end
+if MODE then params:set("mode", MODE) end
 
 -- fake KeyTrack feed by bar: E minor (16), G major (7 -> rel. E minor),
 -- silence, then D minor (14)

@@ -41,7 +41,7 @@ local S = {
   pat = {}, lanes = {}, gain = {}, want = {}, jitter = {},
   chord = {57, 60, 64, 67}, chord_degree = 1, pair = {1, 1}, pair_i = 1, harm_bars = 4,
   on_kick = false, on_pump = false, kickless = false,
-  drop_phrases = 0, force_mutate = false, freeze = false, throw = false,
+  drop_bars = 0, phrase_len = 32, force_mutate = false, freeze = false, throw = false,
   cycle_bars = 96,
   follow = false, pending_root = nil,
 }
@@ -278,7 +278,7 @@ local function listen_loop()
       local pc = L.proposal(S.root_pc, params:get("listen_hold"), now)
       if pc and pc ~= S.pending_root then
         if S.playing then
-          S.pending_root = pc           -- conductor lands it on the next phrase
+          S.pending_root = pc           -- conductor lands it on the next 8-bar edge
         else
           S.root_pc, S.mode = pc, 1
           C.update_chord(S)
@@ -344,11 +344,11 @@ end
 ------------------------------------------------------------------------
 
 local function drop()
-  if S.drop_phrases > 0 then
-    S.drop_phrases = 0
+  if S.drop_bars > 0 then
+    S.drop_bars = 0
     flash("return")
   else
-    S.drop_phrases = 2
+    S.drop_bars = 16 - (S.track_bar % 8)   -- rest of this 8 and the next
     flash("drop")
   end
   C.decide(S)
@@ -537,7 +537,13 @@ local function setup_params()
     S.mode_play = v
     if v == 2 then S.track_bar = 0 end
   end)
-  params:add_number("track_minutes", "track length (min)", 4, 16, 8)
+  params:add_option("phrase_len", "phrase length (bars)", {"8", "16", "32", "64"}, 3)
+  params:set_action("phrase_len", function(v)
+    local old = S.phrase_len
+    S.phrase_len = ({8, 16, 32, 64})[v]
+    S.cycle_bars = math.floor(S.cycle_bars * S.phrase_len / old)
+  end)
+  params:add_number("track_minutes", "track length (min)", 4, 32, 8)
   params:set_action("track_minutes", function(v) S.track_minutes = v end)
   params:add_option("end_action", "track end", {"stop", "next track"}, 2)
   params:set_action("end_action", function(v) S.end_action = v end)

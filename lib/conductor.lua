@@ -8,7 +8,11 @@ local G = include("lib/gen")
 
 local C = {}
 
-local PHRASE = 8
+local BLOCK = 8   -- dub throws, half-checks, drop and key landings run on 8 bars
+
+-- phrase = how long the arrangement holds before parts move and material
+-- mutates (param, 8..64 bars)
+local function plen(S) return S.phrase_len or 32 end
 
 -- track mode arc: fractions of total length; energy ramps e0 -> e1
 C.SECTIONS = {
@@ -57,10 +61,10 @@ function C.new_track(S, seed, move_key)
   C.regen_material(S)
   S.track_bar = 0
   S.nudge     = 0
-  S.cycle_bars = G.pick({64, 96, 128})
+  S.cycle_bars = G.pick({8, 12, 16}) * plen(S)
   for _, k in ipairs(C.FADED) do S.gain[k] = 0 end
   S.jitter = {}
-  S.drop_phrases = 0
+  S.drop_bars = 0
   C.update_chord(S)
 end
 
@@ -78,14 +82,16 @@ end
 local function track_total(S)
   -- minutes -> bars at current tempo, rounded to phrases
   local bars = S.track_minutes * clock.get_tempo() / 4
-  return math.max(PHRASE * 6, math.floor(bars / PHRASE + 0.5) * PHRASE)
+  local P = plen(S)
+  return math.max(P * 6, math.floor(bars / P + 0.5) * P)
 end
 
 local function track_section(S)
   local total = track_total(S)
   local start = 0
   for i, sec in ipairs(C.SECTIONS) do
-    local len = math.floor(sec.len * total / PHRASE + 0.5) * PHRASE
+    local P = plen(S)
+    local len = math.max(P, math.floor(sec.len * total / P + 0.5) * P)
     if i == #C.SECTIONS then len = total - start end
     if S.track_bar < start + len then
       return sec, (S.track_bar - start) / math.max(1, len), total
@@ -121,7 +127,9 @@ end
 
 -- returns "stop" when a track finishes with end action = stop
 function C.bar(S)
-  local bar_in_phrase = (S.track_bar % PHRASE) + 1
+  local P = plen(S)
+  local bar_in_phrase = (S.track_bar % P) + 1
+  local bar_in_block  = (S.track_bar % BLOCK) + 1
 
   -- user nudge relaxes back to zero over ~16 bars
   S.nudge = S.nudge * 0.9
@@ -130,10 +138,21 @@ function C.bar(S)
   S.energy = clamp(base_energy(S) + S.nudge, 0, 1)
   local e = S.energy
 
-  -- phrase boundary: who plays, what mutates
+  if S.drop_bars > 0 then S.drop_bars = S.drop_bars - 1 end
+
+  -- a followed input key lands on the next 8-bar edge
+  if bar_in_block == 1 and S.pending_root then
+    S.root_pc, S.mode = S.pending_root, 1
+    S.pending_root = nil
+    S.key_moved = true
+    C.update_chord(S)
+  end
+
+  -- phrase boundary: who plays, what mutates; re-check every 4 bars
+  -- (and every outro bar) so long phrases still follow the energy arc
   if bar_in_phrase == 1 then
     C.phrase(S)
-  elseif bar_in_phrase == 5 or S.section == "outro" then
+  elseif bar_in_phrase % 4 == 1 or S.section == "outro" then
     C.decide(S)
   end
 
@@ -152,7 +171,7 @@ function C.bar(S)
   end
 
   -- dub throw on the last bar of some phrases
-  S.throw = (bar_in_phrase == PHRASE) and (math.random() < 0.2 + S.dub * 0.35)
+  S.throw = (bar_in_block == BLOCK) and (math.random() < 0.2 + S.dub * 0.35)
 
   S.track_bar = S.track_bar + 1
 
@@ -170,7 +189,7 @@ function C.bar(S)
      and S.track_bar % S.cycle_bars == 0 and math.random() < 0.5 then
     S.root_pc = (S.root_pc + G.pick({5, 7, -5, 3})) % 12
     S.pair = G.pick(T.PAIRS)
-    S.cycle_bars = G.pick({64, 96, 128})
+    S.cycle_bars = G.pick({8, 12, 16}) * plen(S)
     S.key_moved = true
     C.update_chord(S)
   end
@@ -178,18 +197,10 @@ end
 
 -- phrase boundary: roll the dice once, then decide + mutate
 function C.phrase(S)
-  -- a followed input key lands on the phrase edge
-  if S.pending_root then
-    S.root_pc, S.mode = S.pending_root, 1
-    S.pending_root = nil
-    S.key_moved = true
-    C.update_chord(S)
-  end
   -- fresh jitter so parts don't enter in lockstep every time
   for k, _ in pairs(TH) do
     S.jitter[k] = (math.random() - 0.5) * 0.16
   end
-  if S.drop_phrases > 0 then S.drop_phrases = S.drop_phrases - 1 end
   S.roll_kickless = math.random() < 0.25   -- Utility-style stretch
   S.roll_hats     = math.random() < 0.6
   S.roll_bass     = math.random() < 0.6
@@ -203,7 +214,7 @@ function C.decide(S)
   local e = S.energy
   local function over(k) return e > TH[k] + (S.jitter[k] or 0) end
 
-  local drop = S.drop_phrases > 0
+  local drop = S.drop_bars > 0
 
   -- kickless: section says so, user dropped it, style forces it, or
   -- an occasional Utility-style stretch at mid energy

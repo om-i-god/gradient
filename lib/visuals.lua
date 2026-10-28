@@ -83,7 +83,7 @@ local function draw_gradient(S)
   local c, e = S.chord, S.energy
   local t = frame * 0.05 * SP
   local glow = 0.55 + env.stab * 0.7 + VIS.audio_level * 0.5
-  local width = 2.2 + (1 - e) * 3.5             -- calm = wider, softer bands
+  local width = 1.6 + (1 - e) * 2.2             -- calm = wider, softer bands
   local bass_lit = 1.5 + env.bass * 7 + env.kick * 3 * ((S.gain.bass or 0) > 0 and 1 or 0.3)
   for col = 0, 15 do
     local x = col * 8
@@ -97,7 +97,8 @@ local function draw_gradient(S)
       end
       local db = (y - 62) / 5
       v = v * glow
-      put(v * v * 0.35 + math.exp(-db * db) * bass_lit, x, y, 8, 2)
+      -- soft knee: close voices merge into a glow, not a flat slab
+      put(13 * (1 - math.exp(-v * v * 0.04)) + math.exp(-db * db) * bass_lit, x, y, 8, 2)
     end
   end
 end

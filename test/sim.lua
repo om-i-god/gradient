@@ -41,6 +41,7 @@ function params:delta(id, n)
   if d.trig then return end
   params:set(id, math.max(d.lo, math.min(d.hi, d.v + n * (d.f and 0.01 or 1))))
 end
+function params:lookup_param(id) return {name = id} end
 function params:bang()
   for _, id in ipairs(P.order) do
     local d = P.defs[id]
@@ -68,6 +69,11 @@ midi = {vports = {{name = "fake synth"}}, connect = function()
           note_off = function() calls.midi_off = (calls.midi_off or 0) + 1 end,
           cc = function() calls.midi_cc = (calls.midi_cc or 0) + 1 end}
 end}
+grid_dev = {cols = 16, rows = 8, leds = 0}
+function grid_dev:all() end
+function grid_dev:led() self.leds = self.leds + 1 end
+function grid_dev:refresh() calls.grid_refresh = (calls.grid_refresh or 0) + 1 end
+grid = {connect = function() return grid_dev end}
 polls = {}
 poll = {set = function(name, fn) polls[name] = fn; return {start = function() end} end}
 screen = setmetatable({text_extents = function() return 20, 6 end},
@@ -162,7 +168,21 @@ enc(1, 1)
 key(2, 1); enc(2, 3); enc(3, 1); key(2, 0)   -- key change while held (no drop)
 key(3, 1); enc(2, 2); enc(3, 1); key(3, 0)   -- bpm / mode while held
 key(1, 1); enc(1, 1); key(1, 0)
+-- encoder pages
+for pg = 1, 4 do
+  key(1, 1); enc(2, 1); key(1, 0)
+  enc(1, 2); enc(2, -1); enc(3, 1)
+end
+-- grid: every action, a mute, a step toggle, an energy pull, a new lane
+for _, x in ipairs({1, 2, 3, 4, 6, 7, 14}) do grid_dev.key(x, 8, 1); grid_dev.key(x, 8, 0) end
+grid_dev.key(1, 3, 1); grid_dev.key(6, 3, 1); grid_dev.key(2, 4, 1)
+grid_dev.key(12, 2, 1); grid_dev.key(16, 5, 1); grid_dev.key(15, 6, 1)
+-- perform params
+for _, id in ipairs({"p_throw", "p_lead_throw", "p_build", "p_break", "p_mutate", "p_drop"}) do
+  P.defs[id].action()
+end
 for i = 1, 16 * 8 do tick_all() end
+print("grid leds lit (cumulative):", grid_dev.leds)
 
 local keys = {}
 for k in pairs(calls) do keys[#keys+1] = k end

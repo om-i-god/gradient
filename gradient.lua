@@ -2,13 +2,18 @@
 -- generative dub / kickless techno
 -- press play and let it ride
 --
--- E1 energy nudge  E2 dub  E3 tone
+-- E1-E3: the current page
+--   play: energy nudge / dub / tone
+--   lead: send / feedback / time
+--   sound: kick tune / stab cutoff / pump
+--   space: reverb / echo wow / swing
 -- K2 tap: drop (kickless)
 -- K3 tap: mutate now
 -- K2+K3: play / stop
 -- hold K2: E2 key  E3 mode
 -- hold K3: E2 bpm  E3 set/track
--- hold K1: E1 visual theme
+-- hold K1: E1 visual theme  E2 page
+-- grid: see lib/gridui.lua
 --
 -- params > LISTEN > follow input key:
 -- tracks the key of the audio input
@@ -23,6 +28,7 @@ local G   = include("lib/gen")
 local C   = include("lib/conductor")
 local VIS = include("lib/visuals")
 local L   = include("lib/listen")
+local GU  = include("lib/gridui")
 
 local ECHO_DIVS      = {0.5, 0.75, 1, 1.5}          -- in beats
 local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
@@ -46,6 +52,7 @@ local S = {
   drop_bars = 0, phrase_len = 32, force_mutate = false, freeze = false, throw = false,
   cycle_bars = 96,
   follow = false, pending_root = nil,
+  mute = {}, hand_throw = 0, lead_throw = 0,
 }
 
 local main_clock, draw_clock, listen_clock
@@ -54,6 +61,7 @@ local loop_gen = 0        -- bumps on each start; stale step loops exit
 local k1, k2, k3 = false, false, false
 local k2_used, k3_used = false, false
 local theme = 1
+local page  = 1
 local msg, msg_t = nil, 0
 local audio_level_smooth = 0
 
@@ -135,14 +143,20 @@ local function apply_bar()
   S.dub = dub
   local beat = clock.get_beat_sec()
 
+  local throwing = S.throw or S.hand_throw > 0
   tweak("echo_time", ECHO_DIVS[params:get("echo_div")] * beat)
-  tweak("lead_time", LEAD_DIVS[params:get("lead_div")] * beat)
   local fb = 0.32 + dub * 0.45
-  if S.throw then fb = math.min(0.93, fb + 0.28) end
+  if throwing then fb = math.min(0.93, fb + 0.28) end
   tweak("echo_fb", fb)
+
+  -- lead delay: only the hand throw touches it
+  local lthrow = S.lead_throw > 0
+  tweak("lead_time", LEAD_DIVS[params:get("lead_div")] * beat)
+  tweak("lead_fb", lthrow and 0.92 or params:get("lead_fb") / 100)
+  tweak("arp_lead", math.min(1, params:get("lead_send") / 100 + (lthrow and 0.45 or 0)))
   tweak("echo_lpf", 1100 + tone * 2600 + e * 1200)
   tweak("echo_hpf", 250 + (1 - dub) * 300)
-  tweak("chord_echo", 0.28 + dub * 0.5 + (S.throw and 0.35 or 0))
+  tweak("chord_echo", 0.28 + dub * 0.5 + (throwing and 0.35 or 0))
   tweak("rim_echo",   0.15 + dub * 0.55)
   tweak("arp_echo",   params:get("lead_dub") == 2 and (0.08 + dub * 0.25) or 0)
   tweak("hat_echo",   dub * 0.12)
@@ -175,6 +189,8 @@ local function play_step()
   local s = (S.step % 16) + 1
 
   if s == 1 then
+    if S.hand_throw > 0 then S.hand_throw = S.hand_throw - 1 end
+    if S.lead_throw > 0 then S.lead_throw = S.lead_throw - 1 end
     local r = C.bar(S)
     if r == "next" or S.key_moved then
       S.key_moved = false
@@ -381,6 +397,76 @@ local function mutate()
   flash("mutate")
 end
 
+-- dub throw by hand: rest of this bar and the next, on the main echo
+local function throw()
+  S.hand_throw = 2
+  apply_bar()
+  flash("throw")
+end
+
+local function lead_throw()
+  S.lead_throw = 2
+  apply_bar()
+  flash("lead throw")
+end
+
+-- push the arc; both relax back with the nudge (~16 bars)
+local function build()
+  S.drop_bars = 0
+  S.nudge = clamp(S.nudge + 0.25, -1, 1)
+  C.decide(S)
+  flash("build")
+end
+
+local function brk()
+  S.nudge = clamp(S.nudge - 0.35, -1, 1)
+  S.drop_bars = 16 - (S.track_bar % 8)
+  C.decide(S)
+  flash("break")
+end
+
+local function toggle_play()
+  if S.playing then stop() else start() end
+end
+
+local function set_energy(target)
+  local base = S.energy - S.nudge
+  S.nudge = clamp(target - base, -1, 1)
+  S.energy = clamp(base + S.nudge, 0, 1)
+  C.decide(S)
+end
+
+local function toggle_mute(k)
+  S.mute[k] = not S.mute[k] or nil
+  C.decide(S)
+  flash((S.mute[k] and "mute " or "unmute ") .. k)
+end
+
+local function fresh()
+  new_track(math.random(1, 9999), true)
+  flash("new track " .. S.seed)
+end
+
+local function toggle_step(i, x)
+  local l = S.lanes[i]
+  if (l.seq[x] or 0) > 0 then l.seq[x] = 0 else l.seq[x] = math.random(1, 6) end
+end
+
+local function new_lane(i)
+  local old = S.lanes[i]
+  S.lanes[i] = G.lane(i)
+  S.lanes[i].tick = old.tick
+  flash("new lane " .. i)
+end
+
+-- encoder pages: {param id, step multiplier}; "_energy" is the nudge
+local PAGES = {
+  {name = "play",  {"_energy", 1}, {"dub", 1},          {"tone", 1}},
+  {name = "lead",  {"lead_send", 1}, {"lead_fb", 1},    {"lead_div", 1}},
+  {name = "sound", {"kick_tune", 1}, {"chord_cutoff", 25}, {"pump_depth", 1}},
+  {name = "space", {"verb_size", 1}, {"echo_wow", 1},   {"swing", 1}},
+}
+
 function key(n, z)
   if n == 1 then
     k1 = z == 1
@@ -412,6 +498,11 @@ end
 function enc(n, d)
   if k1 and n == 1 then
     params:delta("theme", d)
+  elseif k1 and n == 2 then
+    page = clamp(page + d, 1, #PAGES)
+    flash("page " .. PAGES[page].name)
+  elseif k1 then
+    return
   elseif k2 then
     k2_used = true
     if n == 2 then params:delta("root", d)
@@ -426,15 +517,15 @@ function enc(n, d)
       params:delta("play_mode", d)
       flash(params:string("play_mode"))
     end
-  elseif n == 1 then
-    S.nudge = clamp(S.nudge + d * 0.03, -0.6, 0.6)
-    flash(string.format("energy %+d", math.floor(S.nudge * 100 + 0.5)))
-  elseif n == 2 then
-    params:delta("dub", d)
-    flash("dub " .. params:get("dub"))
-  elseif n == 3 then
-    params:delta("tone", d)
-    flash("tone " .. params:get("tone"))
+  else
+    local id, mult = PAGES[page][n][1], PAGES[page][n][2]
+    if id == "_energy" then
+      S.nudge = clamp(S.nudge + d * 0.03, -0.6, 0.6)
+      flash(string.format("energy %+d", math.floor(S.nudge * 100 + 0.5)))
+    else
+      params:delta(id, d * mult)
+      flash(params:lookup_param(id).name .. " " .. params:string(id))
+    end
   end
 end
 
@@ -461,6 +552,7 @@ local function draw_hud()
   local top = T.name(S.root_pc, S.mode, true)
   if k1 then top = VIS.names[theme] .. " " .. theme .. "/" .. #VIS.names end
   text_box(1, 7, top, S.playing and 12 or 4)
+  if page ~= 1 and not k1 then text_box(1, 15, PAGES[page].name, 6) end
 
   local sec = S.section or "-"
   if S.mode_play == 2 and S.total_bars then
@@ -511,7 +603,8 @@ local function draw_hud()
 
   -- held-key hints, then transient messages
   local hint
-  if k2 and not k3 then hint = "E2 key  E3 mode"
+  if k1 then hint = "E1 theme  E2 page: " .. PAGES[page].name
+  elseif k2 and not k3 then hint = "E2 key  E3 mode"
   elseif k3 and not k2 then hint = "E2 bpm  E3 " .. params:string("play_mode") end
   if hint then
     text_box(64 - screen.text_extents(hint) / 2, 34, hint, 15)
@@ -525,8 +618,11 @@ local function draw_hud()
 end
 
 local function draw_loop()
+  local n = 0
   while true do
     clock.sleep(1 / 20)
+    n = n + 1
+    if n % 4 ~= 0 then GU.redraw() end
     if not _menu.mode then
       screen.clear()
       screen.aa(0)
@@ -579,10 +675,16 @@ local function setup_params()
     flash("seed " .. params:get("seed"))
   end)
   params:add_trigger("fresh", "> new random track")
-  params:set_action("fresh", function()
-    new_track(math.random(1, 9999), true)
-    flash("new track " .. S.seed)
-  end)
+  params:set_action("fresh", fresh)
+
+  params:add_separator("PERFORM")
+  for _, a in ipairs({{"p_play", "> play / stop", toggle_play}, {"p_drop", "> drop", drop},
+                      {"p_mutate", "> mutate", mutate}, {"p_throw", "> throw", throw},
+                      {"p_lead_throw", "> lead throw", lead_throw},
+                      {"p_build", "> build", build}, {"p_break", "> break", brk}}) do
+    params:add_trigger(a[1], a[2])
+    params:set_action(a[1], a[3])
+  end
 
   params:add_separator("KEY")
   params:add_option("root", "root", T.NOTE_NAMES, 10)
@@ -621,10 +723,10 @@ local function setup_params()
 
   params:add_separator("LEAD DELAY")
   params:add_number("lead_send", "send", 0, 100, 30)
-  params:set_action("lead_send", function(v) engine.tweak("arp_lead", v / 100) end)
+  params:set_action("lead_send", function() apply_bar() end)
   params:add_option("lead_div", "time", LEAD_DIV_NAMES, 4)
   params:add_number("lead_fb", "feedback", 0, 95, 45)
-  params:set_action("lead_fb", function(v) engine.tweak("lead_fb", v / 100) end)
+  params:set_action("lead_fb", function() apply_bar() end)
   params:add_control("lead_lpf", "tone", controlspec.new(500, 12000, "exp", 0, 4500, "Hz"))
   params:set_action("lead_lpf", function(v) engine.tweak("lead_lpf", v) end)
   params:add_control("lead_hpf", "low cut", controlspec.new(40, 2000, "exp", 0, 350, "Hz"))
@@ -722,6 +824,14 @@ function init()
 
   clock.transport.start = function() start() end
   clock.transport.stop  = function() stop() end
+
+  GU.init({
+    S = S, drop = drop, mutate = mutate, throw = throw, lead_throw = lead_throw,
+    build = build, brk = brk, play = toggle_play,
+    fresh = fresh,
+    set_energy = set_energy, toggle_mute = toggle_mute,
+    toggle_step = toggle_step, new_lane = new_lane,
+  })
 
   draw_clock = clock.run(draw_loop)
 end

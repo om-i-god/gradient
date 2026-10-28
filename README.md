@@ -46,15 +46,45 @@ new tracks (and next-track key moves) mostly land on aeolian, dorian or phrygian
 
 | input | action |
 |---|---|
-| **E1** | energy nudge (relaxes back over ~16 bars) |
-| **E2** | dub (echo send / feedback) |
-| **E3** | tone (brightness of stabs, arps, echo, wash) |
+| **E1 / E2 / E3** | the current page (below) |
 | **K2 tap** | drop: kickless, hats and bass out, for the rest of this 8 bars and the next 8. tap again to bring it back |
 | **K3 tap** | mutate now |
 | **K2 + K3** | play / stop (starts on the next bar) |
 | **hold K2** + E2 / E3 | key / mode |
 | **hold K3** + E2 / E3 | tempo / set ↔ track |
 | **hold K1** + E1 | visual theme |
+| **hold K1** + E2 | encoder page |
+
+**encoder pages**
+
+| page | E1 | E2 | E3 |
+|---|---|---|---|
+| play | energy nudge (relaxes back over ~16 bars) | dub (echo send / feedback) | tone (brightness of stabs, arps, echo, wash) |
+| lead | lead delay send | lead delay feedback | lead delay time |
+| sound | kick tune | stab cutoff | pump depth |
+| space | reverb size | echo wow | swing |
+
+the page name shows under the key when you're off the play page.
+
+**actions.** besides drop and mutate:
+- **throw:** the main dub echo's feedback and stab send jump for the rest of this bar and the next.
+- **lead throw:** the same for the lead delay (feedback near runaway, send up).
+- **build:** pushes energy up and cancels a drop.
+- **break:** pulls energy down and drops the kick, hats and bass for the rest of this 8 bars and the next.
+
+build and break relax back over about 16 bars, like the E1 nudge. every action is also a trigger in **PARAMS > PERFORM**, so you can map them to a MIDI controller (PARAMS > MAP).
+
+## grid
+
+| row | |
+|---|---|
+| 1 | phrase position (dim marks every 8 bars) |
+| 2 | energy: lit to the current level; press anywhere to pull energy there |
+| 3 | parts `K H R B C 1 2 3 4 . wash noise`: brightness = how loud; press to mute / unmute |
+| 4–7 | arp lanes 1–4: the lane's steps with its playhead. press a step to switch it on / off. col 15 mutes the lane, col 16 replaces it with a new one |
+| 8 | 1 drop · 2 mutate · 3 throw · 4 lead throw · 6 break · 7 build · 14 new track · 16 play / stop |
+
+mutes win over the conductor until you unmute; the pump keeps breathing when the kick is muted. lanes are at most 14 steps so they fit beside the lane buttons.
 
 screen: key and mode top left, section top right (with `~` when kickless), energy bar bottom left, part lights bottom right (K H R B C 1 2 3 4; K is dim when only the ghost pump is running).
 

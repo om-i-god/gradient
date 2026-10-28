@@ -237,6 +237,13 @@ function C.decide(S)
   S.want.bass   = over("bass") and not (kickless and S.roll_bass)
   S.on_kick     = over("kick") and not kickless
   S.on_pump     = over("pump")
+
+  -- hand mutes (grid) override the arc; the pump keeps breathing
+  local m = S.mute or {}
+  for k, _ in pairs(S.want) do
+    if m[k] then S.want[k] = false end
+  end
+  if m.kick then S.on_kick = false end
 end
 
 function C.mutate(S)

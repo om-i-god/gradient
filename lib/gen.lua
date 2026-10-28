@@ -83,7 +83,7 @@ end
 -- arp lanes: odd lengths so lanes phase against each other and the bar
 ------------------------------------------------------------------------
 
-local LENS  = {3, 5, 5, 6, 7, 7, 9, 10, 11, 12, 13, 16}
+local LENS  = {3, 5, 5, 6, 7, 7, 9, 10, 11, 12, 13, 14}   -- <= 14: grid cols 15-16 are lane buttons
 local DIVS  = {1, 1, 1, 2, 2, 3}       -- in 16ths (3 = dotted 8th)
 local SHAPES = {"up", "down", "updown", "random", "pendulum"}
 
@@ -147,7 +147,7 @@ function G.mutate_lane(l)
     l.seq[math.random(l.len)] = math.random(0, 8)
   elseif r < 0.75 then
     -- grow / shrink by one step: shifts the phase relationship
-    if l.len < 16 and (math.random() < 0.5 or l.len <= 3) then
+    if l.len < 14 and (math.random() < 0.5 or l.len <= 3) then
       l.len = l.len + 1
       table.insert(l.seq, math.random(1, 6))
     else

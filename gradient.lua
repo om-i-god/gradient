@@ -26,6 +26,8 @@ local L   = include("lib/listen")
 
 local ECHO_DIVS      = {0.5, 0.75, 1, 1.5}          -- in beats
 local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
+local LEAD_DIVS      = {0.25, 1/3, 0.5, 0.75, 2/3, 1, 1.5, 2}
+local LEAD_DIV_NAMES = {"1/16", "1/8T", "1/8", "3/16", "1/4T", "1/4", "3/8", "1/2"}
 local OUT_NAMES      = {"internal", "midi", "both"}
 
 ------------------------------------------------------------------------
@@ -134,6 +136,7 @@ local function apply_bar()
   local beat = clock.get_beat_sec()
 
   tweak("echo_time", ECHO_DIVS[params:get("echo_div")] * beat)
+  tweak("lead_time", LEAD_DIVS[params:get("lead_div")] * beat)
   local fb = 0.32 + dub * 0.45
   if S.throw then fb = math.min(0.93, fb + 0.28) end
   tweak("echo_fb", fb)
@@ -141,7 +144,7 @@ local function apply_bar()
   tweak("echo_hpf", 250 + (1 - dub) * 300)
   tweak("chord_echo", 0.28 + dub * 0.5 + (S.throw and 0.35 or 0))
   tweak("rim_echo",   0.15 + dub * 0.55)
-  tweak("arp_echo",   0.08 + dub * 0.25)
+  tweak("arp_echo",   params:get("lead_dub") == 2 and (0.08 + dub * 0.25) or 0)
   tweak("hat_echo",   dub * 0.12)
 
   tweak("chord_cutoff", params:get("chord_cutoff") * (0.5 + tone) * (0.55 + e * 0.6))
@@ -615,6 +618,26 @@ local function setup_params()
   params:set_action("verb_size", function(v) engine.tweak("verb_size", v) end)
   params:add_control("echo_wow", "echo wow", controlspec.new(0, 1, "lin", 0.01, 0.3))
   params:set_action("echo_wow", function(v) engine.tweak("echo_wow", v) end)
+
+  params:add_separator("LEAD DELAY")
+  params:add_number("lead_send", "send", 0, 100, 30)
+  params:set_action("lead_send", function(v) engine.tweak("arp_lead", v / 100) end)
+  params:add_option("lead_div", "time", LEAD_DIV_NAMES, 4)
+  params:add_number("lead_fb", "feedback", 0, 95, 45)
+  params:set_action("lead_fb", function(v) engine.tweak("lead_fb", v / 100) end)
+  params:add_control("lead_lpf", "tone", controlspec.new(500, 12000, "exp", 0, 4500, "Hz"))
+  params:set_action("lead_lpf", function(v) engine.tweak("lead_lpf", v) end)
+  params:add_control("lead_hpf", "low cut", controlspec.new(40, 2000, "exp", 0, 350, "Hz"))
+  params:set_action("lead_hpf", function(v) engine.tweak("lead_hpf", v) end)
+  params:add_control("lead_pp", "ping-pong", controlspec.new(0, 1, "lin", 0.01, 0.85))
+  params:set_action("lead_pp", function(v) engine.tweak("lead_pp", v) end)
+  params:add_control("lead_wow", "wow", controlspec.new(0, 1, "lin", 0.01, 0.1))
+  params:set_action("lead_wow", function(v) engine.tweak("lead_wow", v) end)
+  params:add_control("lead_sat", "saturation", controlspec.new(0, 1, "lin", 0.01, 0.2))
+  params:set_action("lead_sat", function(v) engine.tweak("lead_sat", v) end)
+  params:add_control("lead_verb", "to reverb", controlspec.new(0, 1, "lin", 0.01, 0.25))
+  params:set_action("lead_verb", function(v) engine.tweak("lead_verb", v) end)
+  params:add_option("lead_dub", "arps also to dub echo", {"off", "on"}, 2)
 
   params:add_separator("LEVELS")
   for _, p in ipairs({{"kick", 100}, {"hat", 100}, {"rim", 100}, {"bass", 100},

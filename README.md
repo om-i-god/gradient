@@ -66,6 +66,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 - **LISTEN:** follow input key, input gate (dB), hold before move (s)
 - **KEY:** root, mode, chord voicing, bass octave
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, echo wow
+- **LEAD DELAY:** a second tape echo fed only by the arps, apart from the dub echo and untouched by the dub knob and throws: send, time (1/16, 1/8T, 1/8, 3/16, 1/4T, 1/4, 3/8, 1/2; tempo-synced), feedback, tone, low cut, ping-pong, wow, saturation, to reverb, and whether the arps also feed the dub echo
 - **LEVELS:** kick, hat, rim, bass, chord, arp, wash, noise, crackle
 - **SOUND:** kick tune / decay, stab cutoff / resonance / detune, bass cutoff
 - **BASS OUT / CHORD OUT / ARP OUT:** output (internal / midi / both), midi device, channel (default bass ch 1, chords ch 2, arps ch 3)

@@ -9,6 +9,7 @@
 //        pump (ducked by the sidechain envelope: everything else, plus the
 //              echo and reverb returns, so the tails breathe with the pulse)
 //        echo / verb sends
+//        lead  (arp-only send into its own echo, set apart from the dub echo)
 //
 // NOTE: sclang binary operators have no precedence (strict left-to-right),
 // so every compound expression below is fully parenthesized.
@@ -31,8 +32,8 @@
 
 Engine_Gradient : CroneEngine {
   var voiceGroup, fxGroup;
-  var dryBus, pumpBus, echoBus, verbBus;
-  var washSynth, noiseSynth, echoSynth, verbSynth, masterSynth;
+  var dryBus, pumpBus, echoBus, verbBus, leadBus;
+  var washSynth, noiseSynth, echoSynth, leadSynth, verbSynth, masterSynth;
   var listenSynth, keyBus, inAmpBus;
   var st, fxMap;
 
@@ -47,6 +48,7 @@ Engine_Gradient : CroneEngine {
     pumpBus = Bus.audio(s, 2);
     echoBus = Bus.audio(s, 2);
     verbBus = Bus.audio(s, 2);
+    leadBus = Bus.audio(s, 2);
     keyBus   = Bus.control(s, 1);
     inAmpBus = Bus.control(s, 1);
 
@@ -61,7 +63,7 @@ Engine_Gradient : CroneEngine {
       \bass_lvl -> 1.0,  \bass_cutoff -> 260, \bass_drive -> 0.3,
       \chord_lvl -> 1.0, \chord_echo -> 0.55, \chord_verb -> 0.35,
       \chord_cutoff -> 1400, \chord_res -> 0.35, \chord_env -> 1.6, \chord_detune -> 0.18,
-      \arp_lvl -> 1.0,   \arp_echo -> 0.22, \arp_verb -> 0.40
+      \arp_lvl -> 1.0,   \arp_echo -> 0.22, \arp_verb -> 0.40, \arp_lead -> 0.3
     ];
 
     // ---------------------------------------------------------------- voices
@@ -125,8 +127,8 @@ Engine_Gradient : CroneEngine {
     }).add;
 
     SynthDef(\grad_arp, {
-      arg out, echoOut, verbOut, freq=440, amp=0.2, decay=0.25, cutoff=3000,
-          shape=0.5, pan=0, echo=0.2, verb=0.4;
+      arg out, echoOut, verbOut, leadOut, freq=440, amp=0.2, decay=0.25, cutoff=3000,
+          shape=0.5, pan=0, echo=0.2, verb=0.4, lead=0.3;
       var env  = EnvGen.ar(Env.perc(0.002, decay, 1, -4), doneAction: 2);
       var fenv = EnvGen.ar(Env.perc(0.001, decay * 0.5, 1, -4));
       var sig  = XFade2.ar(LFTri.ar(freq), Pulse.ar(freq, 0.3), (shape * 2) - 1);
@@ -136,6 +138,7 @@ Engine_Gradient : CroneEngine {
       Out.ar(out, sig);
       Out.ar(echoOut, sig * echo);
       Out.ar(verbOut, sig * verb);
+      Out.ar(leadOut, sig * lead);
     }).add;
 
     // persistent pad under the chords; glides between voicings, swells in
@@ -237,6 +240,11 @@ Engine_Gradient : CroneEngine {
     echoSynth = Synth(\grad_echo, [
       \in, echoBus.index, \out, pumpBus.index, \verbOut, verbBus.index
     ], fxGroup, \addToTail);
+    // the lead delay: a second grad_echo, fed only by the arps; it must sit
+    // before the reverb because it writes to the verb send
+    leadSynth = Synth.after(echoSynth, \grad_echo, [
+      \in, leadBus.index, \out, pumpBus.index, \verbOut, verbBus.index
+    ]);
     verbSynth = Synth(\grad_verb, [
       \in, verbBus.index, \out, pumpBus.index
     ], fxGroup, \addToTail);
@@ -256,6 +264,10 @@ Engine_Gradient : CroneEngine {
       \echo_lpf -> [echoSynth, \lpf],     \echo_hpf -> [echoSynth, \hpf],
       \echo_wow -> [echoSynth, \wow],     \echo_sat -> [echoSynth, \sat],
       \echo_pp -> [echoSynth, \pp],       \echo_verb -> [echoSynth, \verb],
+      \lead_time -> [leadSynth, \time],   \lead_fb -> [leadSynth, \fb],
+      \lead_lpf -> [leadSynth, \lpf],     \lead_hpf -> [leadSynth, \hpf],
+      \lead_wow -> [leadSynth, \wow],     \lead_sat -> [leadSynth, \sat],
+      \lead_pp -> [leadSynth, \pp],       \lead_verb -> [leadSynth, \verb],
       \verb_size -> [verbSynth, \size],   \verb_damp -> [verbSynth, \damp],
       \verb_level -> [verbSynth, \level],
       \pump_depth -> [masterSynth, \pumpDepth], \pump_rel -> [masterSynth, \pumpRel],
@@ -312,9 +324,10 @@ Engine_Gradient : CroneEngine {
     this.addCommand(\arp, "ffffff", { |msg|
       Synth(\grad_arp, [
         \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
+        \leadOut, leadBus.index,
         \freq, msg[1], \amp, msg[2] * st[\arp_lvl], \decay, msg[3],
         \cutoff, msg[4], \pan, msg[5], \shape, msg[6],
-        \echo, st[\arp_echo], \verb, st[\arp_verb]
+        \echo, st[\arp_echo], \verb, st[\arp_verb], \lead, st[\arp_lead]
       ], voiceGroup);
     });
 
@@ -352,6 +365,7 @@ Engine_Gradient : CroneEngine {
     pumpBus.free;
     echoBus.free;
     verbBus.free;
+    leadBus.free;
     keyBus.free;
     inAmpBus.free;
   }

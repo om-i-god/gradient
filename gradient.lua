@@ -610,7 +610,11 @@ local function setup_params()
   params:set_action("crackle", function(v) engine.tweak("noise_crackle", v) end)
 
   params:add_separator("SOUND")
-  params:add_number("kick_tune", "kick tune", 24, 45, 33)
+  params:add_number("kick_tune", "kick tune", 24, 45, 33, function(p)
+    local n = p:get()
+    return string.format("%s%d  %.1f Hz", T.NOTE_NAMES[n % 12 + 1], n // 12 - 1,
+      440 * 2 ^ ((n - 69) / 12))
+  end)
   params:add_number("kick_decay", "kick decay", 15, 120, 45)
   params:add_number("chord_cutoff", "stab cutoff", 300, 5000, 1400)
   params:add_control("chord_res", "stab resonance", controlspec.new(0, 1, "lin", 0.01, 0.35))

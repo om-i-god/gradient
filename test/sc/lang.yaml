@@ -1,0 +1,5 @@
+includePaths:
+  - /Users/omneo/dev/gradient/test/sc
+  - /Users/omneo/dev/gradient/lib
+excludePaths: []
+postInlineWarnings: false

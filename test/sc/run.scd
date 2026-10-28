@@ -27,7 +27,9 @@ s.waitForBoot {
   s.recHeaderFormat = "wav"; s.recSampleFormat = "float";
   s.record(out, numChannels: 2);
   0.3.wait;
-  if(~script.notNil, { ~script.load }, {
+  // any error in the test body still reaches the report and quits the
+  // server, so a failure can't leave scsynth holding the pipe open
+  try { if(~script.notNil, { ~script.load }, {
     var t = 60 / 128 / 4;
     eng.cmd(\tweak, \wash_amp, 0.3);
     eng.cmd(\tweak, \noise_amp, 0.05);
@@ -39,10 +41,10 @@ s.waitForBoot {
       if(i % 8 == 4, { eng.cmd(\rim, 0.3, 1700, -0.3) });
       if(i % 8 == 3, { eng.cmd(\chord, 220, 261, 329, 392, 0.3, 0.2) });
       if(i % 2 == 0, { eng.cmd(\bass, 55, 0.5, 0.2) });
-      eng.cmd(\arp, 440 * (1 + (i % 3)), 0.15, 0.25, 3000, 0.3, 0.5);
+      eng.cmd(\arp, 440 * (1 + (i % 3)), 0.15, 0.25, 3000, 0.3, 0.5, (i % 4) + 1);
       t.wait;
     };
-  });
+  }) } { |err| ("ERROR in test body: " ++ err.errorString).postln };
   2.wait;
   ~eng.polls.keysValuesDo { |k, f| ("poll " ++ k ++ " = " ++ f.value).postln };
   s.stopRecording;
@@ -57,5 +59,7 @@ s.waitForBoot {
       ++ "  secs " ++ (f.numFrames / f.sampleRate).round(0.1)).postln;
   });
   "SMOKE DONE".postln;
+  s.quit;
+  0.5.wait;
   0.exit;
 };

@@ -204,9 +204,9 @@ Engine_Gradient : CroneEngine {
     }).add;
 
     SynthDef(\grad_master, {
-      arg dry, pump, out, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2;
-      var d   = In.ar(dry, 2);
-      var p   = In.ar(pump, 2);
+      arg dryIn, pumpIn, out, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2;
+      var d   = In.ar(dryIn, 2);
+      var p   = In.ar(pumpIn, 2);
       var env = EnvGen.kr(Env.perc(0.005, pumpRel, 1, -3), t_pump);
       var sig = d + (p * (1 - (env * pumpDepth)));
       sig = HPF.ar(sig, 28);
@@ -247,7 +247,7 @@ Engine_Gradient : CroneEngine {
     listenSynth.run(false);
 
     masterSynth = Synth(\grad_master, [
-      \dry, dryBus.index, \pump, pumpBus.index, \out, context.out_b.index
+      \dryIn, dryBus.index, \pumpIn, pumpBus.index, \out, context.out_b.index
     ], fxGroup, \addToTail);
 
     // tweak keys that route straight to a persistent synth arg

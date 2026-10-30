@@ -22,16 +22,48 @@ function G.kick()
   return p
 end
 
--- offbeat open-ish hats are the spine; 16th ghosts fill in by density
+-- hat grooves. the offbeat spine is in all of them; what fills around it
+-- changes. `open` = offbeats that open up when the energy builds,
+-- `shuffle` = how late the off-16ths sit (fraction of a 16th)
+G.HAT_KINDS = {"straight", "rolling", "skip", "sparse"}
+local ROLL = {0.35, 0.2, 0.9, 0.28}   -- 16th contour inside a beat
 function G.hats()
-  local p = {}
+  local kind = pick({1, 1, 2, 2, 3, 4})
+  local p = {kind = kind, shuffle = pick({0, 0, 0.12, 0.2, 0.3}),
+             open = pick({{}, {15}, {15}, {7, 15}, {3, 11}})}
+  local ghosts = kind == 3 and G.euclid(pick({3, 5}), 16, math.random(0, 15))
   for i = 1, 16 do
-    if (i - 1) % 4 == 2 then
+    local b = (i - 1) % 4 + 1
+    if b == 3 then
       p[i] = 0.9
-    else
+    elseif kind == 1 then
       p[i] = (math.random() < 0.5) and (0.25 + math.random() * 0.3) or 0
+    elseif kind == 2 then
+      p[i] = ROLL[b] * (0.85 + math.random() * 0.3)
+    elseif kind == 3 then
+      p[i] = ghosts[i] and (0.3 + math.random() * 0.25) or 0
+    else
+      p[i] = (i == 16 and math.random() < 0.5) and 0.3 or 0
     end
   end
+  return p
+end
+
+-- shaker: soft 16ths leaning on the offbeats; toms: one or two dub tom
+-- ghosts a bar, left for the echo to answer. tom entries are {vel, voice}
+-- (which chord voice it's tuned to, 1 low .. 4 high)
+function G.shaker()
+  local p = {}
+  local acc = pick({{0.25, 0.5, 0.8, 0.45}, {0.3, 0.3, 0.75, 0.3}, {0.5, 0.25, 0.7, 0.25}})
+  for i = 1, 16 do p[i] = acc[(i - 1) % 4 + 1] * (0.8 + math.random() * 0.4) end
+  return p
+end
+
+local TOMS = {{8}, {14}, {7, 15}, {6, 14}, {11}, {4, 12}, {16}}
+function G.toms()
+  local p = {}
+  for i = 1, 16 do p[i] = {0, 1} end
+  for _, s in ipairs(pick(TOMS)) do p[s] = {0.5 + math.random() * 0.4, math.random(1, 3)} end
   return p
 end
 
@@ -60,7 +92,14 @@ function G.stabs()
   return p
 end
 
--- bass: {vel, semitone offset from chord root}
+-- bass lines: 16 steps of {vel, semitone offset from the chord's bass,
+-- glide in from the last note (bool)}. a track keeps one line per energy
+-- band (calm / mid / high) and plays whichever the energy is in.
+--   root    sparse offbeat roots, the odd fifth or octave
+--   octave  offbeat 8ths bouncing root <-> octave
+--   rolling syncopated 16ths with fifths and b7s
+--   slide   few, long notes that glide into each other
+G.BASS_KINDS = {"root", "octave", "rolling", "slide"}
 local BASS_RHY = {
   {3, 7, 11, 15},          -- offbeat
   {1, 4, 7, 11, 14},
@@ -68,15 +107,52 @@ local BASS_RHY = {
   {1, 7, 11},
   {3, 8, 11, 16},
 }
-function G.bass()
-  local p = {}
+local ROLL_RHY = {
+  {3, 4, 7, 8, 11, 12, 15},
+  {1, 3, 4, 6, 8, 11, 12, 14},
+  {3, 4, 6, 7, 11, 12, 14, 15},
+  {2, 3, 7, 10, 11, 15, 16},
+}
+local SLIDE_RHY = {{1, 7, 11}, {3, 11}, {1, 6, 11, 15}, {3, 9, 14}}
+local function vel() return 0.7 + math.random() * 0.3 end
+function G.bass(kind)
+  kind = kind or pick(G.BASS_KINDS)
+  local p = {kind = kind}
   for i = 1, 16 do p[i] = {0, 0} end
-  for _, s in ipairs(pick(BASS_RHY)) do
-    local r = math.random()
-    local iv = (r < 0.72) and 0 or (r < 0.84) and 7 or (r < 0.94) and 12 or 10
-    p[s] = {0.7 + math.random() * 0.3, iv}
+  if kind == "octave" then
+    local up = false
+    for s = 3, 15, 4 do
+      p[s] = {vel(), up and 12 or 0}
+      if math.random() < 0.35 then p[s + 1] = {vel() * 0.7, up and 0 or 12} end
+      up = not up
+    end
+    if math.random() < 0.5 then p[1] = {vel(), 0} end
+  elseif kind == "rolling" then
+    for _, s in ipairs(pick(ROLL_RHY)) do
+      p[s] = {vel() * (s % 4 == 3 and 1 or 0.8), pick({0, 0, 0, 0, 7, 12, 10, 0})}
+    end
+  elseif kind == "slide" then
+    local last
+    for _, s in ipairs(pick(SLIDE_RHY)) do
+      local iv = last and pick({0, 7, 10, 12, 5}) or 0
+      p[s] = {vel(), iv, last ~= nil and iv ~= last and math.random() < 0.7}
+      last = iv
+    end
+  else
+    for _, s in ipairs(pick(BASS_RHY)) do
+      local r = math.random()
+      local iv = (r < 0.72) and 0 or (r < 0.84) and 7 or (r < 0.94) and 12 or 10
+      p[s] = {vel(), iv}
+    end
   end
   return p
+end
+
+-- calm / mid / high lines for a track
+function G.bass_lines()
+  return {G.bass(pick({"root", "root", "slide"})),
+          G.bass(pick({"octave", "slide", "root"})),
+          G.bass(pick({"rolling", "octave", "rolling"}))}
 end
 
 ------------------------------------------------------------------------

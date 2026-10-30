@@ -19,6 +19,10 @@
 //   hat   amp decay tone pan
 //   rim   amp freq pan
 //   bass  hz amp dur
+//   bass_glide hz amp dur from glide   (slides in from `from` Hz over `glide` s)
+//   tom   amp hz decay pan
+//   shaker amp decay pan
+//   swell amp dur   -- reversed-noise riser into the next downbeat
 //   chord f1 f2 f3 f4 amp dur
 //   arp   hz amp decay cutoff pan shape voice   (voice 1 classic 2 bell 3 pluck 4 soft)
 //   pump  (dummy f)
@@ -62,6 +66,7 @@ Engine_Gradient : CroneEngine {
     st = IdentityDictionary[
       \kick_lvl -> 1.0,
       \hat_lvl -> 1.0,   \hat_echo -> 0.05, \hat_verb -> 0.10,
+      \tom_echo -> 0.45, \tom_verb -> 0.25, \swell_echo -> 0.3,
       \rim_lvl -> 1.0,   \rim_echo -> 0.45, \rim_verb -> 0.25,
       \bass_lvl -> 1.0,  \bass_cutoff -> 260, \bass_drive -> 0.3,
       \chord_lvl -> 1.0, \chord_echo -> 0.55, \chord_verb -> 0.35,
@@ -108,6 +113,42 @@ Engine_Gradient : CroneEngine {
       Out.ar(verbOut, sig * verb);
     }).add;
 
+    SynthDef(\grad_shaker, {
+      arg out, echoOut, verbOut, amp=0.2, decay=0.07, pan=0, echo=0, verb=0.15;
+      var env = EnvGen.ar(Env([0, 1, 0], [decay * 0.35, decay * 0.65], [2, -6]), doneAction: 2);
+      var sig = BPF.ar(WhiteNoise.ar, 7000, 0.7) + (HPF.ar(WhiteNoise.ar, 11000) * 0.4);
+      sig = Pan2.ar(sig * env * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // dub tom: a pitched sine thump with a noise skin, mostly there for the
+    // echo to answer
+    SynthDef(\grad_tom, {
+      arg out, echoOut, verbOut, amp=0.3, freq=110, decay=0.3, pan=0, echo=0.45, verb=0.25;
+      var penv = EnvGen.ar(Env([freq * 1.7, freq], [0.035], -3));
+      var env  = EnvGen.ar(Env.perc(0.002, decay, 1, -5), doneAction: 2);
+      var skin = BPF.ar(WhiteNoise.ar, freq * 4, 0.4) * EnvGen.ar(Env.perc(0.0005, 0.012)) * 0.6;
+      var sig  = ((SinOsc.ar(penv) * 1.3).tanh + skin) * env * amp;
+      sig = Pan2.ar(sig, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // riser: filtered noise swelling up (a reversed cymbal, more or less)
+    // and cut dead at the end, so the downbeat lands in the gap
+    SynthDef(\grad_swell, {
+      arg out, echoOut, verbOut, amp=0.2, dur=1.8, echo=0.3, verb=0.5;
+      var env = EnvGen.ar(Env([0.0001, 1, 0], [dur, 0.01], [5, -4]), doneAction: 2);
+      var cut = EnvGen.ar(Env([300, 9000], [dur], [4]));
+      var sig = RLPF.ar({ WhiteNoise.ar } ! 2, cut, 0.45) * env * amp;
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
     SynthDef(\grad_rim, {
       arg out, echoOut, verbOut, amp=0.3, freq=1700, pan=0, echo=0.4, verb=0.2;
       var env  = EnvGen.ar(Env.perc(0.0005, 0.05, 1, -8), doneAction: 2);
@@ -120,9 +161,12 @@ Engine_Gradient : CroneEngine {
     }).add;
 
     SynthDef(\grad_bass, {
-      arg out, freq=55, amp=0.5, dur=0.3, cutoff=260, drive=0.3;
+      arg out, freq=55, amp=0.5, dur=0.3, cutoff=260, drive=0.3, from=0, glide=0.05;
       var env = EnvGen.ar(Env.linen(0.004, dur, 0.08, 1, -3), doneAction: 2);
-      var sig = SinOsc.ar(freq) + (LFTri.ar(freq * 2) * 0.12) + (Saw.ar(freq) * 0.08);
+      // from > 0: slide in from that pitch
+      var f   = Select.kr(from > 0, [freq,
+        EnvGen.kr(Env([from.max(20), freq], [glide.max(0.001)], \exp))]);
+      var sig = SinOsc.ar(f) + (LFTri.ar(f * 2) * 0.12) + (Saw.ar(f) * 0.08);
       sig = RLPF.ar(sig, cutoff.clip(40, 4000), 0.7);
       sig = (sig * (1 + (drive * 3))).tanh * env * amp;
       Out.ar(out, sig ! 2);
@@ -325,9 +369,11 @@ Engine_Gradient : CroneEngine {
     }).add;
 
     SynthDef(\grad_master, {
-      arg dryIn, pumpIn, out, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2;
+      arg dryIn, pumpIn, out, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2,
+          pumpLpf=20000;
       var d   = In.ar(dryIn, 2);
-      var p   = In.ar(pumpIn, 2);
+      // pumpLpf: the fill's filter dip, on everything but kick and hats
+      var p   = LPF.ar(In.ar(pumpIn, 2), Lag.kr(pumpLpf, 0.12).clip(80, 20000));
       var env = EnvGen.kr(Env.perc(0.005, pumpRel, 1, -3), t_pump);
       var sig = d + (p * (1 - (env * pumpDepth)));
       sig = HPF.ar(sig, 28);
@@ -397,6 +443,7 @@ Engine_Gradient : CroneEngine {
       \verb_size -> [\verb, \size],   \verb_damp -> [\verb, \damp],
       \verb_level -> [\verb, \level],
       \pump_depth -> [\master, \pumpDepth], \pump_rel -> [\master, \pumpRel],
+      \pump_lpf -> [\master, \pumpLpf],
       \level -> [\master, \level],    \drive -> [\master, \drive],
       \wash_amp -> [\wash, \amp],     \wash_cutoff -> [\wash, \cutoff],
       \wash_echo -> [\wash, \echo],   \wash_verb -> [\wash, \verb],
@@ -435,6 +482,37 @@ Engine_Gradient : CroneEngine {
       Synth(\grad_bass, [
         \out, pumpBus.index, \freq, msg[1], \amp, msg[2] * st[\bass_lvl], \dur, msg[3],
         \cutoff, st[\bass_cutoff], \drive, st[\bass_drive]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\bass_glide, "fffff", { |msg|
+      Synth(\grad_bass, [
+        \out, pumpBus.index, \freq, msg[1], \amp, msg[2] * st[\bass_lvl], \dur, msg[3],
+        \from, msg[4], \glide, msg[5],
+        \cutoff, st[\bass_cutoff], \drive, st[\bass_drive]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\tom, "ffff", { |msg|
+      Synth(\grad_tom, [
+        \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
+        \amp, msg[1] * st[\hat_lvl], \freq, msg[2], \decay, msg[3], \pan, msg[4],
+        \echo, st[\tom_echo], \verb, st[\tom_verb]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\shaker, "fff", { |msg|
+      Synth(\grad_shaker, [
+        \out, dryBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
+        \amp, msg[1] * st[\hat_lvl], \decay, msg[2], \pan, msg[3],
+        \echo, st[\hat_echo], \verb, st[\hat_verb]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\swell, "ff", { |msg|
+      Synth(\grad_swell, [
+        \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
+        \amp, msg[1], \dur, msg[2], \echo, st[\swell_echo]
       ], voiceGroup);
     });
 

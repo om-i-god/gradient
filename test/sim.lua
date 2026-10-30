@@ -35,8 +35,10 @@ engine = setmetatable({}, {__index = function(_, k)
     end
     if k == "tweak" and not TWEAKS[(...)] then error("engine.tweak: unknown key '" .. (...) .. "'", 2) end
     calls[k] = (calls[k] or 0) + 1
+    if k == "tweak" then TWV[(...)] = select(2, ...) end
   end
 end})
+TWV = {}   -- last value sent per tweak key
 
 function include(p) return dofile(p .. ".lua") end
 
@@ -246,6 +248,43 @@ for i = 1, BARS * 16 * 3 do
   end
 end
 
+local function getS()
+  for j = 1, 60 do
+    local name, val = debug.getupvalue(key, j)
+    if not name then break end
+    if name == "S" then return val end
+  end
+end
+-- fills, drums and bass lines over the run so far
+do
+  local S = getS()
+  print(string.format("drums+fills: tom %d shaker %d swell %d glide %d; hats %s bass %s/%s/%s",
+    calls.tom or 0, calls.shaker or 0, calls.swell or 0, calls.bass_glide or 0,
+    include("lib/gen").HAT_KINDS[S.pat.hats.kind], S.pat.bass_lines[1].kind, S.pat.bass_lines[2].kind,
+    S.pat.bass_lines[3].kind))
+  -- a filter dip always opens back up on the next bar
+  local seen_dip = false
+  for i = 1, 16 * 200 do
+    tick_all()
+    if S.fill == "dip" then seen_dip = true end
+    if seen_dip and S.fill ~= "dip" and (S.step % 16) == 1 then
+      assert(TWV.pump_lpf == 20000, "filter dip stuck at " .. tostring(TWV.pump_lpf))
+      break
+    end
+  end
+  print("dip seen and released:", seen_dip)
+  -- fills off: no fills at all
+  params:set("fills", 3)
+  for i = 1, 16 * 2 do tick_all() end           -- let a fill already rolled finish
+  for i = 1, 16 * 64 do tick_all(); assert(not S.fill, "fill with fills = off") end
+  params:set("fills", 2)
+  local n = 0
+  for i = 1, 16 * 64 do tick_all(); if S.fill and S.step % 16 == 1 then n = n + 1 end end
+  assert(n > 0, "busy fills never fired")
+  params:set("fills", 1)
+  print("fills off/busy ok, busy fills in 64 bars:", n)
+end
+
 -- poke the performance controls mid-run
 enc(1, 10); enc(2, 5); enc(3, -5)
 key(2, 1); key(2, 0)  -- drop
@@ -255,10 +294,43 @@ key(2, 1); enc(2, 3); enc(3, 1); key(2, 0)   -- key change while held (no drop)
 key(3, 1); enc(2, 2); enc(3, 1); key(3, 0)   -- bpm / mode while held
 key(1, 1); enc(1, 1); key(1, 0)
 -- encoder pages
-for pg = 1, 4 do
+for pg = 1, 5 do
   key(1, 1); enc(2, 1); key(1, 0)
   enc(1, 2); enc(2, -1); enc(3, 1)
 end
+-- parts page: pick, level, mute, solo; solo silences the rest at once
+do
+  local S = getS()
+  key(1, 1); enc(2, 10); key(1, 0)            -- last page = parts
+  enc(2, -10); enc(2, 3)                        -- part 4 = bass
+  local lvl = params:get("bass_lvl")
+  enc(3, -5)
+  assert(params:get("bass_lvl") == lvl - 5, "parts E3 didn't move bass level")
+  key(2, 1); key(2, 0)
+  assert(S.mute.bass and (S.gain.bass or 0) == 0, "parts K2 didn't mute bass")
+  key(2, 1); key(2, 0)
+  assert(not S.mute.bass, "parts K2 didn't unmute bass")
+  enc(2, 1)                                     -- chords
+  key(3, 1); key(3, 0)
+  assert(S.solo.chords, "parts K3 didn't solo")
+  for _, k in ipairs({"bass", "hats", "lane1", "wash"}) do
+    assert((S.gain[k] or 0) == 0, k .. " still sounding under a chords solo")
+  end
+  assert(not S.on_kick, "kick still on under a chords solo")
+  key(2, 1); key(2, 0)                          -- mute chords too, to see both marks
+  for i = 1, 16 * 4 do tick_all() end
+  if RAST then RAST.snap(SNAP .. "/parts.pgm") end
+  key(2, 1); key(2, 0)
+  assert((S.gain.hats or 0) == 0, "hats came back under solo")
+  key(3, 1); key(3, 0)
+  assert(not next(S.solo), "parts K3 didn't unsolo")
+  key(2, 1); key(3, 1); key(3, 0); key(2, 0)   -- K2+K3 still play/stop on this page
+  assert(not S.playing, "K2+K3 on parts page didn't stop")
+  key(2, 1); key(3, 1); key(3, 0); key(2, 0)
+  key(1, 1); enc(2, -10); key(1, 0)
+  print("parts page ok")
+end
+
 -- grid: every action, a mute, a step toggle, an energy pull, a new lane
 for _, x in ipairs({1, 2, 3, 4, 6, 7, 14}) do grid_dev.key(x, 8, 1); grid_dev.key(x, 8, 0) end
 grid_dev.key(1, 3, 1); grid_dev.key(6, 3, 1); grid_dev.key(2, 4, 1)
@@ -295,9 +367,10 @@ params:set("vis_cycle", 1)
 -- bass never: no bass anywhere (engine, midi, crow) once it has faded out
 params:set("bass_style", 3)
 for i = 1, 16 * 8 do tick_all() end
-local b0 = calls.bass or 0
+local function bass_calls() return (calls.bass or 0) + (calls.bass_glide or 0) end
+local b0 = bass_calls()
 for i = 1, 16 * 64 do tick_all() end
-assert((calls.bass or 0) == b0, "bass still playing with bass = never")
+assert(bass_calls() == b0, "bass still playing with bass = never")
 print("bass never: silent for 64 bars")
 params:set("bass_style", 2)
 -- always still waits for the energy; hold it up from the grid's energy row
@@ -305,19 +378,20 @@ for bar = 1, 32 do
   grid_dev.key(16, 2, 1)
   for i = 1, 16 do tick_all() end
 end
-assert((calls.bass or 0) > b0, "bass = always never played")
+assert(bass_calls() > b0, "bass = always never played")
 -- hats never: silent once faded; always: back with the energy held up
 params:set("hat_style", 3)
 for i = 1, 16 * 8 do tick_all() end
-local h0 = calls.hat or 0
+local function hat_calls() return (calls.hat or 0) + (calls.shaker or 0) + (calls.tom or 0) end
+local h0 = hat_calls()
 for i = 1, 16 * 64 do tick_all() end
-assert((calls.hat or 0) == h0, "hats still playing with hats = never")
+assert(hat_calls() == h0, "hats still playing with hats = never")
 params:set("hat_style", 2)
 for bar = 1, 32 do
   grid_dev.key(16, 2, 1)
   for i = 1, 16 do tick_all() end
 end
-assert((calls.hat or 0) > h0, "hats = always never played")
+assert(hat_calls() > h0, "hats = always never played")
 print("hats never/always ok")
 params:set("hat_style", 1)
 local ls = {}
@@ -326,6 +400,8 @@ table.sort(ls)
 print(string.format("harmony: %d bars changed, avg %.1f semitones moved, max %d;  %s",
   changes, changes > 0 and moves / changes or 0, max_leap, table.concat(ls, " ")))
 
+assert((calls.bass_glide or 0) > 0, "no bass glides")
+assert((calls.tom or 0) > 0, "no toms")
 local keys = {}
 for k in pairs(calls) do keys[#keys+1] = k end
 table.sort(keys)

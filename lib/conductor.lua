@@ -44,7 +44,10 @@ function C.regen_material(S)
   S.pat.hats   = G.hats()
   S.pat.rim    = G.rim()
   S.pat.stabs  = G.stabs()
-  S.pat.bass   = G.bass()
+  S.pat.shaker = G.shaker()
+  S.pat.toms   = G.toms()
+  S.pat.bass_lines = G.bass_lines()
+  S.pat.bass   = S.pat.bass_lines[1]
   for i = 1, 4 do S.lanes[i] = G.lane(i) end
   S.pair       = G.pick(T.PAIRS)
   S.harm_bars  = G.pick({2, 4, 4, 8})
@@ -130,6 +133,50 @@ local function base_energy(S)
 end
 
 ------------------------------------------------------------------------
+-- fills: the bar before a phrase edge, sometimes an 8-bar edge
+--   swell  noise riser into the downbeat      dip   filter dip on the pads
+--   toms   a tom run down the chord           gap   drums out for the last beat(s)
+--   throw  an extra stab, echo thrown         open  open hats + rim ghosts
+------------------------------------------------------------------------
+
+local function pick_fill(S, big)
+  local e = S.energy
+  local t = {"open", "throw", "toms"}
+  if big then
+    t = {"swell", "dip", "toms", "gap", "throw", "open"}
+    -- heading up: risers and gaps; settling: dips and throws
+    if (S.trend or 0) > 0.002 or S.nudge > 0.05 then
+      t[#t + 1] = "swell"; t[#t + 1] = "gap"; t[#t + 1] = "swell"
+    elseif e < 0.45 then
+      t[#t + 1] = "dip"; t[#t + 1] = "throw"
+    end
+  end
+  local f = G.pick(t)
+  -- toms and gaps need something to play / something to stop
+  -- toms belong to the hats (style, mute)
+  if f == "toms" and (e < 0.25 or S.hat_style == 3 or S.mute.hats) then f = "throw" end
+  if f == "gap" and not S.on_kick and (S.gain.hats or 0) == 0 then f = "dip" end
+  return f
+end
+
+local function roll_fill(S, bar_in_phrase, bar_in_block)
+  S.fill = nil
+  local amt = S.fills or 1               -- 1 normal, 2 busy, 3 off
+  -- no fills while something's soloed: you're listening to that part
+  if amt == 3 or S.track_bar == 0 or next(S.solo or {}) then return end
+  local busy = amt == 2
+  if bar_in_phrase == plen(S) then
+    if math.random() < (busy and 1 or 0.85) then S.fill = pick_fill(S, true) end
+  elseif bar_in_block == BLOCK then
+    if math.random() < (busy and 0.6 or 0.3) then S.fill = pick_fill(S, false) end
+  elseif busy and bar_in_block == 4 and math.random() < 0.25 then
+    S.fill = pick_fill(S, false)
+  end
+  S.fill_from = (S.fill == "gap" and math.random() < 0.4) and 9 or 13
+  if S.fill == "throw" then S.throw = true end
+end
+
+------------------------------------------------------------------------
 -- per-bar tick
 ------------------------------------------------------------------------
 
@@ -143,8 +190,11 @@ function C.bar(S)
   S.nudge = S.nudge * 0.9
   if math.abs(S.nudge) < 0.01 then S.nudge = 0 end
 
+  local prev_e = S.energy
   S.energy = clamp(base_energy(S) + S.nudge, 0, 1)
   local e = S.energy
+  -- which way the energy is heading, smoothed (fills + open hats read it)
+  S.trend = (S.trend or 0) * 0.85 + (e - prev_e) * 0.15
 
   if S.drop_bars > 0 then S.drop_bars = S.drop_bars - 1 end
 
@@ -168,6 +218,14 @@ function C.bar(S)
   if bar_in_phrase == 1 and S.track_bar > 0 then H.phrase(S) end
   H.bar(S, bar_in_block)
 
+  -- bass: the line for this energy band; every 4th bar can turn around,
+  -- walking into the next chord if there is one
+  local lines = S.pat.bass_lines
+  if lines then S.pat.bass = lines[e < 0.5 and 1 or (e < 0.75 and 2 or 3)] end
+  S.bass_turn = bar_in_block % 4 == 0 and math.random() < 0.55
+  S.bass_appr = G.pick({-1, -1, 1, -2})
+  S.bass_next = S.bass_turn and H.next_bass(S, bar_in_phrase == plen(S), bar_in_block == BLOCK) or nil
+
   -- fades: each faded part moves 1/4 of the way per bar -> ~4-bar fades
   for _, k in ipairs(C.FADED) do
     local target = S.want[k] and 1 or 0
@@ -178,6 +236,7 @@ function C.bar(S)
 
   -- dub throw on the last bar of some phrases
   S.throw = (bar_in_block == BLOCK) and (math.random() < 0.2 + S.dub * 0.35)
+  roll_fill(S, bar_in_phrase, bar_in_block)
 
   S.track_bar = S.track_bar + 1
 
@@ -211,6 +270,8 @@ function C.phrase(S)
   S.roll_kickless = math.random() < 0.25   -- Utility-style stretch
   S.roll_hats     = math.random() < 0.6
   S.roll_bass     = math.random() < 0.6
+  S.roll_shaker   = math.random() < 0.5
+  S.roll_toms     = math.random() < 0.45
   C.decide(S)
   if not S.freeze then C.mutate(S) end
 end
@@ -256,6 +317,14 @@ function C.decide(S)
     if m[k] then S.want[k] = false end
   end
   if m.kick then S.on_kick = false end
+
+  -- solo: only the soloed parts (beds included) play
+  if next(S.solo or {}) then
+    for k, _ in pairs(S.want) do
+      if not S.solo[k] then S.want[k] = false end
+    end
+    if not S.solo.kick then S.on_kick = false end
+  end
 end
 
 function C.mutate(S)
@@ -266,8 +335,14 @@ function C.mutate(S)
     if math.random() < 0.35 * m then G.mutate_lane(S.lanes[i]) end
   end
   if math.random() < 0.20 * m then S.pat.hats  = G.hats() end
+  if math.random() < 0.10 * m then S.pat.shaker = G.shaker() end
+  if math.random() < 0.15 * m then S.pat.toms  = G.toms() end
   if math.random() < 0.15 * m then S.pat.stabs = G.stabs() end
-  if math.random() < 0.12 * m then S.pat.bass  = G.bass() end
+  if math.random() < 0.12 * m and S.pat.bass_lines then
+    local j = math.random(3)
+    S.pat.bass_lines[j] = G.bass(G.pick(({{"root", "slide"}, {"octave", "slide"},
+                                           {"rolling", "octave"}})[j]))
+  end
   if math.random() < 0.10 * m then S.pat.rim   = G.rim() end
   if math.random() < 0.06 * m then
     local j = math.random(4)

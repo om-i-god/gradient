@@ -41,6 +41,11 @@ s.waitForBoot {
       if(i % 8 == 4, { eng.cmd(\rim, 0.3, 1700, -0.3) });
       if(i % 8 == 3, { eng.cmd(\chord, 220, 261, 329, 392, 0.3, 0.2) });
       if(i % 2 == 0, { eng.cmd(\bass, 55, 0.5, 0.2) });
+      if(i % 4 == 1, { eng.cmd(\bass_glide, 82, 0.5, 0.2, 55, 0.06) });
+      if(i % 8 == 6, { eng.cmd(\tom, 0.4, 110, 0.3, 0.2) });
+      eng.cmd(\shaker, 0.2, 0.07, -0.2);
+      if(i == 16, { eng.cmd(\swell, 0.2, 1.5); eng.cmd(\tweak, \pump_lpf, 600) });
+      if(i == 28, { eng.cmd(\tweak, \pump_lpf, 20000) });
       eng.cmd(\arp, 440 * (1 + (i % 3)), 0.15, 0.25, 3000, 0.3, 0.5, (i % 4) + 1);
       t.wait;
     };

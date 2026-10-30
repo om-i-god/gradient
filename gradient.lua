@@ -48,7 +48,7 @@ local S = {
   energy = 0, nudge = 0, dub = 0.5,
   section = "-", progress = 0, total_bars = nil,
   root_pc = 9, mode = 1, voicing = 1, harmony = 3,
-  mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 1, bass_style = 1, hat_style = 1,
+  mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 1, bass_style = 1, hat_style = 1, fills = 1,
   pat = {}, lanes = {}, gain = {}, want = {}, jitter = {},
   chord = {57, 60, 64, 67}, chord_degree = 1, pair = {1, 1}, harm_bars = 4,
   bass_pc = 0, bass_free = true, chord_root_pc = 0, chord_label = "i",
@@ -56,7 +56,7 @@ local S = {
   drop_bars = 0, phrase_len = 32, force_mutate = false, freeze = false, throw = false,
   cycle_bars = 96,
   follow = false, pending_root = nil,
-  mute = {}, hand_throw = 0, lead_throw = 0,
+  mute = {}, solo = {}, hand_throw = 0, lead_throw = 0,
 }
 
 local main_clock, draw_clock, listen_clock
@@ -172,6 +172,7 @@ local function apply_bar()
   tweak("rim_echo",   0.15 + dub * 0.55)
   tweak("arp_echo",   params:get("lead_dub") == 2 and (0.08 + dub * 0.25) or 0)
   tweak("hat_echo",   dub * 0.12)
+  tweak("tom_echo",   0.25 + dub * 0.45)
 
   tweak("chord_cutoff", params:get("chord_cutoff") * (0.5 + tone) * (0.55 + e * 0.6))
   tweak("bass_cutoff",  params:get("bass_cutoff") * (0.8 + e * 0.4))
@@ -217,6 +218,10 @@ local function play_step()
       flash(label)
     end
     apply_bar()
+    if S.dipped then
+      S.dipped = false
+      tweak("pump_lpf", 20000)
+    end
     O.bar(S, (S.track_bar - 1) % S.phrase_len == 0)
     VIS.event("bar", S)
     if (S.track_bar - 1) % 8 == 0 then cycle_theme(2) end
@@ -231,6 +236,17 @@ local function play_step()
 
   local e    = S.energy
   local beat = clock.get_beat_sec()
+  local fill = S.fill
+  -- gap fill: drums and bass sit out the end of the bar, the pump goes on
+  local gap  = fill == "gap" and s >= (S.fill_from or 13)
+
+  -- fills that run under everything else
+  if fill == "swell" and s == 5 then
+    engine.swell(0.14 + e * 0.1, beat * 3)
+  elseif fill == "dip" then
+    S.dipped = true
+    tweak("pump_lpf", 20000 * 0.025 ^ (math.min(s, 12) / 12))
+  end
 
   -- kick + ghost pump
   if S.pat.kick[s] > 0 then
@@ -239,31 +255,69 @@ local function play_step()
       O.pump(beat)
       VIS.event("pump")
     end
-    if S.on_kick then
+    if S.on_kick and not gap then
       engine.kick(0.9, params:get("kick_tune"), params:get("kick_decay") / 100, 0.15 + e * 0.2)
       O.kick()
       VIS.event("kick")
     end
   end
 
-  -- hats: offbeat spine always (when on); 16th ghosts thin with energy
-  local hg, hv = S.gain.hats or 0, S.pat.hats[s]
-  if hg > 0 and hv > 0 then
-    local spine = (s - 1) % 4 == 2
-    if spine or math.random() < 0.2 + e * 0.7 then
-      engine.hat(hv * hg * 0.3, spine and (0.05 + e * 0.09) or 0.03,
-        6500 + e * 4500, (math.random() - 0.5) * 0.5)
+  -- off-16ths of a shuffled groove land a little late
+  local hp = S.pat.hats
+  local function late(f)
+    if (s - 1) % 2 == 1 and (hp.shuffle or 0) > 0 then
+      clock.run(function() clock.sleep(beat * 0.25 * hp.shuffle); f() end)
+    else
+      f()
     end
+  end
+
+  -- hats: the groove's offbeat spine always (when on); ghosts thin with
+  -- energy; marked offbeats open up while the energy builds
+  local hg, hv = S.gain.hats or 0, hp[s]
+  if hg > 0 and hv > 0 and not gap then
+    local spine = (s - 1) % 4 == 2
+    local open = fill == "open" and (s == 11 or s == 15)
+    if spine and not open and ((S.trend or 0) > 0.002 or S.nudge > 0.05 or e > 0.75) then
+      for _, o in ipairs(hp.open or {}) do open = open or o == s end
+    end
+    local pan = (math.random() - 0.5) * 0.5
+    if open then
+      engine.hat(hv * hg * 0.3, 0.22 + e * 0.15, 5500 + e * 2500, pan)
+    elseif spine or math.random() < 0.2 + e * 0.7 then
+      late(function()
+        engine.hat(hv * hg * 0.3, spine and (0.05 + e * 0.09) or 0.03, 6500 + e * 4500, pan)
+      end)
+    end
+  end
+
+  -- shaker and tom ghosts ride with the hats, on some phrases, when it's up
+  if hg > 0 and not gap then
+    if S.roll_shaker and e > 0.55 and math.random() < 0.5 + e * 0.5 then
+      local v = S.pat.shaker[s] * hg * 0.16
+      late(function() engine.shaker(v, 0.05 + (1 - e) * 0.04, (math.random() - 0.5) * 0.6) end)
+    end
+    local t = S.pat.toms[s]
+    if S.roll_toms and e > 0.35 and t[1] > 0 and fill ~= "toms" then
+      engine.tom(t[1] * hg * 0.3, mtof(S.chord[t[2]] - 24), 0.25 + (1 - e) * 0.2,
+        (t[2] - 2) * 0.3)
+    end
+  end
+  -- tom fill: a run down the chord on the last beat
+  if fill == "toms" and s >= 13 then
+    engine.tom(0.3 + (s - 13) * 0.05, mtof(S.chord[17 - s] - 24), 0.3, (14.5 - s) * 0.25)
   end
 
   -- rim
   local rg, rv = S.gain.rim or 0, S.pat.rim[s]
+  if fill == "open" and (s == 14 or s == 16) and rv == 0 then rv = 0.4 end
   if rg > 0 and rv > 0 then
     engine.rim(rv * rg * 0.25, 1500 + math.random(0, 500), (math.random() - 0.5) * 0.8)
   end
 
   -- chord stabs
   local cg, cv = S.gain.chords or 0, S.pat.stabs[s]
+  if fill == "throw" and s == 15 and cv == 0 then cv = 0.8 end
   if cg > 0 and cv > 0 then
     local amp = cv * cg * 0.32
     local dur = 0.1 + (1 - e) * 0.25
@@ -279,19 +333,44 @@ local function play_step()
     O.note("chord", 48 + S.root_pc + S.chord_root_pc, dur)
   end
 
-  -- bass: chord root, its 3rd / 5th, or a tonic pedal (lib/harmony)
+  -- bass: chord root, its 3rd / 5th, or a tonic pedal (lib/harmony), on
+  -- the line for this energy (lib/gen). every 4th bar the last beat can
+  -- walk into the next chord, or turn around if the chord holds
   local bg, bv = S.gain.bass or 0, S.pat.bass[s]
-  if bg > 0 and bv[1] > 0 then
+  if bg > 0 and not gap then
     local base = 12 * (params:get("bass_oct") + 1) + S.root_pc
-    local iv = bv[2]
-    if not S.bass_free and (iv == 7 or iv == 10) then iv = 12 end
+    local vel, iv, slide = bv[1], bv[2], bv[3]
+    -- over a pedal only roots and octaves
+    if not S.bass_free and iv % 12 ~= 0 then iv = iv >= 6 and 12 or 0 end
     local note = base + S.bass_pc + iv
-    local dur  = beat * 0.25 * (1.2 + (1 - e) * 1.2)
-    local internal, ext = routes("bass")
-    if internal then engine.bass(mtof(note), bv[1] * bg * 0.55, dur) end
-    if ext then midi_note("bass", note, bv[1] * bg, dur) end
-    O.note("bass", note, dur)
-    VIS.event("bass", note)
+    if S.bass_turn then
+      if S.bass_next and S.bass_next ~= S.bass_pc then
+        if s == 16 then
+          local n = S.bass_next + (S.bass_appr or -1)
+          note, vel, slide = base + (n < 0 and n + 12 or n), 0.75, false
+        end
+      elseif s == 15 then
+        note, vel, slide = base + S.bass_pc + 12, 0.7, false
+      elseif s == 16 then
+        note, vel, slide = base + S.bass_pc + (S.bass_free and 7 or 0), 0.6, true
+      end
+    end
+    if vel > 0 then
+      local dur = beat * 0.25 * (1.2 + (1 - e) * 1.2)
+      if S.pat.bass.kind == "slide" then dur = dur * 2.5 end
+      local internal, ext = routes("bass")
+      if internal then
+        if slide and S.last_bass and S.last_bass ~= note then
+          engine.bass_glide(mtof(note), vel * bg * 0.55, dur, mtof(S.last_bass), beat * 0.15)
+        else
+          engine.bass(mtof(note), vel * bg * 0.55, dur)
+        end
+      end
+      if ext then midi_note("bass", note, vel * bg, dur) end
+      O.note("bass", note, dur)
+      VIS.event("bass", note)
+      S.last_bass = note
+    end
   end
 
   -- phasing arp lanes: always tick so phase relationships persist in silence
@@ -472,10 +551,24 @@ local function set_energy(target)
   C.decide(S)
 end
 
+-- hand mutes and solos land at once (the arc's own moves still fade)
+local function snap()
+  C.decide(S)
+  for _, k in ipairs(C.FADED) do
+    if not S.want[k] then S.gain[k] = 0 elseif (S.gain[k] or 0) == 0 then S.gain[k] = 1 end
+  end
+end
+
 local function toggle_mute(k)
   S.mute[k] = not S.mute[k] or nil
-  C.decide(S)
+  snap()
   flash((S.mute[k] and "mute " or "unmute ") .. k)
+end
+
+local function toggle_solo(k)
+  S.solo[k] = not S.solo[k] or nil
+  snap()
+  flash((S.solo[k] and "solo " or "unsolo ") .. k)
 end
 
 local function fresh()
@@ -495,13 +588,25 @@ local function new_lane(i)
   flash("new lane " .. i)
 end
 
--- encoder pages: {param id, step multiplier}; "_energy" is the nudge
+local PART_KEYS  = {"kick", "hats", "rim", "bass", "chords", "lane1", "lane2", "lane3", "lane4"}
+local PART_GLYPH = {"K", "H", "R", "B", "C", "1", "2", "3", "4"}
+-- the level param each part's E3 turns on the parts page
+local PART_LVL = {kick = "kick_lvl", hats = "hat_lvl", rim = "rim_lvl", bass = "bass_lvl",
+                  chords = "chord_lvl", lane1 = "arp_lvl", lane2 = "arp_lvl",
+                  lane3 = "arp_lvl", lane4 = "arp_lvl"}
+local part_sel = 1
+
+-- encoder pages: {param id, step multiplier}; "_energy" is the nudge.
+-- the parts page is its own thing: E2 picks a part, E3 its level,
+-- K2 mutes it, K3 solos it
 local PAGES = {
   {name = "play",  {"_energy", 1}, {"dub", 1},          {"tone", 1}},
   {name = "lead",  {"lead_send", 1}, {"lead_fb", 1},    {"lead_div", 1}},
   {name = "sound", {"kick_tune", 1}, {"chord_cutoff", 25}, {"pump_depth", 1}},
   {name = "space", {"verb_size", 1}, {"echo_wow", 1},   {"swing", 1}},
+  {name = "parts", {"_energy", 1}},
 }
+local function on_parts() return PAGES[page].name == "parts" end
 
 function key(n, z)
   if n == 1 then
@@ -515,7 +620,9 @@ function key(n, z)
       end
     else
       k2 = false
-      if not k2_used then drop() end
+      if not k2_used then
+        if on_parts() then toggle_mute(PART_KEYS[part_sel]) else drop() end
+      end
     end
   elseif n == 3 then
     if z == 1 then
@@ -526,7 +633,9 @@ function key(n, z)
       end
     else
       k3 = false
-      if not k3_used then mutate() end
+      if not k3_used then
+        if on_parts() then toggle_solo(PART_KEYS[part_sel]) else mutate() end
+      end
     end
   end
 end
@@ -553,6 +662,16 @@ function enc(n, d)
       params:delta("play_mode", d)
       flash(params:string("play_mode"))
     end
+  elseif on_parts() and n > 1 then
+    local k = PART_KEYS[part_sel]
+    if n == 2 then
+      part_sel = clamp(part_sel + d, 1, #PART_KEYS)
+      k = PART_KEYS[part_sel]
+      flash(k .. (S.solo[k] and " solo" or (S.mute[k] and " muted" or "")))
+    else
+      params:delta(PART_LVL[k], d)
+      flash(params:lookup_param(PART_LVL[k]).name .. " " .. params:string(PART_LVL[k]))
+    end
   else
     local id, mult = PAGES[page][n][1], PAGES[page][n][2]
     if id == "_energy" then
@@ -568,9 +687,6 @@ end
 ------------------------------------------------------------------------
 -- screen
 ------------------------------------------------------------------------
-
-local PART_KEYS  = {"kick", "hats", "rim", "bass", "chords", "lane1", "lane2", "lane3", "lane4"}
-local PART_GLYPH = {"K", "H", "R", "B", "C", "1", "2", "3", "4"}
 
 local function text_box(x, y, s, lvl, right)
   local w = screen.text_extents(s)
@@ -647,11 +763,41 @@ local function draw_hud()
     end
   end
 
+  -- parts page: every part, the picked one underlined; muted dim,
+  -- soloed boxed. drawn whatever the overlay setting
+  if on_parts() then
+    screen.level(0)
+    screen.rect(0, 38, 128, 17)
+    screen.fill()
+    local any_solo = next(S.solo) ~= nil
+    for i, k in ipairs(PART_KEYS) do
+      local x = 6 + (i - 1) * 13
+      local on = k == "kick" and (S.on_kick and 1 or 0) or (S.gain[k] or 0)
+      local lvl = S.mute[k] and 2 or (any_solo and not S.solo[k]) and 3 or math.floor(5 + on * 10)
+      screen.level(lvl)
+      screen.move(x, 48)
+      screen.text(PART_GLYPH[i])
+      if S.solo[k] then
+        screen.level(12)
+        screen.rect(x - 2.5, 40.5, 9, 10)
+        screen.stroke()
+      end
+      if i == part_sel then
+        screen.level(15)
+        screen.rect(x - 1, 52, 6, 1)
+        screen.fill()
+      end
+    end
+  end
+
   -- held-key hints, then transient messages
   local hint
   if k1 then hint = "E1 theme  E2 page: " .. PAGES[page].name
   elseif k2 and not k3 then hint = "E2 key  E3 mode"
   elseif k3 and not k2 then hint = "E2 bpm  E3 " .. params:string("play_mode") end
+  if not hint and on_parts() and not (msg and util.time() - msg_t < 1.5) then
+    text_box(64 - screen.text_extents("K2 mute  K3 solo") / 2, 34, "K2 mute  K3 solo", 4)
+  end
   if hint then
     text_box(64 - screen.text_extents(hint) / 2, 34, hint, 15)
   elseif msg and util.time() - msg_t < 1.5 then
@@ -716,6 +862,8 @@ local function setup_params()
   params:set_action("bass_style", function(v) S.bass_style = v end)
   params:add_option("hat_style", "hats", {"auto", "always", "never"}, 1)
   params:set_action("hat_style", function(v) S.hat_style = v end)
+  params:add_option("fills", "fills", {"normal", "busy", "off"}, 1)
+  params:set_action("fills", function(v) S.fills = v end)
   params:add_option("freeze", "freeze material", {"off", "on"}, 1)
   params:set_action("freeze", function(v) S.freeze = v == 2 end)
   params:add_number("seed", "seed", 1, 9999, 1)

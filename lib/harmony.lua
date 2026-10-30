@@ -297,6 +297,26 @@ function H.retarget(S, instant)
   set_bass(S)
 end
 
+-- where the bass is going next bar (semitones over the key root), or nil
+-- if the chord holds. `phrase_end` / `block_end`: next bar starts a phrase
+-- (the loop restarts) / an 8-bar block (a queued progression lands)
+function H.next_bass(S, phrase_end, block_end)
+  local h = S.h
+  if not h or not h.prog then return nil end
+  local st
+  if h.next and block_end then
+    st = h.next[1]
+  elseif phrase_end and S.harmony ~= 1 and h.i ~= 1 then
+    st = h.prog[1]
+  elseif h.held >= need(S) then
+    st = h.prog[(h.i % #h.prog) + 1]
+  end
+  if not st then return nil end
+  if h.pedal then return 0 end
+  local m = st.mode or S.mode
+  return (T.degree(0, m, st.deg) + (st.shift or 0)) % 12
+end
+
 -- phrase start: re-roll the pedal and, outside simple, restart the loop
 function H.phrase(S)
   local h = S.h

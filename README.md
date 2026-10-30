@@ -18,13 +18,28 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 - **set (endless):** energy swells and drains over 8–16 phrases (about 4–16 min, depending on phrase length) with a random walk on top. the troughs are kickless "drift" stretches. at some troughs the key moves by a 4th or 5th.
 - **track:** a fixed arc over the track length (default 8 min): intro → build → peak → breakdown (kickless) → return → outro. at the end it either stops or rolls straight into a new track with a new seed and a neighbouring key.
 
-**kickless.** the pump (ghost sidechain on every quarter) keeps running when the kick drops out, so pads, arps, echo and reverb tails still breathe on the beat. that happens in breakdowns, when you press drop, and sometimes on its own at mid energy (kick: auto). set **kick → never** for a fully kickless set. **bass** works the same way: auto sits it out in some kickless stretches, always keeps it in whenever the energy is high enough, never turns it off everywhere (engine, midi and crow), for when you bring your own low end. **hats** too: auto sometimes clears them for a drop, always keeps them in once the energy is there, never mutes them for good.
+**kickless.** the pump (ghost sidechain on every quarter) keeps running when the kick drops out, so pads, arps, echo and reverb tails still breathe on the beat. that happens in breakdowns, when you press drop, and sometimes on its own at mid energy (kick: auto). set **kick → never** for a fully kickless set. **bass** works the same way: auto sits it out in some kickless stretches, always keeps it in whenever the energy is high enough, never turns it off everywhere (engine, midi and crow), for when you bring your own low end. **hats** too: auto sometimes clears them for a drop, always keeps them in once the energy is there, never mutes them for good. the hats setting (and the hats mute) covers the shaker and toms as well.
+
+**drums.** each track picks a hat groove: **straight** (offbeats plus loose 16th ghosts), **rolling** (every 16th, leaning on the offbeat), **skip** (offbeats plus a euclidean ghost pattern) or **sparse** (just the offbeats). some grooves shuffle, sitting the off-16ths a little late, on top of the global swing. marked offbeats open up while the energy is building or near the top. on some phrases a **shaker** joins at higher energy, and **dub toms** tuned to the chord drop one or two hits a bar into the echo.
+
+**fills.** the bar before a phrase edge almost always gets a fill, and some 8-bar edges get a small one:
+
+- **swell:** a noise riser over the last three beats, cut dead at the downbeat
+- **dip:** a filter dip on everything but the kick and hats, opening again on the downbeat
+- **toms:** a tom run down the chord on the last beat
+- **gap:** kick, hats and bass drop out for the last beat (sometimes the last half bar) while the pump keeps going
+- **throw:** an extra stab on the last offbeat with the echo thrown
+- **open:** open hats and rim ghosts
+
+risers and gaps come up more when the energy is heading up; dips and throws when it's settling. **fills** (GRADIENT) sets normal / busy / off. there are no fills while something's soloed.
+
+**bass lines.** each track keeps three bass lines and plays the one that fits the energy: a calm one (sparse roots, or a slide line of long notes gliding into each other), a middle one (octave bounces or slides) and a high one (rolling syncopated 16ths with fifths and b7s, or octaves). every 4th bar the last beat can move: if the chord is about to change, the bass walks in from a semitone or tone away; if not, it turns around (octave up, then a slide back down). over a pedal it sticks to roots and octaves.
 
 **lead voices.** each arp lane plays one of four voices: **classic** (triangle/pulse), **bell** (two-operator FM), **pluck** (karplus string) or **soft** (sine). on **auto** (the default) the seed picks, mostly classic. set a lane's voice in SOUND to fix it.
 
 **phasing arps.** four lanes, each with its own odd length (3, 5, 7, 9, 11, 13 steps...), its own rate (16th, 8th, dotted 8th), register, pan, decay and slow filter LFO. lanes keep stepping even while silent, so when one fades back in it lands in a new phase against the others. lanes are written as chord-tone indices, so when the harmony moves, the arps move with it.
 
-**mutation.** on every phrase, each lane might rotate, swap a note, or grow or shrink by a step, which shifts its phase. stab, hat, bass and rim patterns regenerate occasionally. very rarely a lane is replaced or a new progression arrives (it lands on the next 8-bar edge).
+**mutation.** on every phrase, each lane might rotate, swap a note, or grow or shrink by a step, which shifts its phase. stab, hat, shaker, tom, bass and rim patterns regenerate occasionally (the bass one band at a time). very rarely a lane is replaced or a new progression arrives (it lands on the next 8-bar edge).
 
 **harmony.** one key and one mode, three ways to move through it (PARAMS > KEY > harmony):
 
@@ -78,8 +93,11 @@ new tracks (and next-track key moves) mostly land on aeolian, dorian or phrygian
 | lead | lead delay send | lead delay feedback | lead delay time |
 | sound | kick tune | stab cutoff | pump depth |
 | space | reverb size | echo wow | swing |
+| parts | energy nudge | pick a part | that part's level |
 
 the page name shows under the key when you're off the play page.
+
+**parts page.** a strip of every part (`K H R B C 1 2 3 4`) with the picked one underlined. here **K2** mutes / unmutes the picked part and **K3** solos it (soloed parts are boxed, and more than one can be soloed; a solo silences everything else, beds included). K2 + K3 still plays / stops. the lanes share the arp level. mutes and solos, from here or the grid, land at once instead of fading.
 
 **actions.** besides drop and mutate:
 - **throw:** the main dub echo's feedback and stab send jump for the rest of this bar and the next.
@@ -107,7 +125,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 
 ## params
 
-- **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), bass (auto / always / never), hats (auto / always / never), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
+- **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), bass (auto / always / never), hats (auto / always / never), fills (normal / busy / off), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
 - **LISTEN:** follow input key, input gate (dB), hold before move (s)
 - **KEY:** root, mode, harmony (simple / rich / drifting), chord voicing (m7, m9, quartal, add9, sus2, sus4, m11, cluster, 6/9, or auto by energy), bass octave
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, reverb type (hall / plate / spring), echo wow

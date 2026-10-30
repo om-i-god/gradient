@@ -306,6 +306,20 @@ for bar = 1, 32 do
   for i = 1, 16 do tick_all() end
 end
 assert((calls.bass or 0) > b0, "bass = always never played")
+-- hats never: silent once faded; always: back with the energy held up
+params:set("hat_style", 3)
+for i = 1, 16 * 8 do tick_all() end
+local h0 = calls.hat or 0
+for i = 1, 16 * 64 do tick_all() end
+assert((calls.hat or 0) == h0, "hats still playing with hats = never")
+params:set("hat_style", 2)
+for bar = 1, 32 do
+  grid_dev.key(16, 2, 1)
+  for i = 1, 16 do tick_all() end
+end
+assert((calls.hat or 0) > h0, "hats = always never played")
+print("hats never/always ok")
+params:set("hat_style", 1)
 local ls = {}
 for k, n in pairs(labels) do ls[#ls + 1] = k .. "=" .. n end
 table.sort(ls)

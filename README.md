@@ -18,7 +18,7 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 - **set (endless):** energy swells and drains over 8–16 phrases (about 4–16 min, depending on phrase length) with a random walk on top. the troughs are kickless "drift" stretches. at some troughs the key moves by a 4th or 5th.
 - **track:** a fixed arc over the track length (default 8 min): intro → build → peak → breakdown (kickless) → return → outro. at the end it either stops or rolls straight into a new track with a new seed and a neighbouring key.
 
-**kickless.** the pump (ghost sidechain on every quarter) keeps running when the kick drops out, so pads, arps, echo and reverb tails still breathe on the beat. that happens in breakdowns, when you press drop, and sometimes on its own at mid energy (kick: auto). set **kick → never** for a fully kickless set. **bass** works the same way: auto sits it out in some kickless stretches, always keeps it in whenever the energy is high enough, never turns it off everywhere (engine, midi and crow), for when you bring your own low end.
+**kickless.** the pump (ghost sidechain on every quarter) keeps running when the kick drops out, so pads, arps, echo and reverb tails still breathe on the beat. that happens in breakdowns, when you press drop, and sometimes on its own at mid energy (kick: auto). set **kick → never** for a fully kickless set. **bass** works the same way: auto sits it out in some kickless stretches, always keeps it in whenever the energy is high enough, never turns it off everywhere (engine, midi and crow), for when you bring your own low end. **hats** too: auto sometimes clears them for a drop, always keeps them in once the energy is there, never mutes them for good.
 
 **lead voices.** each arp lane plays one of four voices: **classic** (triangle/pulse), **bell** (two-operator FM), **pluck** (karplus string) or **soft** (sine). on **auto** (the default) the seed picks, mostly classic. set a lane's voice in SOUND to fix it.
 
@@ -107,7 +107,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 
 ## params
 
-- **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), bass (auto / always / never), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
+- **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), bass (auto / always / never), hats (auto / always / never), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
 - **LISTEN:** follow input key, input gate (dB), hold before move (s)
 - **KEY:** root, mode, harmony (simple / rich / drifting), chord voicing (m7, m9, quartal, add9, sus2, sus4, m11, cluster, 6/9, or auto by energy), bass octave
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, reverb type (hall / plate / spring), echo wow

@@ -241,7 +241,9 @@ function C.decide(S)
   S.want.lane4  = over("lane4")
   S.want.chords = over("chords")
   S.want.rim    = over("rim")
-  S.want.hats   = over("hats") and not (drop and S.roll_hats)
+  -- hats: auto sometimes clears them for a drop; always stays in; never
+  S.want.hats   = over("hats") and S.hat_style ~= 3
+                  and (S.hat_style == 2 or not (drop and S.roll_hats))
   -- bass: auto sits out some kickless stretches; always stays in; never
   S.want.bass   = over("bass") and S.bass_style ~= 3
                   and (S.bass_style == 2 or not (kickless and S.roll_bass))

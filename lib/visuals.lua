@@ -105,7 +105,7 @@ local function follow(v, to, tau, dt) return v + (to - v) * (1 - math.exp(-dt / 
 -- own dice so the visuals never disturb (or depend on) math.random
 local function rnd()
   rseed = (rseed * 1103515245 + 12345) & 0x7fffffff
-  return rseed / 0x80000000
+  return rseed / 2147483648.0
 end
 
 -- a fixed hash 0..1 of an integer (and a salt): for shapes that must not move
@@ -115,7 +115,7 @@ local function hash(i, s)
   i = math.floor(i) // 1 | 0
   local h = ((i * 374761393 + (s or 0) * 668265263) & 0x7fffffff)
   h = ((h ~ (h >> 13)) * 1274126177) & 0x7fffffff
-  return (h ~ (h >> 16)) / 0x80000000
+  return (h ~ (h >> 16)) / 2147483648.0
 end
 
 -- note -> screen row: the stabs' usual range (Bb2..E5) fills the height

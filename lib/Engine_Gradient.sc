@@ -388,8 +388,8 @@ Engine_Gradient : CroneEngine {
       toVis = { arg a, lo, hi; a.max(0.00001).ampdb.linlin(lo, hi, 0, 1) };
       mono = (sig[0] + sig[1]) * 0.5;
       Out.kr(ampOut, [
-        toVis.value(Amplitude.kr(mono, 0.02, 0.3), -54, -6),
-        toVis.value(Amplitude.kr(LPF.ar(mono, 160), 0.02, 0.3), -56, -6),
+        toVis.value(Amplitude.kr(mono, 0.02, 0.3), -54, -3),
+        toVis.value(Amplitude.kr(LPF.ar(mono, 160), 0.02, 0.3), -56, -3),
         toVis.value(Amplitude.kr(LPF.ar(HPF.ar(mono, 160), 3000), 0.02, 0.3), -60, -14),
         toVis.value(Amplitude.kr(HPF.ar(mono, 3000), 0.02, 0.25), -70, -24)
       ]);

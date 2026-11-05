@@ -31,6 +31,14 @@ return function(K)
   end
   local TIP = {}
   for i, t in ipairs(TW) do TIP[i] = tips(t) end
+  -- each wire's four spans, built once: in from the left (only its last
+  -- stretch is on screen), tower to tower, and out to the right
+  local SPANS = {}
+  for i = 1, 4 do
+    local p0 = {TIP[1][i][1] - 70, TIP[1][i][2] - 22, 0}
+    SPANS[i] = {{p0, TIP[1][i], 1.6}, {TIP[1][i], TIP[2][i], 1}, {TIP[2][i], TIP[3][i], 0.45},
+      {TIP[3][i], {TIP[3][i][1] + 40, TIP[3][i][2] + 3, 0}, 0.25}}
+  end
 
   local ring = {0, 0, 0, 0}              -- each insulator's stab, eased
   local sag, sway = 0, 0                 -- the wires' extra sag (bass), eased
@@ -148,9 +156,7 @@ return function(K)
     for i = 1, 4 do
       local wl = 1.6 + K.lane_kick[i] * 1.5 + e * 0.5 + hi * 1.3
       -- in from the left, toward us (only its last stretch is on screen)
-      local p0 = {TIP[1][i][1] - 70, TIP[1][i][2] - 22, 0}
-      local spans = {{p0, TIP[1][i], 1.6}, {TIP[1][i], TIP[2][i], 1}, {TIP[2][i], TIP[3][i], 0.45},
-        {TIP[3][i], {TIP[3][i][1] + 40, TIP[3][i][2] + 3, 0}, 0.25}}
+      local spans = SPANS[i]
       for si, sp in ipairs(spans) do
         local p, q, near = sp[1], sp[2], sp[3]
         local sg = wire_sag(i, near)

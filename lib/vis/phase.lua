@@ -53,12 +53,18 @@ return function(K)
     local b = 0.5 + 0.5 * math.cos(TAU * (gph(G[1], x, y) - gph(G[2], x, y)))
     return b
   end
+  local lift_y, lift_v                    -- the voices' part depends on y only
   local function lift(x, y)
     local dx, dy = x - LX, y - LY
-    local v = 0
-    for i = 1, 4 do
-      local d = (y - vy[i]) / 4
-      v = v + vk[i] * math.exp(-d * d)
+    local v
+    if y == lift_y then v = lift_v
+    else
+      v = 0
+      for i = 1, 4 do
+        local d = (y - vy[i]) / 4
+        v = v + vk[i] * math.exp(-d * d)
+      end
+      lift_y, lift_v = y, v
     end
     return (0.55 + 0.7 / (1 + (dx * dx + dy * dy) / 3000)) * (0.6 + 0.5 * lamp), v
   end
@@ -145,6 +151,7 @@ return function(K)
   end
 
   function M.draw(S)
+    lift_y = nil                          -- the voices moved since last frame
     local T, DT, kl = K.T, K.DT, K.kickless
     -- the turn between the fences: the phase gap of lanes 1 and 2
     local d = (cycle(K.lane(S, 1)) - cycle(K.lane(S, 2))) % 1

@@ -51,7 +51,7 @@ return function(K)
       if v < 0.08 then break end
       echoes[#echoes + 1] = {at = K.NOW + t * k, v = v}
     end
-    while #echoes > 24 do table.remove(echoes, 1) end
+    while #echoes > 24 do table.remove(echoes) end   -- drop this stab's furthest, not the due ones
   end
 
   function M.kick() beat_seen = 2 end

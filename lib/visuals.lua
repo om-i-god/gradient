@@ -352,7 +352,9 @@ local function physics(S)
   local live = heard >= 0 and (NOW - heard) < 1.5
   for k = 1, 4 do
     local to = raw[k]
-    if not live then
+    if live then
+      if k == HI then to = math.max(to, env.hat * 0.35) end   -- hats tick the highs
+    else
       local lv = clamp(num(VIS.audio_level, 0), 0, 1)
       if k == AMP then to = lv
       elseif k == LO then to = math.max(env.kick * 0.9, env.bass * 0.7, lv * 0.5)
@@ -369,7 +371,8 @@ local function physics(S)
   dub = follow(dub, clamp(num(S.dub, 0.5), 0, 1), 1, DT)
   local throwing = S.throw == true or num(S.hand_throw, 0) > 0 or num(S.lead_throw, 0) > 0
   throw = follow(throw, throwing and 1 or 0, throwing and 0.15 or 1.2, DT)
-  kickless = follow(kickless, (S.kickless or S.on_kick == false) and 1 or 0, 1.5, DT)
+  local kl = (S.kickless == true or S.on_kick == false) and S.playing ~= false
+  kickless = follow(kickless, kl and 1 or 0, 1.5, DT)
   -- the beat: the 16th clock, smoothed between steps
   beat_sec = 60 / S_tempo(S)
   local step = num(S.step, 0)
@@ -537,7 +540,8 @@ function VIS.draw(i, S, dt)
     xf = xf - DT / 0.25
     if xf <= 0 then
       local old = THEMES[cur]
-      if old.clear then old.clear() end
+      local reset = old.clear or old.init
+      if reset then reset() end
       for k = #grains, 1, -1 do grains[k] = nil end
       xf, cur = 0, i
     end

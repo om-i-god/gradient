@@ -12,6 +12,7 @@ return function(K)
   local ys = {40, 30, 22, 14}             -- each band's eased row
   local vk = {0, 0, 0, 0}                 -- each voice's stab, eased in
   local bs = 0                            -- the bass glow, eased in
+  local wobs, gains = {}, {}              -- per-frame scratch
 
   function M.init() ys = {40, 30, 22, 14}; vk = {0, 0, 0, 0}; bs = 0 end
 
@@ -30,14 +31,17 @@ return function(K)
     local hi = A[K.HI]
     -- the bands, in 4-px columns of 2-px cells, equal neighbours merged
     local lv = {}
+    for col = 0, 31 do wobs[col] = math.sin(T * 0.6 + col * 0.22) * loose end
+    for i = 1, 4 do gains[i] = (2.2 + i * 0.5) * (1 + vk[i] * 0.45 + (i >= 3 and hi * 0.5 or 0)) end
     for row = 0, FLOOR // 2 - 1 do
       local y = row * 2
       for col = 0, 31 do
-        local wob = math.sin(T * 0.6 + col * 0.22) * loose
+        local wob = wobs[col]
         local v = 0
         for i = 1, 4 do
           local d = (y - ys[i] - wob * (i % 2 == 0 and 1 or -1)) / width
-          v = v + math.exp(-d * d) * (2.2 + i * 0.5) * (1 + vk[i] * 0.45 + (i >= 3 and hi * 0.5 or 0))
+          -- past 3 widths a band adds nothing visible
+          if d > -3 and d < 3 then v = v + math.exp(-d * d) * gains[i] end
         end
         v = v * breathe * (0.75 + 0.35 * A[K.MID])
         -- soft knee: close voices merge into a glow, not a flat slab; the

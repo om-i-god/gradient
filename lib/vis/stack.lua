@@ -1,9 +1,216 @@
--- stack: placeholder until the theme is built
+-- stack: a sound system in a yard at night. two stacks flank the amp rack:
+-- bass bins at the bottom, a mid box, a pair of horns and the tweeters on
+-- top. the bin cones push out with the kick and out_lo (in kickless
+-- stretches only the ghost pump moves them, softer); each chord voice lights
+-- its mid cone on a stab and the echo plays it back through the same cones,
+-- fainter by the feedback, with a ring of air off the box; the horns
+-- shimmer with out_hi, each arp lane has its tweeter. the crowd stands in
+-- front against the floor glow the kick throws, nodding on the beat; haze
+-- drifts through, thicker with dub
 return function(K)
   local M = {}
-  function M.draw(S)
-    K.put(2 + K.duck * 4, 0, 32, 128, 1)
-    K.haze(0, 0, 128, 64, 0.2, 1, K.T * 3)
+  local put, line, A, clamp, follow = K.put, K.line, K.A, K.clamp, K.follow
+  local TAU = K.TAU
+
+  local FLOOR = 52
+  local STACKS = {4, 84}                  -- left edge of each 40-px stack
+  local NHEAD = 13
+
+  local ex, vb = 0, 0                     -- bin excursion, bass glow (eased)
+  local vk = {0, 0, 0, 0}                 -- mid cones, eased
+  local lk = {0, 0, 0, 0}                 -- tweeters, eased
+  local glow = 0                          -- the floor glow, eased
+  local echoes = {}                       -- stabs, replayed at the echo time
+
+  -- unit polygons for the cone rings
+  local POLY = {}
+  for _, n in ipairs({8, 12}) do
+    local p = {}
+    for k = 0, n do p[k] = {math.cos(k / n * TAU), math.sin(k / n * TAU)} end
+    POLY[n] = p
   end
+
+  local function ring(l, cx, cy, r, n)
+    local p = POLY[n]
+    for k = 1, n do
+      line(l, cx + p[k - 1][1] * r, cy + p[k - 1][2] * r, cx + p[k][1] * r, cy + p[k][2] * r)
+    end
+  end
+
+  -- a filled disc from row strokes (small radii), so it layers with the
+  -- rings by level (strokes land after all the fills)
+  local function disc(l, cx, cy, r)
+    local ri = math.floor(r)
+    for dy = -ri, ri do
+      local hw = math.floor(math.sqrt(math.max(0, r * r - dy * dy)) + 0.5)
+      if hw > 0 then line(l, cx - hw, cy + dy, cx + hw - 1, cy + dy) end
+    end
+  end
+
+  -- a cabinet's outline, from fills
+  local function box(l, x, y, w, h)
+    put(l, x, y, w, 1)
+    put(l, x, y + h - 1, w, 1)
+    put(l, x, y + 1, 1, h - 2)
+    put(l, x + w - 1, y + 1, 1, h - 2)
+  end
+
+  -- the crowd: fixed heads, each with its own place, size and nod
+  local heads = {}
+  for h = 1, NHEAD do
+    heads[h] = {x = (h - 0.5) / NHEAD * 128 + (K.hash(h, 3) - 0.5) * 6,
+      y = 55 + K.hash(h, 5) * 2.5, w = 2.5 + K.hash(h, 7) * 1.5,
+      ph = K.hash(h, 9)}
+  end
+  local prof = {}
+
+  function M.init()
+    ex, vb, glow = 0, 0, 0
+    vk, lk, echoes = {0, 0, 0, 0}, {0, 0, 0, 0}, {}
+  end
+  M.clear = M.init
+
+  function M.stab()
+    echoes[#echoes + 1] = {t0 = K.T, s = 0.35 + 0.65 * K.dub * (0.4 + 0.6 * K.throw) + 0.3 * K.throw}
+    if #echoes > 6 then table.remove(echoes, 1) end
+  end
+
+  function M.draw(S)
+    local T, DT, env = K.T, K.DT, K.env
+    local kl = K.kickless
+    -- the bins: a fast push out, a slower return
+    local push = math.max(env.kick * (1 - kl), clamp((A[K.LO] - 0.2) / 0.75, 0, 1), K.duck * (0.2 + 0.3 * kl))
+    ex = follow(ex, push, push > ex and 0.02 or 0.1, DT)
+    vb = follow(vb, math.max(env.bass, A[K.LO] * 0.5) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.05, DT)
+    -- the echo: each stab comes back every echo_t, fainter by the feedback
+    local et, fb = K.echo_t, K.echo_fb
+    local echo_v, air = 0, {}
+    for i = #echoes, 1, -1 do
+      local e = echoes[i]
+      local age = T - e.t0
+      local k = math.floor(age / et)
+      local v = (k == 0 and 1 or e.s * fb ^ k)
+      if v < 0.05 or k > 8 then table.remove(echoes, i)
+      else
+        local u = (age - k * et) / et
+        echo_v = math.max(echo_v, v * math.exp(-u * 3))
+        if k >= 1 and u < 0.7 and (not air[1] or air[1].v < v) then air[1] = {u = u / 0.7, v = v} end
+      end
+    end
+    for i = 1, 4 do
+      vk[i] = follow(vk[i], math.max(K.voice_kick[i], echo_v * (0.4 + 0.15 * i)), 0.04, DT)
+      lk[i] = follow(lk[i], K.lane_kick[i], 0.03, DT)
+    end
+    local hi = A[K.HI]
+    local mid = A[K.MID]
+
+    -- the floor glow the kick throws, and the crowd against it
+    local g = math.max(env.kick * (1 - kl) * 0.9, K.duck * 0.35, A[K.LO] * 0.55, 0.15)
+    glow = follow(glow, g, g > glow and 0.04 or 0.18, DT)
+    for c = 0, 64 do prof[c] = 64 end
+    for _, h in ipairs(heads) do
+      local nod = (1 - kl) * K.energy * 1.6 * K.duck
+      local sway = kl * 1.5 * math.sin(T * 0.9 + h.ph * TAU)
+      local top = h.y + nod * (0.6 + 0.6 * h.ph)
+      local cx = h.x + sway
+      for c = math.max(0, math.floor((cx - h.w - 4) / 2)), math.min(64, math.floor((cx + h.w + 4) / 2)) do
+        local d = math.abs(c * 2 + 1 - cx)
+        local y = d <= h.w and top + (d / h.w) ^ 2 * 1.5
+          or d <= h.w + 4 and top + 5 + (d - h.w) * 0.5 or 64
+        if y < prof[c] then prof[c] = y end
+      end
+    end
+    K.gradient(FLOOR + 1, 63, function(y)
+      local d = y - FLOOR - 1
+      return (1.3 + glow * 4) * math.exp(-d / (3.5 + glow * 3))
+    end, prof)
+    put(2 + glow * 3 + K.bar_pulse, 0, FLOOR, 128, 1)
+
+    -- the amp rack between the stacks: four meters, the desk lamp on top
+    local rx = 54
+    box(2, rx, 30, 20, 22)
+    local meters = {A[K.AMP], A[K.LO], mid, hi}
+    for m = 1, 4 do
+      local y = 33 + (m - 1) * 4
+      local w = math.floor(clamp(meters[m], 0, 1) * 14 + 0.5)
+      if w > 0 then put(3 + meters[m] * 3, rx + 3, y, w, 2) end
+    end
+    put(3 + K.bar_pulse * 5, rx + 9, 28, 2, 2)
+    -- moths round the lamp
+    for m = 1, 3 do
+      local a = T * (1.7 + m * 0.45) + m * 2.1
+      local r = 3 + m * 1.6 + math.sin(T * 0.7 + m) * 1.5
+      put(1.6 + (m == 1 and 0.6 or 0), rx + 10 + math.cos(a) * r, 28 + math.sin(a * 1.3) * r * 0.55 - 1, 1, 1)
+    end
+    -- a string of bulbs slung between the stacks, each glowing on its own
+    for k = 0, 16 do
+      local u = k / 16
+      local x = 44 + u * 40
+      local y = 9 + 7 * (1 - (2 * u - 1) ^ 2)
+      if k > 0 then line(1, x - 2.5, 9 + 7 * (1 - (2 * u - 1 - 0.125) ^ 2), x, y) end
+      if k % 2 == 1 then
+        put(2.2 + 1.6 * math.sin(T * (2.2 + 1.5 * K.hash(k, 11)) + k * 2.3) + K.bar_pulse * 1.5 + K.energy, x, y + 1, 1, 1)
+      end
+    end
+
+    for _, x0 in ipairs(STACKS) do
+      -- bass bins: two scoops, one cone each
+      for b = 0, 1 do
+        local bx = x0 + b * 20
+        box(1.6, bx, 32, 20, 20)
+        local cx, cy = bx + 10, 42
+        ring(2 + ex * 1.5, cx, cy, 8, 12)
+        ring(2.5 + ex * 5 + vb * 2, cx, cy, 3.9 + ex * 3, 12)
+        disc(3.5 + ex * 7 + vb * 2, cx, cy, 1.2 + ex * 2.2)
+      end
+      -- the mid box: a cone per chord voice
+      box(1.6, x0, 21, 40, 11)
+      for i = 1, 4 do
+        local cx, cy = x0 + 5 + (i - 1) * 10, 26
+        local v = vk[i]
+        ring(2 + v * 5 + mid, cx, cy, 3.6 + v * 0.6, 8)
+        disc(2 + v * 9, cx, cy, 1.2 + v * 0.6)
+      end
+      -- the echo's air: an arc off the mid box into the yard
+      for _, a in ipairs(air) do
+        local r = 21 + a.u * 10
+        local side = x0 < 64 and 1 or -1
+        local l = 1 + 3 * a.v * (1 - a.u)
+        local px, py
+        for k = -3, 3 do
+          local th = k * 0.2
+          local x, y = x0 + 20 + side * r * math.cos(th), 26 + r * math.sin(th)
+          if px then line(l, px, py, x, y) end
+          px, py = x, y
+        end
+      end
+      -- horns: a mouth, a flare, a throat; out_hi shimmers in them
+      for j = 0, 1 do
+        local hx = x0 + 2 + j * 19
+        box(2, hx, 11, 17, 9)
+        box(1.5 + hi * 2, hx + 4, 13, 9, 5)
+        line(1, hx + 1, 12, hx + 3, 13); line(1, hx + 15, 12, hx + 13, 13)
+        line(1, hx + 1, 18, hx + 3, 17); line(1, hx + 15, 18, hx + 13, 17)
+        local sh = 0.5 + 0.5 * math.sin(T * 9 + j * 2.1 + x0)
+        put(3 + hi * (5 + 3 * sh) + env.hat * 2, hx + 7, 15, 3, 1)
+        if hi > 0.1 then K.dashes(hi * 3 * sh, 12 + (j + math.floor(T * 7)) % 2 * 6, 2, 5, T * 30 + j * 3, hx + 2, hx + 15) end
+      end
+      -- tweeters on top: one per arp lane
+      box(1.6, x0 + 2, 6, 36, 5)
+      for i = 1, 4 do put(2.5 + lk[i] * 9, x0 + 5 + (i - 1) * 9, 8, 2, 1) end
+    end
+
+    -- haze drifting through, thicker with dub and kickless stretches
+    local hz = 0.1 + 0.12 * K.dub * (0.5 + K.throw) + 0.18 * kl
+    K.haze(0, 44, 128, FLOOR, hz, 1, T * (6 + 8 * K.throw))
+    K.haze(44, 18, 84, 44, hz * 1.3, 1, T * (6 + 8 * K.throw) + 40)
+    -- the highs as a fine fizz off the horns
+    K.grain(function(u, v)
+      local x0 = STACKS[1 + math.floor(u * 2) % 2]
+      return x0 + 2 + v * 36, 5 + K.rnd() * 3
+    end, hi * 40, 7)
+  end
+
+  M.init()
   return M
 end

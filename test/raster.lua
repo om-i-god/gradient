@@ -22,7 +22,9 @@ end
 
 local function seg(x0, y0, x1, y1, l)
   local n = math.max(math.abs(x1 - x0), math.abs(y1 - y0), 1)
-  for i = 0, n do plot(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, l) end
+  -- a stroke centred on a pixel (x + 0.5, as the kit sends) lights that
+  -- pixel, as cairo does with aa off: so floor, not round
+  for i = 0, n do plot(x0 + (x1 - x0) * i / n - 0.5, y0 + (y1 - y0) * i / n - 0.5, l) end
 end
 
 local S = {}

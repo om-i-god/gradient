@@ -160,6 +160,7 @@ local function apply_bar()
   local fb = 0.32 + dub * 0.45
   if throwing then fb = math.min(0.93, fb + 0.28) end
   tweak("echo_fb", fb)
+  S.echo_time, S.echo_fb = ECHO_DIVS[params:get("echo_div")] * beat, fb   -- for the visuals
 
   -- lead delay: only the hand throw touches it
   local lthrow = S.lead_throw > 0
@@ -284,9 +285,11 @@ local function play_step()
     local pan = (math.random() - 0.5) * 0.5
     if open then
       engine.hat(hv * hg * 0.3, 0.22 + e * 0.15, 5500 + e * 2500, pan)
+      VIS.event("hat")
     elseif spine or math.random() < 0.2 + e * 0.7 then
       late(function()
         engine.hat(hv * hg * 0.3, spine and (0.05 + e * 0.09) or 0.03, 6500 + e * 4500, pan)
+        VIS.event("hat")
       end)
     end
   end
@@ -1044,6 +1047,16 @@ function init()
   local in_amp_poll = poll.set("in_amp", function(v) in_amp = v end)
   in_amp_poll.time = 1 / 4
   in_amp_poll:start()
+  -- the engine's ears for the visuals: its own output, overall and in three
+  -- bands (an engine from before these polls, not yet restarted, has none:
+  -- the visuals then run on the music and the amp poll alone)
+  for _, name in ipairs({"out_amp", "out_lo", "out_mid", "out_hi"}) do
+    local ok, p = pcall(poll.set, name, function(v) VIS.audio(name, v) end)
+    if ok and p then
+      p.time = 1 / 20
+      p:start()
+    end
+  end
   listen_clock = clock.run(listen_loop)
 
   clock.transport.start = function() start() end

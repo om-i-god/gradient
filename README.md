@@ -139,15 +139,23 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 - **CROW:** four outputs, each assignable: bass pitch, bass gate, lead pitch, lead gate, chord root, energy (0–5V, slewed), kick trig, pump env (5V ar per beat, follows the ghost sidechain even when the kick is out). pitches are 1V/oct with C3 at 0V, gates 8V. **lead lane** picks which arp lane is the lead; **pitch slew** adds glide; **pitch octave** shifts every pitch output. crow follows the parts as they play, whatever their internal / midi routing
 - **CC OUT:** a midi device and channel (default 16) for the arc as CCs: energy, dub, tone (0 = off), and a phrase pulse (127 on the first bar of each phrase, then 0). sent once a bar, only when the value changes
 - **VISUALS:**
-  - **theme:** eight, each drawn from what the music is doing rather than just how loud it is:
-    - **gradient:** the chord as soft bands of light at each voice's pitch, the bass glowing underneath; calm sections widen and soften the bands
-    - **voices:** the four chord voices scrolling right to left, so voice leading and morphs are drawn as they happen; stabs flash as stems
-    - **lanes:** each arp lane as a ring of its steps, playheads circling at their own lengths; a line joins the four heads and tightens when the lanes line up
-    - **phase:** two line gratings turned by the phase gap between lanes 1 and 2, so the moiré swims as they drift apart
-    - **echo:** every stab leaves copies drifting off at the echo time, fading by the feedback, wobbling like tape; throws leave long trails
-    - **fall:** arp notes fall from their pitch; stabs fall slower and heavier; the bass glows on the floor
-    - **pump:** horizon lines squeezed by the ghost sidechain each beat; in kickless stretches they turn to water
-    - **arc:** the energy of the last 60 bars. columns go hollow where the kick was out, dots mark chord changes, a line marks pedal bass; in track mode a progress line runs along the bottom
+  - **theme:** sixteen places at night, each drawn from what the music is doing: the kick and the ghost pump, the chord voices, the arp lanes, the bass, the dub echo and its throws, and what the engine hears of its own output (overall level, lows, mids, highs). the pulse shows in every theme, kickless stretches loosen the picture, and nothing strobes:
+    - **gradient:** the chord as soft bands of light weaving across the sky at each voice's place in the chord, over a floor where the bass glows and the bands come back as broken reflections. the pump breathes the bands, stabs swell their voice, the highs are grain in the light, and kickless stretches loosen them into haze
+    - **voices:** the four chord voices as ribbons scrolling right to left over a dim staff, written at a playhead on the right, so voice leading and morphs are drawn as they happen. stabs swell the ribbons with a stem and echo back as fainter repeats at the echo time; a heavy bass ribbon runs along the bottom
+    - **lanes:** a machine of four nested step rings round a hub, one per arp lane, each with a tick per step. playheads ease round with fading trails, notes light the tick they land on, and a line joins the heads: tight when the lanes line up, a zigzag as they phase apart. the hub pumps and lights on the kick
+    - **phase:** two chain-link fences under a floodlight on waste ground. the gap between arp lanes 1 and 2 turns the far fence against the near one, so the moiré bands of light swim as the lanes drift apart; the pump squeezes the far fence on every beat
+    - **echo:** a railway viaduct seen side-on over a canal. each stab lights the first arch with four bars of light, one per chord voice; every echo time a copy appears in the next arch, fainter by the feedback and swaying on a tape wobble. arp notes are train windows along the deck, the bass glows on the water
+    - **fall:** under a brick arch looking through to a lit street. arp notes drip from the arch at their pitch and splash on the wet floor, stabs fall heavier, the bass glows in a puddle the kick ripples, and the pump flickers the street lamp. throws repeat the splashes at the echo time
+    - **pump:** a city across a flat drawn in ruled lines. each pump squeezes every line toward the horizon, near field first, and they spring back; the horizon flares with the kick. in kickless stretches the ground turns to water and the skyline reflects in it
+    - **arc:** the last ~60 bars as a ridge at night: each bar's land as high as its energy, hollow where the kick was out, a small light where the chord changed, a road under pedal bass. the live edge is a lamp pulsing with the kick; the moon crosses the sky with the track, and track mode adds a progress line
+    - **motorway:** a night motorway from a bridge, under sodium lamps and a gantry of signs. the four arp lanes are four traffic lanes: each note sends a car, higher notes faster. the bass sends a lorry up the slow lane, stabs light the signs, the pump is the sodium flicker, throws streak the lights into long exposures
+    - **tape:** a reel-to-reel tape echo face on. each stab is written at the record head and the tape carries it to the playback heads in exactly one echo time, where it is written again, fainter by the feedback, until it dies. the VU needle kicks with the pump; throws spin the reels and smear the marks
+    - **stack:** a sound system in a yard: bass bins, mids, horns, an amp rack and a crowd in silhouette. the bin cones push out on the kick and the lows (softer on the ghost pump when kickless), each chord voice lights its mid cone, each arp lane its own tweeter, the horns shimmer with the highs
+    - **blocks:** tower blocks at night over a viaduct. each arp lane has a tower, and a note lights a window on the floor of its pitch, coming back fainter at the echo time. the chord decides which floors are lived in, the pump dims the stairwells, a train crosses on each bar
+    - **beams:** moving heads and a mirror ball throwing slow beams through haze onto a dancefloor. each head is an arp lane leaning toward its notes, stabs swell every beam, the kick lands as a low floor glow, throws leave ghost beams at the echo time. every change is eased
+    - **window:** the city out of focus through a rain-streaked window. the chord is four bokeh discs at its voices' pitches, the bass a big streetlamp blur, arp notes far windows switching on. drops slide down in jolts on each pump and merge; throws ghost the discs in the double glazing
+    - **pylons:** lattice pylons striding across a foggy field. four wires, one per arp lane: each note runs along its wire as a spark. the wires sag with the bass and dip on every pump, stabs make the insulators glow, the highs crackle round them
+    - **dubplate:** a record turning under a lamp, once a bar, so the label's mark passes the stylus on every downbeat while the tonearm creeps in over the phrase. stabs leave glints on the groove at each voice's radius, arp notes drop dust that crackles past the stylus, the strobe dots flicker with the pump
   - **theme cycle:** off / every 8 bars / every phrase / each track; jumps to a random other theme
   - **overlay:** full / minimal (key and chord only) / off (just the picture, plus held-key hints and messages)
   - **speed, brightness**
@@ -160,11 +168,11 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 
 ## install
 
-copy the folder to `~/dust/code/gradient/` on norns. it ships its own engine (`lib/Engine_Gradient.sc`), so after the first install run **SYSTEM > RESTART** before loading the script.
+copy the folder to `~/dust/code/gradient/` on norns. it ships its own engine (`lib/Engine_Gradient.sc`), so after the first install, and after any update that changes the engine (the visuals' output polls did), run **SYSTEM > RESTART** before loading the script.
 
 ## dev
 
-`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars. `HARM=1|2|3` picks the harmony mode; `SNAP=dir` renders each visual theme to a PGM in `dir` through a small rasterizer (`test/raster.lua`); `HTRACE=1` prints every bar's chord, notes and bass, and the run ends with how far the voices moved per change. it fails on doubled or out-of-range stab notes.
+`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars. `HARM=1|2|3` picks the harmony mode; `SNAP=dir` renders each visual theme to a PGM in `dir` through a small rasterizer (`test/raster.lua`); `lua test/unit.lua test/unit_visuals.lua` runs every theme headless through silence / mid / peak / kickless and checks lit area, frame-to-frame change, the pulse, audio reactivity, bad input and the draw-call budget (`VISONLY=a,b` for some themes, `VISREPORT=1` for the numbers); `lua test/contact.lua out.pgm` draws a contact sheet of every theme; `HTRACE=1` prints every bar's chord, notes and bass, and the run ends with how far the voices moved per change. it fails on doubled or out-of-range stab notes.
 
 ## license
 

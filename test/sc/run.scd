@@ -46,6 +46,7 @@ s.waitForBoot {
       eng.cmd(\shaker, 0.2, 0.07, -0.2);
       if(i == 16, { eng.cmd(\swell, 0.2, 1.5); eng.cmd(\tweak, \pump_lpf, 600) });
       if(i == 28, { eng.cmd(\tweak, \pump_lpf, 20000) });
+      if(i == 24, { eng.polls.keysValuesDo { |k, f| ("poll mid " ++ k ++ " = " ++ f.value.round(0.001)).postln } });
       eng.cmd(\arp, 440 * (1 + (i % 3)), 0.15, 0.25, 3000, 0.3, 0.5, (i % 4) + 1);
       t.wait;
     };

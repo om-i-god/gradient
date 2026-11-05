@@ -35,12 +35,14 @@
 // polls
 //   in_key  KeyTrack estimate of the audio input: 0-11 C..B major, 12-23 C..B minor
 //   in_amp  input amplitude
+//   out_amp, out_lo, out_mid, out_hi  what gradient itself sounds like, for
+//           the visuals: 0..1 on a dB scale, overall and in three bands
 
 Engine_Gradient : CroneEngine {
   var voiceGroup, fxGroup;
   var dryBus, pumpBus, echoBus, verbBus, leadBus;
   var washSynth, noiseSynth, echoSynth, leadSynth, verbSynth, masterSynth;
-  var listenSynth, keyBus, inAmpBus;
+  var listenSynth, keyBus, inAmpBus, outBus;
   var bedBuf;
   var st, fx, fxMap, fxVals;
 
@@ -58,6 +60,7 @@ Engine_Gradient : CroneEngine {
     leadBus = Bus.audio(s, 2);
     keyBus   = Bus.control(s, 1);
     inAmpBus = Bus.control(s, 1);
+    outBus   = Bus.control(s, 4);     // out_amp, out_lo, out_mid, out_hi
 
     voiceGroup = Group.head(context.xg);
     fxGroup    = Group.after(voiceGroup);
@@ -369,9 +372,10 @@ Engine_Gradient : CroneEngine {
     }).add;
 
     SynthDef(\grad_master, {
-      arg dryIn, pumpIn, out, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2,
+      arg dryIn, pumpIn, out, ampOut, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2,
           pumpLpf=20000;
       var d   = In.ar(dryIn, 2);
+      var mono, toVis;
       // pumpLpf: the fill's filter dip, on everything but kick and hats
       var p   = LPF.ar(In.ar(pumpIn, 2), Lag.kr(pumpLpf, 0.12).clip(80, 20000));
       var env = EnvGen.kr(Env.perc(0.005, pumpRel, 1, -3), t_pump);
@@ -379,6 +383,16 @@ Engine_Gradient : CroneEngine {
       sig = HPF.ar(sig, 28);
       sig = (sig * (1 + (drive * 2))).tanh / (1 + (drive * 0.6));
       sig = Limiter.ar(sig * level, 0.95, 0.01);
+      // the visuals' ears: three cheap filters and four Amplitude followers
+      // on the mono sum, mapped from dB to 0..1
+      toVis = { arg a, lo, hi; a.max(0.00001).ampdb.linlin(lo, hi, 0, 1) };
+      mono = (sig[0] + sig[1]) * 0.5;
+      Out.kr(ampOut, [
+        toVis.value(Amplitude.kr(mono, 0.02, 0.3), -54, -3),
+        toVis.value(Amplitude.kr(LPF.ar(mono, 160), 0.02, 0.3), -56, -3),
+        toVis.value(Amplitude.kr(LPF.ar(HPF.ar(mono, 160), 3000), 0.02, 0.3), -60, -14),
+        toVis.value(Amplitude.kr(HPF.ar(mono, 3000), 0.02, 0.25), -70, -24)
+      ]);
       Out.ar(out, sig);
     }).add;
 
@@ -419,7 +433,8 @@ Engine_Gradient : CroneEngine {
     listenSynth.run(false);
 
     masterSynth = Synth(\grad_master, [
-      \dryIn, dryBus.index, \pumpIn, pumpBus.index, \out, context.out_b.index
+      \dryIn, dryBus.index, \pumpIn, pumpBus.index, \out, context.out_b.index,
+      \ampOut, outBus.index
     ], fxGroup, \addToTail);
 
     // persistent synths by name; the reverb and bed get swapped in place,
@@ -582,6 +597,10 @@ Engine_Gradient : CroneEngine {
 
     this.addPoll(\in_key, { keyBus.getSynchronous });
     this.addPoll(\in_amp, { inAmpBus.getSynchronous });
+    // the visuals' ears (see grad_master)
+    [\out_amp, \out_lo, \out_mid, \out_hi].do { |name, i|
+      this.addPoll(name, { outBus.getnSynchronous(4)[i] });
+    };
 
     this.addCommand(\tweak, "sf", { |msg|
       var key = msg[1].asSymbol;
@@ -608,6 +627,7 @@ Engine_Gradient : CroneEngine {
     leadBus.free;
     keyBus.free;
     inAmpBus.free;
+    outBus.free;
     if(bedBuf.notNil, { bedBuf.free });
   }
 }

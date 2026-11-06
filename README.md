@@ -2,7 +2,7 @@
 
 generative dub / kickless techno for norns. press play and let it ride.
 
-gradient makes whole tracks by itself: phasing arpeggios, dub chord stabs into a tape echo, a sub bass, a kick you can drop out while its sidechain pump keeps breathing, hats, rims, a pad wash and a hiss/crackle bed. a conductor above the notes decides, bar by bar, what plays, how hard, and when things change. you can steer it, but you don't have to.
+gradient makes whole tracks by itself: phasing arpeggios, dub chord stabs into a tape echo, a sub bass, a kick you can drop out while its sidechain pump keeps breathing, hats, rims, claps, tuned hand / wood / metal percussion, a ride, glitch ticks, a glitch processor on the whole mix, a pad wash and a hiss/crackle bed. a conductor above the notes decides, bar by bar, what plays, how hard, and when things change. you can steer it, but you don't have to.
 
 the bass, chords and arps can also go out over USB MIDI, per part: **internal**, **midi**, or **both**.
 
@@ -22,6 +22,19 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 
 **drums.** each track picks a hat groove: **straight** (offbeats plus loose 16th ghosts), **rolling** (every 16th, leaning on the offbeat), **skip** (offbeats plus a euclidean ghost pattern) or **sparse** (just the offbeats). some grooves shuffle, sitting the off-16ths a little late, on top of the global swing. marked offbeats open up while the energy is building or near the top. on some phrases a **shaker** joins at higher energy, and **dub toms** tuned to the chord drop one or two hits a bar into the echo.
 
+**more drums.** each track also picks:
+
+- **clap:** a clap, snare or snap on the backbeat (2 and 4), a lone 4, or a backbeat with a ghost; on some tracks it sits a little behind the grid. it comes in high on the energy, sits out drops and most kickless stretches, and goes into the dub echo (harder on a throw).
+- **perc:** a percussion lane with its own odd length (6, 7, 9, 10, 12, 14 or 16 steps), so like the arps it phases against the bar. the kit is **hand** (bent-sine congas), **wood** (claves / logs) or **metal** (cowbell / agogo), tuned to the chord's low, middle and high voices. it comes in early in the build, and on some kickless stretches it stays in or comes in low down: congas in the breakdown. it rotates or regrows on phrase edges.
+- **ride:** quarters, offbeats or 8ths near the top of the energy on some phrases, riding with the hats.
+- **ghost kicks:** quiet extra kicks before a beat, near the top, on some phrases. the pump stays on the quarters.
+- **kick types:** sub, dusty, **boom** (a long 808-ish sub) or **knock** (short and tight).
+
+**glitch.** two layers, set together by **glitch** (off / subtle / **normal** / heavy):
+
+- **ticks:** clicks, blips, crushed noise and zaps tuned to the chord, on a euclidean scatter, some ratcheted 2–3 times inside a 16th, into the dub echo. they come in mid-build and float on through kickless stretches.
+- **the glitch insert:** a processor on the whole mix after the echoes and reverb, before the master (so the pump still ducks the live pulse). **stutter** repeats a slice, **tape stop** winds the mix down, **reverse** plays the last moments backwards, **chop** gates the mix in 32nds, **crush** coarsens it. each bar may hold a small one somewhere (more near the top and in kickless stretches), and the stutter, tape stop and reverse also turn up as fills. **glitch depth** (LEVELS) sets how wet it is.
+
 **fills.** the bar before a phrase edge almost always gets a fill, and some 8-bar edges get a small one:
 
 - **swell:** a noise riser over the last three beats, cut dead at the downbeat
@@ -30,6 +43,9 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 - **gap:** kick, hats and bass drop out for the last beat (sometimes the last half bar) while the pump keeps going
 - **throw:** an extra stab on the last offbeat with the echo thrown
 - **open:** open hats and rim ghosts
+- **stutter:** the last beat repeats, the slices halving into a roll (glitch on)
+- **tape stop:** the mix winds down over the last beat, the downbeat lands live (glitch on)
+- **reverse:** the last beat plays backwards (glitch on)
 
 risers and gaps come up more when the energy is heading up; dips and throws when it's settling. **fills** (GRADIENT) sets normal / busy / off. there are no fills while something's soloed.
 
@@ -97,11 +113,12 @@ new tracks (and next-track key moves) mostly land on aeolian, dorian or phrygian
 
 the page name shows under the key when you're off the play page.
 
-**parts page.** a strip of every part (`K H R B C 1 2 3 4`) with the picked one underlined. here **K2** mutes / unmutes the picked part and **K3** solos it (soloed parts are boxed, and more than one can be soloed; a solo silences everything else, beds included). K2 + K3 still plays / stops. the lanes share the arp level. mutes and solos, from here or the grid, land at once instead of fading.
+**parts page.** a strip of every part (`K H R B C 1 2 3 4 S P G`: S clap, P perc, G glitch ticks and the small glitches) with the picked one underlined. here **K2** mutes / unmutes the picked part and **K3** solos it (soloed parts are boxed, and more than one can be soloed; a solo silences everything else, beds included). K2 + K3 still plays / stops. the lanes share the arp level. mutes and solos, from here or the grid, land at once instead of fading.
 
 **actions.** besides drop and mutate:
 - **throw:** the main dub echo's feedback and stab send jump for the rest of this bar and the next.
 - **lead throw:** the same for the lead delay (feedback near runaway, send up).
+- **stutter / tape stop / reverse / chop:** the glitch insert on the next beat, by hand.
 - **build:** pushes energy up and cancels a drop.
 - **break:** pulls energy down and drops the kick, hats and bass for the rest of this 8 bars and the next.
 
@@ -113,26 +130,26 @@ build and break relax back over about 16 bars, like the E1 nudge. every action i
 |---|---|
 | 1 | phrase position (dim marks every 8 bars) |
 | 2 | energy: lit to the current level; press anywhere to pull energy there |
-| 3 | parts `K H R B C 1 2 3 4 . wash noise`: brightness = how loud; press to mute / unmute |
+| 3 | parts `K H R B C 1 2 3 4 . wash noise bed clap perc ticks`: brightness = how loud; press to mute / unmute |
 | 4–7 | arp lanes 1–4: the lane's steps with its playhead. press a step to switch it on / off. col 15 mutes the lane, col 16 replaces it with a new one |
-| 8 | 1 drop · 2 mutate · 3 throw · 4 lead throw · 6 break · 7 build · 14 new track · 16 play / stop |
+| 8 | 1 drop · 2 mutate · 3 throw · 4 lead throw · 6 break · 7 build · 9 stutter · 10 tape stop · 11 reverse · 14 new track · 16 play / stop |
 
 mutes win over the conductor until you unmute; the pump keeps breathing when the kick is muted. lanes are at most 14 steps so they fit beside the lane buttons.
 
-screen: key and mode top left, section top right (with `~` when kickless), energy bar bottom left, part lights bottom right (K H R B C 1 2 3 4; K is dim when only the ghost pump is running).
+screen: key and mode top left, section top right (with `~` when kickless), energy bar bottom left, part lights bottom right (K H R B C 1 2 3 4 S P G; K is dim when only the ghost pump is running).
 
 ---
 
 ## params
 
-- **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), bass (auto / always / never), hats (auto / always / never), fills (normal / busy / off), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
+- **GRADIENT:** play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), bass (auto / always / never), hats (auto / always / never), fills (normal / busy / off), perc (auto / always / never), clap (auto / always / never), glitch (off / subtle / normal / heavy), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
 - **LISTEN:** follow input key, input gate (dB), hold before move (s)
 - **KEY:** root, mode, harmony (simple / rich / drifting), chord voicing (m7, m9, quartal, add9, sus2, sus4, m11, cluster, 6/9, or auto by energy), bass octave
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, reverb type (hall / plate / spring), echo wow
 - **LEAD DELAY:** a second tape echo fed only by the arps, apart from the dub echo and untouched by the dub knob and throws: send, time (1/16, 1/8T, 1/8, 3/16, 1/4T, 1/4, 3/8, 1/2; tempo-synced), feedback, tone, low cut, ping-pong, wow, saturation, to reverb, and whether the arps also feed the dub echo
 - **BED:** a sound file from `dust/audio` looping under everything as a field-recording layer: file, level, tone, speed, to reverb. it drifts slowly in speed, filter and pan, rises in the kickless stretches, and fades with the arc like the wash
-- **LEVELS:** kick, hat, rim, bass, chord, arp, wash, noise, crackle
-- **SOUND:** kick tune (shown as note + Hz), kick type (**sub**: clean sine / **dusty**: 909-ish thud, crushed and band-limited), kick decay, stab cutoff / resonance / detune, bass cutoff, lane 1–4 voice
+- **LEVELS:** kick, hat (also shaker, toms, ride), rim, bass, chord, arp, clap, perc, tick, glitch depth, wash, noise, crackle
+- **SOUND:** kick tune (shown as note + Hz), kick type (**sub**: clean sine / **dusty**: 909-ish thud, crushed and band-limited / **boom**: long 808-ish sub / **knock**: short and tight), kick decay, stab cutoff / resonance / detune, bass cutoff, clap voice (auto / clap / snare / snap), perc kit (auto / hand / wood / metal), lane 1–4 voice
 - **BASS OUT / CHORD OUT / ARP OUT:** output (internal / midi / both), midi device, channel (default bass ch 1, chords ch 2, arps ch 3)
 - **ARP OUT > lanes to midi:** all four lanes on one channel, a single lane (for a mono synth: the other lanes keep playing on norns), or each lane on its own channel starting at the arp channel (ch, ch+1, ch+2, ch+3). velocity follows the lane's fade and accent; note length follows its decay
 - **SYNC OUT:** a midi device to send start / stop to. gradient sends start on the bar it begins playing and stop when it stops, so a drum machine or sequencer lines up with bar one. the clock itself comes from norns: **PARAMS > CLOCK > midi out**, per port
@@ -156,6 +173,8 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
     - **window:** the city out of focus through a rain-streaked window. the chord is four bokeh discs at its voices' pitches, the bass a big streetlamp blur, arp notes far windows switching on. drops slide down in jolts on each pump and merge; throws ghost the discs in the double glazing
     - **pylons:** lattice pylons striding across a foggy field. four wires, one per arp lane: each note runs along its wire as a spark. the wires sag with the bass and dip on every pump, stabs make the insulators glow, the highs crackle round them
     - **dubplate:** a record turning under a lamp, once a bar, so the label's mark passes the stylus on every downbeat while the tonearm creeps in over the phrase. stabs leave glints on the groove at each voice's radius, arp notes drop dust that crackles past the stylus, the strobe dots flicker with the pump
+  - **drums and glitch on screen:** claps, perc and ticks land on every theme (as its hat accent, or their own touch). while the glitch insert runs, the picture glitches with it, whatever the theme: a band of rows freezes on each stutter or chop slice while the rest moves on, slides out and home on a reverse, drifts out while the picture dims through a tape stop, and coarsens on a crush. it stays inside the no-strobe limits.
+  - **robust:** a theme that fails to load or errors mid-draw is swapped for a plain horizon scene and logged once to the REPL; the script and the other themes keep going, and the theme gets another go next time you switch to it. every frame has a draw budget, and bad values never reach the screen.
   - **theme cycle:** off / every 8 bars / every phrase / each track; jumps to a random other theme
   - **overlay:** full / minimal (key and chord only) / off (just the picture, plus held-key hints and messages)
   - **speed, brightness**
@@ -172,7 +191,7 @@ copy the folder to `~/dust/code/gradient/` on norns. it ships its own engine (`l
 
 ## dev
 
-`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars. `HARM=1|2|3` picks the harmony mode; `SNAP=dir` renders each visual theme to a PGM in `dir` through a small rasterizer (`test/raster.lua`); `lua test/unit.lua test/unit_visuals.lua` runs every theme headless through silence / mid / peak / kickless and checks lit area, frame-to-frame change, the pulse, audio reactivity, bad input and the draw-call budget (`VISONLY=a,b` for some themes, `VISREPORT=1` for the numbers); `lua test/contact.lua out.pgm` draws a contact sheet of every theme; `HTRACE=1` prints every bar's chord, notes and bass, and the run ends with how far the voices moved per change. it fails on doubled or out-of-range stab notes.
+`lua test/sim.lua [bars] [mode 1=set 2=track] [minutes]` runs the script headless against stubbed norns APIs and prints the conductor's arc every 8 bars. `HARM=1|2|3` picks the harmony mode; `SNAP=dir` renders each visual theme to a PGM in `dir` through a small rasterizer (`test/raster.lua`); `lua test/unit.lua test/unit_visuals.lua` runs every theme headless through silence / mid / peak / kickless and checks lit area, frame-to-frame change, the pulse, audio reactivity, bad input and the draw-call budget (`VISONLY=a,b` for some themes, `VISREPORT=1` for the numbers); `lua test/contact.lua out.pgm` draws a contact sheet of every theme; `test/sc/run.sh [test/sc/sound.scd | test/sc/glitch.scd]` compiles the engine against a stub and plays every voice (`glitch.scd` checks each glitch mode against a lone kick); `HTRACE=1` prints every bar's chord, notes and bass, and the run ends with how far the voices moved per change. it fails on doubled or out-of-range stab notes.
 
 ## license
 

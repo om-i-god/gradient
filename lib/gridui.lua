@@ -4,16 +4,17 @@
 --
 -- row 1    phrase: where we are in the phrase (8-bar blocks marked)
 -- row 2    energy: lit to the current level; press to pull energy there
--- row 3    parts: K H R B C 1 2 3 4 . wash noise bed   (press = mute)
+-- row 3    parts: K H R B C 1 2 3 4 . wash noise bed clap perc ticks   (press = mute)
 -- row 4-7  arp lanes 1-4: the lane's steps, playhead bright
 --          press a step to toggle it; col 15 = mute, col 16 = new lane
 -- row 8    actions: 1 drop  2 mutate  3 throw  4 lead throw
---                   6 break  7 build    14 new track  16 play/stop
+--                   6 break  7 build    9 stutter  10 tape stop  11 reverse
+--                   14 new track  16 play/stop
 
 local GU = {}
 
 GU.PARTS = {"kick", "hats", "rim", "bass", "chords", "lane1", "lane2", "lane3", "lane4",
-            false, "wash", "noise", "bed"}
+            false, "wash", "noise", "bed", "clap", "perc", "ticks"}
 
 local g, A
 local flash = {}          -- "x,y" -> time of last press, for a press blink
@@ -43,7 +44,8 @@ function GU.key(x, y, z)
     elseif l and x <= l.len then A.toggle_step(i, x) end
   elseif y == 8 then
     local act = ({[1] = "drop", [2] = "mutate", [3] = "throw", [4] = "lead_throw",
-                  [6] = "brk", [7] = "build", [14] = "fresh", [16] = "play"})[x]
+                  [6] = "brk", [7] = "build", [9] = "stutter", [10] = "tapestop",
+                  [11] = "reverse", [14] = "fresh", [16] = "play"})[x]
     if act then A[act]() end
   end
 end
@@ -104,7 +106,7 @@ function GU.redraw()
     [1] = (S.drop_bars or 0) > 0 and 15 or 5,
     [2] = 5, [3] = (S.hand_throw or 0) > 0 and 15 or 5,
     [4] = (S.lead_throw or 0) > 0 and 15 or 5,
-    [6] = 4, [7] = 4, [14] = 3,
+    [6] = 4, [7] = 4, [9] = 4, [10] = 4, [11] = 4, [14] = 3,
     [16] = S.playing and 12 or 4,
   }
   for x, v in pairs(lv) do

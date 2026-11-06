@@ -67,6 +67,14 @@ local function groove(S, VIS, k, o)
   end
   if o.hats and (s - 1) % 4 == 2 then VIS.event("hat") end
   if o.stabs and (s == 4 or s == 11 or (o.dense and s == 7)) then VIS.event("stab", S.chord) end
+  -- the newer drums: claps on the backbeat, a perc lane, glitch ticks, and
+  -- now and then a glitch on the whole mix (each mode in turn)
+  if o.drums then
+    if s == 5 or s == 13 then VIS.event("clap") end
+    if s % 3 == 1 then VIS.event("perc", s % 3 + 1, 57 + s) end
+    if s % 5 == 2 then VIS.event("tick", s % 4 + 1) end
+    if k % 48 == 12 then VIS.event("glitch", (k // 48) % 5 + 1, 0.25 + (k // 48) % 3 * 0.2) end
+  end
   if o.bass and (s % 2 == 1) and math.random() < 0.8 then VIS.event("bass", 36 + S.bass_pc + (s == 9 and 7 or 0)) end
   for i = 1, o.lanes or 0 do
     local l = S.lanes[i]
@@ -103,7 +111,7 @@ SCEN.peak = {
     for _, p in ipairs({"kick", "bass", "chords", "lane1", "lane2", "lane3", "lane4", "hats", "rim"}) do S.gain[p] = 1 end
   end,
   on_step = function(S, VIS, k)
-    groove(S, VIS, k, {stabs = true, dense = true, bass = true, hats = true, lanes = 4, energy = 1})
+    groove(S, VIS, k, {stabs = true, dense = true, bass = true, hats = true, lanes = 4, energy = 1, drums = true})
     if k % 64 == 0 then S.hand_throw = 2 end
   end,
   audio = function() return {out_amp = 1, out_lo = 1, out_mid = 1, out_hi = 1} end,
@@ -114,7 +122,7 @@ SCEN.kickless = {
     S.energy = 0.3; S.section = "drift"; S.kickless = true; S.on_kick = false; S.dub = 0.8
     S.gain.chords, S.gain.lane1, S.gain.lane3, S.gain.bass = 0.7, 0.5, 0.5, 0.5
   end,
-  on_step = function(S, VIS, k) groove(S, VIS, k, {stabs = true, bass = true, lanes = 3}) end,
+  on_step = function(S, VIS, k) groove(S, VIS, k, {stabs = true, bass = true, lanes = 3, drums = true}) end,
   audio = function(t)
     local b = (t * 124 / 60) % 1
     return {out_amp = 0.3, out_lo = 0.2 + 0.1 * math.exp(-b * 4), out_mid = 0.35, out_hi = 0.15}
@@ -410,5 +418,119 @@ if not ONLY then
     local VIS = include("lib/visuals")
     assert(#VIS.names == #NAMES, #VIS.names .. " themes")
     for i, n in ipairs(NAMES) do assert(VIS.names[i] == n, i .. ": " .. tostring(VIS.names[i])) end
+  end)
+end
+
+-- the glitch tear: every mode, on every theme, stays inside the bounds and
+-- lets go of the picture when it ends
+if not ONLY then
+  test("visuals glitch: every mode bounded, every theme, and released", function()
+    for th = 1, #NAMES do
+      for mode = 1, 5 do
+        local base = run(th, "mid", {frames = 60, seed = 3})
+        local st = run(th, "mid", {frames = 60, seed = 3, at = function(f, VIS)
+          if f == 30 then VIS.event("glitch", mode, 0.6) end
+        end, keep = true})
+        assert(st.bad == 0, NAMES[th] .. " glitch " .. mode .. ": bad draw values")
+        assert(st.lit_max <= LIT_MAX, NAMES[th] .. " glitch " .. mode .. string.format(" lit %.3f", st.lit_max))
+        assert(st.l15_max <= L15_MAX, NAMES[th] .. " glitch " .. mode .. " l15 " .. st.l15_max)
+        assert(st.diff_max <= DIFF_MAX, NAMES[th] .. " glitch " .. mode .. string.format(" jump %.3f", st.diff_max))
+        assert(st.ops_max <= OPS_BUDGET, NAMES[th] .. " glitch ops " .. st.ops_max)
+      end
+    end
+  end)
+
+  test("visuals glitch changes the picture while it runs", function()
+    local a = run(9, "mid", {frames = 40, seed = 5, keep = true})
+    local b = run(9, "mid", {frames = 40, seed = 5, keep = true, at = function(f, VIS)
+      if f == 30 then VIS.event("glitch", 1, 0.5) end
+    end})
+    assert(bufdiff(a.frames[34], b.frames[34]) > 0.01, "stutter tore nothing")
+    local c = run(9, "mid", {frames = 40, seed = 5, keep = true, at = function(f, VIS)
+      if f == 10 then VIS.event("glitch", 1, 0.3) end
+    end})
+    -- released: the shift is gone a second after (themes keep their own state)
+    assert(bufdiff(a.frames[40], c.frames[40]) < 0.4, "glitch never let go")
+  end)
+
+  test("visuals new drum events and garbage never throw", function()
+    env()
+    local VIS = include("lib/visuals"); VIS.init()
+    local S = mkS()
+    for th = 1, #NAMES do
+      for _, ev in ipairs({{"clap"}, {"perc", 2, 60}, {"perc", "x", nil}, {"tick", 9},
+                           {"glitch", 0 / 0, 1e9}, {"glitch", -3, -1}, {"glitch"}, {42}, {nil},
+                           {"nonsense", {}, {}}, {"perc", math.huge, -math.huge}}) do
+        VIS.event(ev[1], ev[2], ev[3])
+      end
+      screen.clear(); RAST.reset_ops()
+      VIS.draw(th, S, 1 / FPS)
+      assert(RAST.bad == 0, NAMES[th] .. " bad draw after garbage events")
+    end
+    -- odd theme indices and state draw something rather than nothing
+    for _, i in ipairs({0, -5, 99, 0 / 0, "3", nil}) do
+      screen.clear(); RAST.reset_ops()
+      VIS.draw(i, S, 1 / FPS)
+      assert(RAST.bad == 0)
+    end
+    screen.clear(); VIS.draw(1, nil, 1 / FPS)
+    screen.clear(); VIS.draw(1, {energy = "loud", chord = "Am", gain = 3, lanes = 7, step = {}}, 1 / FPS)
+  end)
+
+  test("visuals a broken theme falls back instead of failing", function()
+    env()
+    local VIS = include("lib/visuals"); VIS.init()
+    local S = mkS(); SCEN.mid.setup(S)
+    -- break theme 2's draw and its stab handler from the outside
+    local saved_print = print
+    local logs = 0
+    print = function() logs = logs + 1 end
+    local ok = pcall(function()
+      local reached
+      for j = 1, 60 do
+        local name, val = debug.getupvalue(VIS.draw, j)
+        if not name then break end
+        if name == "THEMES" then reached = val end
+      end
+      assert(reached, "THEMES not reachable")
+      local th = reached[2]
+      local d, st = th.draw, th.stab
+      th.draw = function() error("boom") end
+      th.stab = function() error("stab boom") end
+      for f = 1, 40 do
+        VIS.event("stab", {50, 57, 60, 65})
+        screen.clear(); RAST.reset_ops()
+        VIS.draw(2, S, 1 / FPS)
+      end
+      local lit = lit_stats()
+      assert(lit > 0.01, string.format("fallback scene lit only %.3f", lit))
+      th.draw, th.stab = d, st
+    end)
+    print = saved_print
+    assert(ok, "a broken theme threw out of VIS")
+    assert(logs == 1, "broken theme logged " .. logs .. " times, wanted once")
+  end)
+
+  test("visuals per-frame draw budget holds against a runaway theme", function()
+    env()
+    local VIS = include("lib/visuals"); VIS.init()
+    local THEMES
+    for j = 1, 60 do
+      local name, val = debug.getupvalue(VIS.draw, j)
+      if not name then break end
+      if name == "THEMES" then THEMES = val end
+    end
+    local d = THEMES[1].draw
+    local KK
+    for j = 1, 60 do
+      local name, val = debug.getupvalue(d, j)
+      if not name then break end
+      if name == "K" then KK = val end
+    end
+    THEMES[1].draw = function() for n = 1, 50000 do KK.put(3, n % 128, n % 64, 1, 1) end end
+    screen.clear(); RAST.reset_ops()
+    VIS.draw(1, mkS(), 1 / FPS)
+    THEMES[1].draw = d
+    assert(RAST.ops <= OPS_BUDGET + 40, "runaway theme made " .. RAST.ops .. " draw calls")
   end)
 end

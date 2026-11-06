@@ -49,6 +49,7 @@ local S = {
   section = "-", progress = 0, total_bars = nil,
   root_pc = 9, mode = 1, voicing = 1, harmony = 3,
   mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 1, bass_style = 1, hat_style = 1, fills = 1,
+  perc_style = 1, clap_style = 1, glitch_amt = 3,
   pat = {}, lanes = {}, gain = {}, want = {}, jitter = {},
   chord = {57, 60, 64, 67}, chord_degree = 1, pair = {1, 1}, harm_bars = 4,
   bass_pc = 0, bass_free = true, chord_root_pc = 0, chord_label = "i",
@@ -174,6 +175,9 @@ local function apply_bar()
   tweak("arp_echo",   params:get("lead_dub") == 2 and (0.08 + dub * 0.25) or 0)
   tweak("hat_echo",   dub * 0.12)
   tweak("tom_echo",   0.25 + dub * 0.45)
+  tweak("clap_echo",  0.1 + dub * 0.45 + (throwing and 0.3 or 0))
+  tweak("perc_echo",  0.15 + dub * 0.45)
+  tweak("tick_echo",  0.15 + dub * 0.4)
 
   tweak("chord_cutoff", params:get("chord_cutoff") * (0.5 + tone) * (0.55 + e * 0.6))
   tweak("bass_cutoff",  params:get("bass_cutoff") * (0.8 + e * 0.4))
@@ -200,6 +204,19 @@ end
 ------------------------------------------------------------------------
 
 local start, stop
+
+-- the glitch insert: mode 1 stutter 2 tape stop 3 reverse 4 chop 5 crush;
+-- slice and length in 16ths. the engine caps a glitch at 1.5 s
+local GLITCH_NAMES = {"stutter", "tape stop", "reverse", "chop", "crush"}
+local function glitch(mode, slice16, len16)
+  local q = clock.get_beat_sec() / 4
+  -- a reverse reads back at twice the time, into a 2 s line: at most 1 s
+  local dur = math.min(mode == 3 and 1 or 1.5, len16 * q)
+  local mix = params:get("glitch_mix") / 100
+  if mix <= 0 then return end
+  engine.glitch(mode, slice16 * q, dur, mix)
+  VIS.event("glitch", mode, dur)
+end
 
 local function play_step()
   local s = (S.step % 16) + 1
@@ -247,9 +264,25 @@ local function play_step()
   elseif fill == "dip" then
     S.dipped = true
     tweak("pump_lpf", 20000 * 0.025 ^ (math.min(s, 12) / 12))
+  elseif fill == "stutter" then
+    -- the last beat repeats, a 16th, then 32nds, then a 64th roll
+    if s == 13 then glitch(1, 1, 2)
+    elseif s == 15 then glitch(1, 0.5, 1)
+    elseif s == 16 then glitch(1, 0.25, 1) end
+  elseif fill == "tapestop" and s == 13 then
+    glitch(2, 1, 4)
+  elseif fill == "reverse" and s == 13 then
+    glitch(3, 1, 4)
   end
+  local gl = S.glitches and S.glitches[s]
+  if gl then glitch(gl[2], gl[3], gl[4]) end
 
-  -- kick + ghost pump
+  -- kick + ghost pump (the pump keeps to the quarters; ghost kicks are
+  -- quiet extras near the top)
+  local ghost = S.pat.kick.ghost and S.pat.kick.ghost[s]
+  if ghost and S.on_ghost and not gap then
+    engine.kick(0.9 * ghost, params:get("kick_tune"), params:get("kick_decay") / 200, 0.1)
+  end
   if S.pat.kick[s] > 0 then
     if S.on_pump then
       engine.pump(1)
@@ -316,6 +349,66 @@ local function play_step()
   if fill == "open" and (s == 14 or s == 16) and rv == 0 then rv = 0.4 end
   if rg > 0 and rv > 0 then
     engine.rim(rv * rg * 0.25, 1500 + math.random(0, 500), (math.random() - 0.5) * 0.8)
+  end
+
+  -- clap / snare / snap: the backbeat, a little behind the grid on some
+  -- tracks; thrown into the echo with the stabs
+  local clg, clv = S.gain.clap or 0, S.pat.clap[s]
+  if clg > 0 and clv > 0 and not gap then
+    local cp = S.pat.clap
+    local kind = params:get("clap_kind")
+    kind = kind == 1 and cp.kind or kind - 1
+    local function hit()
+      engine.clap(clv * clg * 0.4, kind, 900 + params:get("tone") * 8 + e * 400,
+        (math.random() - 0.5) * 0.2)
+      VIS.event("clap")
+    end
+    if (cp.late or 0) > 0 then
+      clock.run(function() clock.sleep(beat * 0.25 * cp.late); hit() end)
+    else
+      hit()
+    end
+  end
+
+  -- percussion lane: its own length, phasing against the bar; tuned to the
+  -- chord (hand drums low, wood and metal up high)
+  local pc = S.pat.perc
+  pc.pos = (pc.pos % pc.len) + 1
+  local pg, ph = S.gain.perc or 0, pc[pc.pos]
+  if pg > 0 and ph and ph[1] > 0 and not gap then
+    local kit = params:get("perc_kit")
+    kit = kit == 1 and pc.kit or kit - 1
+    local n = S.chord[ph[2]] + ({-12, 24, 12})[kit]
+    while n > 88 do n = n - 12 end
+    local pan = ({-0.45, 0.1, 0.5})[ph[2]] + (math.random() - 0.5) * 0.15
+    engine.perc(ph[1] * pg * 0.32, mtof(n), pc.decay * (kit == 3 and 0.7 or 1) * (1.3 - e * 0.5),
+      pan, kit)
+    VIS.event("perc", ph[2], n)
+  end
+
+  -- ride near the top, riding with the hats
+  local rdv = S.pat.ride[s]
+  if S.on_ride and hg > 0 and rdv > 0 and not gap then
+    engine.ride(rdv * hg * 0.12, 0.4 + e * 0.5, 6500 + e * 2000, 0.35)
+  end
+
+  -- glitch ticks: clicks, blips, crushed noise and zaps, some ratcheted
+  -- inside the 16th
+  local tg, tk = S.gain.ticks or 0, S.pat.ticks[s]
+  if tg > 0 and tk[1] > 0 and not gap and math.random() < 0.55 + e * 0.4 then
+    local n = tk[3]
+    local hz = mtof(S.chord[math.random(4)] + 36)
+    local pan = (math.random() - 0.5) * 1.4
+    local function hit(v) engine.tick(v, tk[2], hz, pan); VIS.event("tick", tk[2]) end
+    hit(tk[1] * tg * 0.18)
+    if n > 1 then
+      clock.run(function()
+        for r = 2, n do
+          clock.sleep(beat * 0.25 / n)
+          hit(tk[1] * tg * 0.18 * (1 - r * 0.2))
+        end
+      end)
+    end
   end
 
   -- chord stabs
@@ -543,6 +636,14 @@ local function brk()
   flash("break")
 end
 
+-- glitch by hand: the next beat, on the whole mix
+local function hand_glitch(mode)
+  return function()
+    glitch(mode, mode == 1 and 1 or (mode == 4 and 0.5 or 1), 4)
+    flash(GLITCH_NAMES[mode])
+  end
+end
+
 local function toggle_play()
   if S.playing then stop() else start() end
 end
@@ -591,12 +692,14 @@ local function new_lane(i)
   flash("new lane " .. i)
 end
 
-local PART_KEYS  = {"kick", "hats", "rim", "bass", "chords", "lane1", "lane2", "lane3", "lane4"}
-local PART_GLYPH = {"K", "H", "R", "B", "C", "1", "2", "3", "4"}
+local PART_KEYS  = {"kick", "hats", "rim", "bass", "chords", "lane1", "lane2", "lane3", "lane4",
+                    "clap", "perc", "ticks"}
+local PART_GLYPH = {"K", "H", "R", "B", "C", "1", "2", "3", "4", "S", "P", "G"}
 -- the level param each part's E3 turns on the parts page
 local PART_LVL = {kick = "kick_lvl", hats = "hat_lvl", rim = "rim_lvl", bass = "bass_lvl",
                   chords = "chord_lvl", lane1 = "arp_lvl", lane2 = "arp_lvl",
-                  lane3 = "arp_lvl", lane4 = "arp_lvl"}
+                  lane3 = "arp_lvl", lane4 = "arp_lvl",
+                  clap = "clap_lvl", perc = "perc_lvl", ticks = "tick_lvl"}
 local part_sel = 1
 
 -- encoder pages: {param id, step multiplier}; "_energy" is the nudge.
@@ -761,7 +864,7 @@ local function draw_hud()
         on = S.gain[k] or 0
       end
       screen.level(math.floor(1 + on * 13))
-      screen.move(46 + (i - 1) * 9, 63)
+      screen.move(45 + (i - 1) * 7, 63)
       screen.text(PART_GLYPH[i])
     end
   end
@@ -774,7 +877,7 @@ local function draw_hud()
     screen.fill()
     local any_solo = next(S.solo) ~= nil
     for i, k in ipairs(PART_KEYS) do
-      local x = 6 + (i - 1) * 13
+      local x = 5 + (i - 1) * 10
       local on = k == "kick" and (S.on_kick and 1 or 0) or (S.gain[k] or 0)
       local lvl = S.mute[k] and 2 or (any_solo and not S.solo[k]) and 3 or math.floor(5 + on * 10)
       screen.level(lvl)
@@ -867,6 +970,12 @@ local function setup_params()
   params:set_action("hat_style", function(v) S.hat_style = v end)
   params:add_option("fills", "fills", {"normal", "busy", "off"}, 1)
   params:set_action("fills", function(v) S.fills = v end)
+  params:add_option("perc_style", "perc", {"auto", "always", "never"}, 1)
+  params:set_action("perc_style", function(v) S.perc_style = v end)
+  params:add_option("clap_style", "clap", {"auto", "always", "never"}, 1)
+  params:set_action("clap_style", function(v) S.clap_style = v end)
+  params:add_option("glitch_amt", "glitch", {"off", "subtle", "normal", "heavy"}, 3)
+  params:set_action("glitch_amt", function(v) S.glitch_amt = v end)
   params:add_option("freeze", "freeze material", {"off", "on"}, 1)
   params:set_action("freeze", function(v) S.freeze = v == 2 end)
   params:add_number("seed", "seed", 1, 9999, 1)
@@ -882,7 +991,11 @@ local function setup_params()
   for _, a in ipairs({{"p_play", "> play / stop", toggle_play}, {"p_drop", "> drop", drop},
                       {"p_mutate", "> mutate", mutate}, {"p_throw", "> throw", throw},
                       {"p_lead_throw", "> lead throw", lead_throw},
-                      {"p_build", "> build", build}, {"p_break", "> break", brk}}) do
+                      {"p_build", "> build", build}, {"p_break", "> break", brk},
+                      {"p_stutter", "> stutter", hand_glitch(1)},
+                      {"p_tapestop", "> tape stop", hand_glitch(2)},
+                      {"p_reverse", "> reverse", hand_glitch(3)},
+                      {"p_chop", "> chop", hand_glitch(4)}}) do
     params:add_trigger(a[1], a[2])
     params:set_action(a[1], a[3])
   end
@@ -963,10 +1076,12 @@ local function setup_params()
 
   params:add_separator("LEVELS")
   for _, p in ipairs({{"kick", 100}, {"hat", 100}, {"rim", 100}, {"bass", 100},
-                      {"chord", 100}, {"arp", 100}}) do
+                      {"chord", 100}, {"arp", 100}, {"clap", 100}, {"perc", 100},
+                      {"tick", 100}}) do
     params:add_number(p[1] .. "_lvl", p[1] .. " level", 0, 150, p[2])
     params:set_action(p[1] .. "_lvl", function(v) engine.tweak(p[1] .. "_lvl", v / 100) end)
   end
+  params:add_number("glitch_mix", "glitch depth", 0, 100, 100)
   params:add_number("wash_lvl", "wash level", 0, 150, 100)
   params:add_number("noise_lvl", "noise level", 0, 150, 100)
   params:add_control("crackle", "crackle", controlspec.new(0, 1, "lin", 0.01, 0.3))
@@ -978,7 +1093,7 @@ local function setup_params()
     return string.format("%s%d  %.1f Hz", T.NOTE_NAMES[n % 12 + 1], n // 12 - 1,
       440 * 2 ^ ((n - 69) / 12))
   end)
-  params:add_option("kick_type", "kick type", {"sub", "dusty"}, 1)
+  params:add_option("kick_type", "kick type", {"sub", "dusty", "boom", "knock"}, 1)
   params:set_action("kick_type", function(v) engine.tweak("kick_type", v) end)
   params:add_number("kick_decay", "kick decay", 15, 120, 45)
   params:add_number("chord_cutoff", "stab cutoff", 300, 5000, 1400)
@@ -987,6 +1102,8 @@ local function setup_params()
   params:add_control("chord_detune", "stab detune", controlspec.new(0, 1, "lin", 0.01, 0.18))
   params:set_action("chord_detune", function(v) engine.tweak("chord_detune", v) end)
   params:add_number("bass_cutoff", "bass cutoff", 80, 1200, 260)
+  params:add_option("clap_kind", "clap voice", {"auto", "clap", "snare", "snap"}, 1)
+  params:add_option("perc_kit", "perc kit", {"auto", "hand", "wood", "metal"}, 1)
   for i = 1, 4 do
     params:add_option("lane" .. i .. "_voice", "lane " .. i .. " voice", VOICE_NAMES, 1)
   end
@@ -1065,6 +1182,7 @@ function init()
   GU.init({
     S = S, drop = drop, mutate = mutate, throw = throw, lead_throw = lead_throw,
     build = build, brk = brk, play = toggle_play,
+    stutter = hand_glitch(1), tapestop = hand_glitch(2), reverse = hand_glitch(3),
     fresh = fresh,
     set_energy = set_energy, toggle_mute = toggle_mute,
     toggle_step = toggle_step, new_lane = new_lane,

@@ -394,6 +394,25 @@ end
 assert(hat_calls() > h0, "hats = always never played")
 print("hats never/always ok")
 params:set("hat_style", 1)
+-- perc / clap never: silent once faded; glitch off: no ticks, no glitches
+for _, c in ipairs({{"perc_style", "perc"}, {"clap_style", "clap"}, {"glitch_amt", "tick", "glitch"}}) do
+  params:set(c[1], c[1] == "glitch_amt" and 1 or 3)
+  -- the arc re-decides every 4 bars, then a part fades over 4: wait 12+
+  for i = 1, 16 * 14 do tick_all() end
+  local n0 = (calls[c[2]] or 0) + (calls[c[3] or ""] or 0)
+  for bar = 1, 64 do
+    grid_dev.key(16, 2, 1)
+    for i = 1, 16 do tick_all() end
+  end
+  assert((calls[c[2]] or 0) + (calls[c[3] or ""] or 0) == n0, c[1] .. " off but still playing")
+  params:set(c[1], c[1] == "glitch_amt" and 3 or 1)
+end
+for _, id in ipairs({"p_stutter", "p_tapestop", "p_reverse", "p_chop"}) do P.defs[id].action() end
+for _, x in ipairs({9, 10, 11}) do grid_dev.key(x, 8, 1) end
+for _, k in ipairs({"clap", "perc", "tick", "glitch", "ride"}) do
+  assert((calls[k] or 0) > 0, k .. " never played")
+end
+print("perc/clap never, glitch off ok")
 local ls = {}
 for k, n in pairs(labels) do ls[#ls + 1] = k .. "=" .. n end
 table.sort(ls)

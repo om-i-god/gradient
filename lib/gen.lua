@@ -16,9 +16,75 @@ function G.euclid(k, n, rot)
   return out
 end
 
+-- four on the floor; `ghost` = quiet extra kicks a track may add near the
+-- top of the energy (the pump stays on the quarters)
+local GHOSTS = {{}, {}, {}, {16}, {16}, {11}, {8, 16}, {15}}
 function G.kick()
-  local p = {}
+  local p = {ghost = {}}
   for i = 1, 16 do p[i] = ((i - 1) % 4 == 0) and 1 or 0 end
+  for _, s in ipairs(pick(GHOSTS)) do p.ghost[s] = 0.35 + math.random() * 0.2 end
+  return p
+end
+
+-- clap / snare / snap: a backbeat, a lone 4, or a backbeat with a ghost.
+-- `kind` 1 clap 2 snare 3 snap; `late` nudges the hits behind the grid
+local CLAPS = {{5, 13}, {5, 13}, {13}, {5, 13, 16}, {5, 13, 15}, {13, 14}, {5, 12}}
+function G.clap()
+  local p = {kind = pick({1, 1, 1, 2, 3, 3}), late = pick({0, 0, 0.08, 0.15})}
+  for i = 1, 16 do p[i] = 0 end
+  for j, s in ipairs(pick(CLAPS)) do
+    local main = s == 5 or s == 13
+    p[s] = main and (0.85 + math.random() * 0.15) or (0.35 + math.random() * 0.2)
+  end
+  return p
+end
+
+-- percussion: a lane of its own odd length, so it phases against the bar
+-- like the arps. entries are {vel, voice} (voice 1 low .. 3 high, tuned to
+-- the chord); `kit` 1 hand 2 wood 3 metal
+local PERC_LENS = {16, 12, 12, 10, 9, 7, 6, 14}
+function G.perc()
+  local len  = pick(PERC_LENS)
+  local hits = G.euclid(math.max(2, math.floor(len * (0.3 + math.random() * 0.25))), len,
+    math.random(0, len - 1))
+  local p = {kit = pick({1, 1, 1, 2, 2, 3}), len = len, pos = 0, decay = 0.15 + math.random() * 0.2}
+  for i = 1, len do
+    if hits[i] then
+      p[i] = {(i == 1) and 0.9 or (0.45 + math.random() * 0.4), pick({1, 2, 2, 3})}
+    else
+      p[i] = {0, 1}
+    end
+  end
+  return p
+end
+
+-- ride: quarters, offbeats or 8ths with the offbeat leaning
+local RIDES = {
+  {1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0},
+  {0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0},
+  {0.6, 0, 1, 0, 0.6, 0, 1, 0, 0.6, 0, 1, 0, 0.6, 0, 1, 0},
+  {1, 0, 0.5, 0.4, 1, 0, 0.5, 0, 1, 0, 0.5, 0.4, 1, 0, 0.5, 0},
+}
+function G.ride()
+  local r = pick(RIDES)
+  local p = {}
+  for i = 1, 16 do p[i] = r[i] * (0.8 + math.random() * 0.2) end
+  return p
+end
+
+-- glitch ticks: tiny digital hits on a euclidean scatter. entries are
+-- {vel, kind (1 click 2 blip 3 crush 4 zap), ratchet (1-3 hits inside the 16th)}
+function G.ticks()
+  local hits = G.euclid(pick({3, 4, 5, 5, 7}), 16, math.random(0, 15))
+  local kinds = pick({{1, 1, 2}, {1, 2, 2}, {1, 3}, {2, 4}, {1, 2, 3, 4}})
+  local p = {}
+  for i = 1, 16 do
+    if hits[i] then
+      p[i] = {0.4 + math.random() * 0.5, pick(kinds), pick({1, 1, 1, 2, 3})}
+    else
+      p[i] = {0, 1, 1}
+    end
+  end
   return p
 end
 

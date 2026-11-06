@@ -11,11 +11,15 @@
 //        echo / verb sends
 //        lead  (arp-only send into its own echo, set apart from the dub echo)
 //
+// the glitch insert sits after the echoes and reverb and before the master:
+// it reads dry and pump and writes them back (stutter, tape stop, reverse,
+// chop, crush), so the master's pump still ducks the live pulse
+//
 // NOTE: sclang binary operators have no precedence (strict left-to-right),
 // so every compound expression below is fully parenthesized.
 //
 // commands
-//   kick  amp tune decay click
+//   kick  amp tune decay click       (kick_type 1 sub 2 dusty 3 boom 4 knock)
 //   hat   amp decay tone pan
 //   rim   amp freq pan
 //   bass  hz amp dur
@@ -23,6 +27,13 @@
 //   tom   amp hz decay pan
 //   shaker amp decay pan
 //   swell amp dur   -- reversed-noise riser into the next downbeat
+//   clap  amp kind tone pan          (kind 1 clap 2 snare 3 snap)
+//   perc  amp hz decay pan kind      (kind 1 hand 2 wood 3 metal)
+//   ride  amp decay tone pan
+//   tick  amp kind hz pan            (kind 1 click 2 blip 3 crush 4 zap)
+//   glitch mode slice dur mix        -- the glitch insert on the whole mix (dur <= 1.5 s):
+//         mode 1 stutter (repeat `slice` s) 2 tape stop 3 reverse
+//              4 chop (gate at `slice`) 5 crush; for `dur` s, wet `mix`
 //   chord f1 f2 f3 f4 amp dur
 //   arp   hz amp decay cutoff pan shape voice   (voice 1 classic 2 bell 3 pluck 4 soft)
 //   pump  (dummy f)
@@ -42,7 +53,7 @@ Engine_Gradient : CroneEngine {
   var voiceGroup, fxGroup;
   var dryBus, pumpBus, echoBus, verbBus, leadBus;
   var washSynth, noiseSynth, echoSynth, leadSynth, verbSynth, masterSynth;
-  var listenSynth, keyBus, inAmpBus, outBus;
+  var listenSynth, keyBus, inAmpBus, outBus, glitchSynth;
   var bedBuf;
   var st, fx, fxMap, fxVals;
 
@@ -75,6 +86,10 @@ Engine_Gradient : CroneEngine {
       \chord_lvl -> 1.0, \chord_echo -> 0.55, \chord_verb -> 0.35,
       \chord_cutoff -> 1400, \chord_res -> 0.35, \chord_env -> 1.6, \chord_detune -> 0.18,
       \arp_lvl -> 1.0,   \arp_echo -> 0.22, \arp_verb -> 0.40, \arp_lead -> 0.3,
+      \clap_lvl -> 1.0,  \clap_echo -> 0.3, \clap_verb -> 0.35,
+      \perc_lvl -> 1.0,  \perc_echo -> 0.35, \perc_verb -> 0.2,
+      \tick_lvl -> 1.0,  \tick_echo -> 0.3, \tick_verb -> 0.1,
+      \ride_verb -> 0.12,
       \kick_type -> 1
     ];
 
@@ -103,6 +118,30 @@ Engine_Gradient : CroneEngine {
       sig = Latch.ar(sig, Impulse.ar(14000));
       sig = LPF.ar(sig, 3800);
       sig = (sig * 1.3).tanh * amp;
+      Out.ar(out, sig ! 2);
+    }).add;
+
+    // boom: a long 808-ish sub, slow pitch fall, a little drive
+    SynthDef(\grad_kick_boom, {
+      arg out, amp=0.8, tune=33, decay=0.45, click=0.3;
+      var base = tune.midicps;
+      var penv = EnvGen.ar(Env([base * 2.5, base * 1.05, base], [0.03, 0.25], [-3, -1]));
+      var aenv = EnvGen.ar(Env.perc(0.003, decay * 1.9, 1, -3), doneAction: 2);
+      var body = SinOsc.ar(penv, 0.5pi) * aenv;
+      var clk  = LPF.ar(Impulse.ar(0), 4000) * click * 2;
+      var sig  = ((body * 1.6) + clk).tanh * amp;
+      Out.ar(out, sig ! 2);
+    }).add;
+
+    // knock: short and tight, a woody second partial on top
+    SynthDef(\grad_kick_knock, {
+      arg out, amp=0.8, tune=33, decay=0.45, click=0.3;
+      var base = (tune + 5).midicps;
+      var penv = EnvGen.ar(Env([base * 5, base], [0.02], [-6]));
+      var aenv = EnvGen.ar(Env.perc(0.001, decay * 0.45, 1, -6), doneAction: 2);
+      var body = (SinOsc.ar(penv, 0.5pi) + (SinOsc.ar(penv * 2.71) * 0.25 * EnvGen.ar(Env.perc(0.001, 0.04))));
+      var clk  = BPF.ar(WhiteNoise.ar, 3200, 0.5) * EnvGen.ar(Env.perc(0.0005, 0.01)) * (click * 2.5);
+      var sig  = (((body * aenv) + clk) * 1.8).tanh * amp;
       Out.ar(out, sig ! 2);
     }).add;
 
@@ -158,6 +197,137 @@ Engine_Gradient : CroneEngine {
       var body = BPF.ar(WhiteNoise.ar, freq, 0.08) * 6;
       var tick = SinOsc.ar(freq * 0.5) * EnvGen.ar(Env.perc(0.0005, 0.02));
       var sig  = Pan2.ar((body + tick) * env * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // ----------------------------------------------------------- percussion
+
+    // clap: four bursts of band-passed noise, then a short room tail
+    SynthDef(\grad_clap, {
+      arg out, echoOut, verbOut, amp=0.3, tone=1200, pan=0, echo=0.3, verb=0.35;
+      var bursts = EnvGen.ar(Env([0, 1, 0.2, 1, 0.2, 1, 0.2, 1, 0],
+        [0.001, 0.009, 0.001, 0.009, 0.001, 0.011, 0.001, 0.16], [0, -4, 0, -4, 0, -4, 0, -5]),
+        doneAction: 2);
+      var sig = BPF.ar(WhiteNoise.ar, tone.clip(500, 4000), 0.55) * 2.2;
+      sig = (sig + (HPF.ar(WhiteNoise.ar, 5000) * 0.25)) * bursts * amp;
+      sig = Pan2.ar(sig, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // snare: a tuned body under a noise skin
+    SynthDef(\grad_snare, {
+      arg out, echoOut, verbOut, amp=0.3, tone=1200, pan=0, echo=0.3, verb=0.35;
+      var f    = tone.linlin(500, 4000, 160, 260);
+      var body = SinOsc.ar(EnvGen.ar(Env([f * 1.6, f], [0.02], -4)))
+                 * EnvGen.ar(Env.perc(0.001, 0.08, 1, -6)) * 0.8;
+      var skin = BPF.ar(WhiteNoise.ar, tone * 3, 0.9) * EnvGen.ar(Env.perc(0.001, 0.17, 1, -5), doneAction: 2);
+      var sig  = ((body + (skin * 1.4)) * 1.2).tanh * amp;
+      sig = Pan2.ar(sig, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // snap: a finger-snap crack, mostly there for the spring
+    SynthDef(\grad_snap, {
+      arg out, echoOut, verbOut, amp=0.3, tone=1200, pan=0, echo=0.3, verb=0.35;
+      var env = EnvGen.ar(Env.perc(0.0005, 0.045, 1, -8), doneAction: 2);
+      var sig = (BPF.ar(WhiteNoise.ar, tone * 2.2, 0.3) * 3) + (SinOsc.ar(tone * 1.1) * EnvGen.ar(Env.perc(0.0005, 0.008)));
+      sig = Pan2.ar(sig * env * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // hand drum: a bent sine body and a slap, tuned to the chord
+    SynthDef(\grad_perc_hand, {
+      arg out, echoOut, verbOut, amp=0.3, freq=220, decay=0.25, pan=0, echo=0.35, verb=0.2;
+      var env  = EnvGen.ar(Env.perc(0.001, decay, 1, -5), doneAction: 2);
+      var body = SinOsc.ar(EnvGen.ar(Env([freq * 1.25, freq], [0.03], -3)));
+      var slap = Resonz.ar(WhiteNoise.ar, freq * 3.1, 0.3) * EnvGen.ar(Env.perc(0.0005, 0.015)) * 2;
+      var sig  = (((body * env) + slap) * 1.2).tanh * amp;
+      sig = Pan2.ar(sig, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // wood: a clave / log, a ringing resonator on a click
+    SynthDef(\grad_perc_wood, {
+      arg out, echoOut, verbOut, amp=0.3, freq=900, decay=0.25, pan=0, echo=0.35, verb=0.2;
+      var exc = Impulse.ar(0) + (WhiteNoise.ar * EnvGen.ar(Env.perc(0.0002, 0.002)) * 0.3);
+      var sig = Ringz.ar(exc, [freq, freq * 2.57], [decay * 0.35, decay * 0.12]);
+      sig = Mix(sig * [1, 0.35]) * 0.6;
+      DetectSilence.ar(sig, 0.0005, 0.05, doneAction: 2);
+      sig = Pan2.ar(sig.tanh * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // metal: a cowbell / agogo from two squares through a band-pass
+    SynthDef(\grad_perc_metal, {
+      arg out, echoOut, verbOut, amp=0.3, freq=560, decay=0.25, pan=0, echo=0.35, verb=0.2;
+      var env = EnvGen.ar(Env([0, 1, 0.3, 0], [0.001, 0.03, decay], [0, -3, -4]), doneAction: 2);
+      var sig = (Pulse.ar(freq) + Pulse.ar(freq * 1.48)) * 0.5;
+      sig = BPF.ar(sig, freq * 1.5, 0.6) * 2;
+      sig = Pan2.ar(sig * env * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // ride: six detuned squares, the 808 way, high-passed
+    SynthDef(\grad_ride, {
+      arg out, verbOut, amp=0.2, decay=0.6, tone=7000, pan=0, verb=0.12;
+      var env = EnvGen.ar(Env.perc(0.002, decay, 1, -4), doneAction: 2);
+      var sig = Mix([205.3, 304.4, 369.6, 522.7, 540, 800].collect { |f| Pulse.ar(f * 1.7) }) * 0.18;
+      sig = BPF.ar(sig, tone.clip(3000, 12000), 0.5) + (HPF.ar(sig, 9000) * 0.4);
+      sig = Pan2.ar(sig * env * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // glitch ticks: tiny digital sounds, clicks-and-cuts style
+    SynthDef(\grad_tick_click, {
+      arg out, echoOut, verbOut, amp=0.2, freq=3000, pan=0, echo=0.3, verb=0.1;
+      var sig = RHPF.ar(Impulse.ar(0) * 4, freq.clip(800, 12000), 0.05);
+      DetectSilence.ar(sig, 0.0005, 0.02, doneAction: 2);
+      sig = Pan2.ar(sig.clip2(1) * amp, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    SynthDef(\grad_tick_blip, {
+      arg out, echoOut, verbOut, amp=0.2, freq=3000, pan=0, echo=0.3, verb=0.1;
+      var env = EnvGen.ar(Env.linen(0.0005, 0.012, 0.004), doneAction: 2);
+      var sig = Pan2.ar(SinOsc.ar(freq.clip(200, 12000)) * env * amp * 0.7, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    SynthDef(\grad_tick_crush, {
+      arg out, echoOut, verbOut, amp=0.2, freq=3000, pan=0, echo=0.3, verb=0.1;
+      var env = EnvGen.ar(Env.linen(0.0005, 0.025, 0.005), doneAction: 2);
+      var sig = Latch.ar(WhiteNoise.ar, Impulse.ar(freq.clip(400, 8000)));
+      sig = (sig * 4).round(0.5) * 0.25;
+      sig = Pan2.ar(sig * env * amp * 0.6, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    SynthDef(\grad_tick_zap, {
+      arg out, echoOut, verbOut, amp=0.2, freq=3000, pan=0, echo=0.3, verb=0.1;
+      var env = EnvGen.ar(Env.perc(0.0005, 0.05, 1, -4), doneAction: 2);
+      var f   = EnvGen.ar(Env([freq.clip(400, 12000), 60], [0.05], \exp));
+      var sig = Pan2.ar(Pulse.ar(f, 0.3) * env * amp * 0.4, pan);
       Out.ar(out, sig);
       Out.ar(echoOut, sig * echo);
       Out.ar(verbOut, sig * verb);
@@ -371,6 +541,39 @@ Engine_Gradient : CroneEngine {
       Out.ar(out, y * level * 1.2);
     }).add;
 
+    // the glitch insert: one 4-channel delay line over dry + pump, its time
+    // driven per mode from the moment of the trigger (el = seconds since)
+    //   1 stutter  time steps up a slice at a time: the first slice plays
+    //              live, then repeats; a tiny window at each slice edge
+    //   2 tape stop time grows by (1 - rate) as the rate falls to zero
+    //   3 reverse  time grows at 2x: reads backwards from the trigger
+    //   4 chop     live, gated on and off every half slice
+    //   5 crush    live, sample-and-hold + bit reduction
+    // wet fades in and out over a few ms, so it never clicks on or off
+    SynthDef(\grad_glitch, {
+      arg dryBus, pumpBus, t_go=0, mode=1, slice=0.1, dur=0, mix=1;
+      var sig  = In.ar(dryBus, 2) ++ In.ar(pumpBus, 2);
+      var el   = Sweep.ar(t_go, 1);
+      var sl   = slice.clip(0.01, 1);
+      var d    = dur.clip(0, 1.5);
+      var gate = EnvGen.ar(Env([0, 1, 1, 0], [0.004, (d - 0.012).max(0.001), 0.008]), t_go);
+      var rate = EnvGen.ar(Env([1, 1, 0.0], [0, d.max(0.01)], [0, -2]), t_go);
+      var ph   = (el / sl).frac;
+      var win  = Select.ar(mode < 1.5, [DC.ar(1), (ph * sl / 0.003).min(1) * ((1 - ph) * sl / 0.003).min(1)]);
+      var time = Select.ar((mode - 1).clip(0, 2), [
+        (el / sl).floor * sl, Sweep.ar(t_go, 1 - rate), el * 2
+      ]).clip(0.0001, 2);
+      var wet  = Select.ar(mode > 3.5, [DelayC.ar(sig, 2.05, time) * win, sig]);
+      wet = Select.ar((mode - 3).clip(0, 2), [
+        wet,
+        wet * Lag.ar(LFPulse.ar(sl.reciprocal, 0, 0.5), 0.002),
+        // companded: 8 steps on the square root, so quiet pads survive
+        Latch.ar(wet, Impulse.ar(3000)).sign * ((Latch.ar(wet, Impulse.ar(3000)).abs.sqrt * 8).round(1) / 8).squared
+      ]);
+      ReplaceOut.ar(dryBus,  (sig[0..1] * (1 - (gate * mix))) + (wet[0..1] * gate * mix));
+      ReplaceOut.ar(pumpBus, (sig[2..3] * (1 - (gate * mix))) + (wet[2..3] * gate * mix));
+    }).add;
+
     SynthDef(\grad_master, {
       arg dryIn, pumpIn, out, ampOut, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2,
           pumpLpf=20000;
@@ -436,6 +639,10 @@ Engine_Gradient : CroneEngine {
       \dryIn, dryBus.index, \pumpIn, pumpBus.index, \out, context.out_b.index,
       \ampOut, outBus.index
     ], fxGroup, \addToTail);
+    // after the echoes and reverb (which write to pump), before the master
+    glitchSynth = Synth.before(masterSynth, \grad_glitch, [
+      \dryBus, dryBus.index, \pumpBus, pumpBus.index
+    ]);
 
     // persistent synths by name; the reverb and bed get swapped in place,
     // so tweaks look the synth up at send time and remember their values
@@ -471,7 +678,7 @@ Engine_Gradient : CroneEngine {
     // ------------------------------------------------------------- commands
 
     this.addCommand(\kick, "ffff", { |msg|
-      Synth([\grad_kick, \grad_kick_dusty].clipAt(st[\kick_type].asInteger - 1), [
+      Synth([\grad_kick, \grad_kick_dusty, \grad_kick_boom, \grad_kick_knock].clipAt(st[\kick_type].asInteger - 1), [
         \out, dryBus.index, \amp, msg[1] * st[\kick_lvl],
         \tune, msg[2], \decay, msg[3], \click, msg[4]
       ], voiceGroup);
@@ -529,6 +736,42 @@ Engine_Gradient : CroneEngine {
         \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
         \amp, msg[1], \dur, msg[2], \echo, st[\swell_echo]
       ], voiceGroup);
+    });
+
+    this.addCommand(\clap, "ffff", { |msg|
+      Synth([\grad_clap, \grad_snare, \grad_snap].clipAt(msg[2].asInteger - 1), [
+        \out, dryBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
+        \amp, msg[1] * st[\clap_lvl], \tone, msg[3], \pan, msg[4],
+        \echo, st[\clap_echo], \verb, st[\clap_verb]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\perc, "fffff", { |msg|
+      Synth([\grad_perc_hand, \grad_perc_wood, \grad_perc_metal].clipAt(msg[5].asInteger - 1), [
+        \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
+        \amp, msg[1] * st[\perc_lvl], \freq, msg[2], \decay, msg[3], \pan, msg[4],
+        \echo, st[\perc_echo], \verb, st[\perc_verb]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\ride, "ffff", { |msg|
+      Synth(\grad_ride, [
+        \out, dryBus.index, \verbOut, verbBus.index,
+        \amp, msg[1] * st[\hat_lvl], \decay, msg[2], \tone, msg[3], \pan, msg[4],
+        \verb, st[\ride_verb]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\tick, "ffff", { |msg|
+      Synth([\grad_tick_click, \grad_tick_blip, \grad_tick_crush, \grad_tick_zap].clipAt(msg[2].asInteger - 1), [
+        \out, dryBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
+        \amp, msg[1] * st[\tick_lvl], \freq, msg[3], \pan, msg[4],
+        \echo, st[\tick_echo], \verb, st[\tick_verb]
+      ], voiceGroup);
+    });
+
+    this.addCommand(\glitch, "ffff", { |msg|
+      glitchSynth.set(\mode, msg[1], \slice, msg[2], \dur, msg[3], \mix, msg[4], \t_go, 1);
     });
 
     this.addCommand(\chord, "ffffff", { |msg|

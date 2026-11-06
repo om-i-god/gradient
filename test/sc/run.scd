@@ -48,6 +48,15 @@ s.waitForBoot {
       if(i == 28, { eng.cmd(\tweak, \pump_lpf, 20000) });
       if(i == 24, { eng.polls.keysValuesDo { |k, f| ("poll mid " ++ k ++ " = " ++ f.value.round(0.001)).postln } });
       eng.cmd(\arp, 440 * (1 + (i % 3)), 0.15, 0.25, 3000, 0.3, 0.5, (i % 4) + 1);
+      if(i % 8 == 4, { eng.cmd(\clap, 0.4, (i / 8).floor % 3 + 1, 1200, 0.1) });
+      if(i % 3 == 1, { eng.cmd(\perc, 0.3, 220 * (1 + (i % 2)), 0.25, -0.3, i % 3 + 1) });
+      if(i % 4 == 0, { eng.cmd(\ride, 0.15, 0.6, 7000, 0.2) });
+      if(i % 2 == 1, { eng.cmd(\tick, 0.2, i % 4 + 1, 3000, 0.4) });
+      if(i == 8, { eng.cmd(\glitch, 1, t, t * 4, 1) });
+      if(i == 13, { eng.cmd(\glitch, 2, t, t * 3, 1) });
+      if(i == 20, { eng.cmd(\glitch, 3, t, t * 2, 1) });
+      if(i == 24, { eng.cmd(\glitch, 4, t / 2, t * 2, 1) });
+      if(i == 29, { eng.cmd(\glitch, 5, t, t * 2, 0.8) });
       t.wait;
     };
   }) } { |err| ("ERROR in test body: " ++ err.errorString).postln };

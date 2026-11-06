@@ -30,8 +30,14 @@ local TH = {
   noise = -1, wash = -1, bed = -1,
   lane1 = 0.08, lane2 = 0.28, lane3 = 0.50, lane4 = 0.70,
   chords = 0.22, rim = 0.35, hats = 0.42, bass = 0.45, kick = 0.50, pump = 0.25,
+  perc = 0.30, ticks = 0.38, clap = 0.58, ride = 0.80, ghost = 0.72,
 }
-C.FADED = {"noise", "wash", "bed", "lane1", "lane2", "lane3", "lane4", "chords", "rim", "hats", "bass"}
+C.FADED = {"noise", "wash", "bed", "lane1", "lane2", "lane3", "lane4", "chords", "rim", "hats", "bass",
+           "perc", "clap", "ticks"}
+
+-- glitch amount (param): 1 off, 2 subtle, 3 normal, 4 heavy -> chance per bar
+-- of a small glitch somewhere in it
+local GLITCH_P = {0, 0.1, 0.22, 0.45}
 
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 
@@ -46,6 +52,10 @@ function C.regen_material(S)
   S.pat.stabs  = G.stabs()
   S.pat.shaker = G.shaker()
   S.pat.toms   = G.toms()
+  S.pat.clap   = G.clap()
+  S.pat.perc   = G.perc()
+  S.pat.ride   = G.ride()
+  S.pat.ticks  = G.ticks()
   S.pat.bass_lines = G.bass_lines()
   S.pat.bass   = S.pat.bass_lines[1]
   for i = 1, 4 do S.lanes[i] = G.lane(i) end
@@ -137,6 +147,9 @@ end
 --   swell  noise riser into the downbeat      dip   filter dip on the pads
 --   toms   a tom run down the chord           gap   drums out for the last beat(s)
 --   throw  an extra stab, echo thrown         open  open hats + rim ghosts
+-- with glitch on, also (the glitch insert on the whole mix):
+--   stutter the last beat repeats, the slices halving   tapestop  the mix winds down
+--   reverse the last beat plays backwards
 ------------------------------------------------------------------------
 
 local function pick_fill(S, big)
@@ -151,12 +164,41 @@ local function pick_fill(S, big)
       t[#t + 1] = "dip"; t[#t + 1] = "throw"
     end
   end
+  -- glitch fills, more of them the more glitch there is
+  local gl = S.glitch_amt or 3
+  for _ = 1, gl - 1 do
+    t[#t + 1] = G.pick(big and {"stutter", "tapestop", "reverse"} or {"stutter", "reverse"})
+  end
   local f = G.pick(t)
   -- toms and gaps need something to play / something to stop
   -- toms belong to the hats (style, mute)
   if f == "toms" and (e < 0.25 or S.hat_style == 3 or S.mute.hats) then f = "throw" end
   if f == "gap" and not S.on_kick and (S.gain.hats or 0) == 0 then f = "dip" end
   return f
+end
+
+-- small glitches inside a bar: {step, mode, slices (16ths), length (16ths)}.
+-- more near the top of the energy and in kickless stretches; never on a
+-- bar with a fill, never under a solo
+local function roll_glitch(S)
+  S.glitches = nil
+  local p = GLITCH_P[S.glitch_amt or 3] or 0
+  if p == 0 or S.fill or next(S.solo or {}) or S.mute.ticks then return end
+  p = p * (0.4 + S.energy * 0.8 + (S.kickless and 0.3 or 0))
+  local n = 0
+  while math.random() < p and n < 3 do
+    n = n + 1
+    S.glitches = S.glitches or {}
+    local step = G.pick({4, 6, 8, 10, 12, 14, 15, 16, 7, 11})
+    local r = math.random()
+    local g
+    if r < 0.45 then g = {step, 1, G.pick({0.5, 0.5, 1}), G.pick({1, 2, 2})}   -- stutter
+    elseif r < 0.65 then g = {step, 4, 0.5, 2}                                -- chop
+    elseif r < 0.82 then g = {step, 5, 1, G.pick({2, 4})}                     -- crush
+    else g = {step, 3, 1, 2} end                                              -- reverse
+    S.glitches[step] = g
+    p = p * 0.5
+  end
 end
 
 local function roll_fill(S, bar_in_phrase, bar_in_block)
@@ -237,6 +279,7 @@ function C.bar(S)
   -- dub throw on the last bar of some phrases
   S.throw = (bar_in_block == BLOCK) and (math.random() < 0.2 + S.dub * 0.35)
   roll_fill(S, bar_in_phrase, bar_in_block)
+  roll_glitch(S)
 
   S.track_bar = S.track_bar + 1
 
@@ -272,6 +315,10 @@ function C.phrase(S)
   S.roll_bass     = math.random() < 0.6
   S.roll_shaker   = math.random() < 0.5
   S.roll_toms     = math.random() < 0.45
+  S.roll_ride     = math.random() < 0.5
+  S.roll_ghost    = math.random() < 0.5
+  S.roll_perc_kl  = math.random() < 0.6    -- perc stays in (or comes in) for a kickless stretch
+  S.roll_clap_kl  = math.random() < 0.7    -- clap sits out a kickless stretch
   C.decide(S)
   if not S.freeze then C.mutate(S) end
 end
@@ -310,20 +357,34 @@ function C.decide(S)
                   and (S.bass_style == 2 or not (kickless and S.roll_bass))
   S.on_kick     = over("kick") and not kickless
   S.on_pump     = over("pump")
+  -- percussion: auto brings it in on the energy, and on some kickless
+  -- stretches lower down too (congas in the breakdown); always stays in;
+  -- never
+  S.want.perc   = S.perc_style ~= 3 and (over("perc") or (kickless and S.roll_perc_kl and e > 0.15))
+                  and (S.perc_style == 2 or not drop or S.roll_perc_kl)
+  -- clap: auto sits out drops and most kickless stretches
+  S.want.clap   = over("clap") and S.clap_style ~= 3
+                  and (S.clap_style == 2 or not (drop or (kickless and S.roll_clap_kl)))
+  -- glitch ticks: off with glitch off; float on in kickless stretches
+  S.want.ticks  = (S.glitch_amt or 3) > 1
+                  and (over("ticks") or (kickless and e > 0.2 and (S.glitch_amt or 3) > 2))
+  -- ride and ghost kicks: near the top, on some phrases (ride rides with the hats)
+  S.on_ride     = over("ride") and S.roll_ride
+  S.on_ghost    = over("ghost") and S.roll_ghost and S.on_kick
 
   -- hand mutes (grid) override the arc; the pump keeps breathing
   local m = S.mute or {}
   for k, _ in pairs(S.want) do
     if m[k] then S.want[k] = false end
   end
-  if m.kick then S.on_kick = false end
+  if m.kick then S.on_kick = false; S.on_ghost = false end
 
   -- solo: only the soloed parts (beds included) play
   if next(S.solo or {}) then
     for k, _ in pairs(S.want) do
       if not S.solo[k] then S.want[k] = false end
     end
-    if not S.solo.kick then S.on_kick = false end
+    if not S.solo.kick then S.on_kick = false; S.on_ghost = false end
   end
 end
 
@@ -344,6 +405,20 @@ function C.mutate(S)
                                            {"rolling", "octave"}})[j]))
   end
   if math.random() < 0.10 * m then S.pat.rim   = G.rim() end
+  if math.random() < 0.10 * m then S.pat.clap  = G.clap() end
+  if math.random() < 0.12 * m then S.pat.ride  = G.ride() end
+  if math.random() < 0.18 * m then S.pat.ticks = G.ticks() end
+  -- the perc lane rotates or regrows, like an arp lane; it keeps its kit
+  if math.random() < 0.30 * m then
+    local pc = S.pat.perc
+    if math.random() < 0.6 then
+      table.insert(pc, 1, table.remove(pc, pc.len))
+    else
+      local np = G.perc()
+      np.kit, np.pos = pc.kit, 0
+      S.pat.perc = np
+    end
+  end
   if math.random() < 0.06 * m then
     local j = math.random(4)
     S.lanes[j] = G.lane(j)

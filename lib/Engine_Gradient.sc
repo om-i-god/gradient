@@ -567,8 +567,10 @@ Engine_Gradient : CroneEngine {
       wet = Select.ar((mode - 3).clip(0, 2), [
         wet,
         wet * Lag.ar(LFPulse.ar(sl.reciprocal, 0, 0.5), 0.002),
-        // companded: 8 steps on the square root, so quiet pads survive
-        Latch.ar(wet, Impulse.ar(3000)).sign * ((Latch.ar(wet, Impulse.ar(3000)).abs.sqrt * 8).round(1) / 8).squared
+        // companded: 8 steps on the square root, so quiet pads survive.
+        // the max() matters: norns' ARM sqrt returns NaN for 0 and for
+        // denormals (fine on a Mac), and one NaN froze the master's levels
+        { |h| h.sign * ((h.abs.max(0.000001).sqrt * 8).round(1) / 8).squared }.value(Latch.ar(wet, Impulse.ar(3000)))
       ]);
       ReplaceOut.ar(dryBus,  (sig[0..1] * (1 - (gate * mix))) + (wet[0..1] * gate * mix));
       ReplaceOut.ar(pumpBus, (sig[2..3] * (1 - (gate * mix))) + (wet[2..3] * gate * mix));
@@ -577,10 +579,12 @@ Engine_Gradient : CroneEngine {
     SynthDef(\grad_master, {
       arg dryIn, pumpIn, out, ampOut, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2,
           pumpLpf=20000;
-      var d   = In.ar(dryIn, 2);
+      // Sanitize: a NaN or inf from any voice becomes 0 here, so it can't
+      // stick in the limiter or the Amplitude followers (they never recover)
+      var d   = Sanitize.ar(In.ar(dryIn, 2));
       var mono, toVis;
       // pumpLpf: the fill's filter dip, on everything but kick and hats
-      var p   = LPF.ar(In.ar(pumpIn, 2), Lag.kr(pumpLpf, 0.12).clip(80, 20000));
+      var p   = LPF.ar(Sanitize.ar(In.ar(pumpIn, 2)), Lag.kr(pumpLpf, 0.12).clip(80, 20000));
       var env = EnvGen.kr(Env.perc(0.005, pumpRel, 1, -3), t_pump);
       var sig = d + (p * (1 - (env * pumpDepth)));
       sig = HPF.ar(sig, 28);

@@ -1074,7 +1074,7 @@ local function setup_params()
   params:add_control("bed_verb", "to reverb", controlspec.new(0, 1, "lin", 0.01, 0.35))
   params:set_action("bed_verb", function(v) engine.tweak("bed_verb", v) end)
 
-  params:add_separator("LEVELS")
+  params:add_separator("gradient_levels", "LEVELS")
   for _, p in ipairs({{"kick", 100}, {"hat", 100}, {"rim", 100}, {"bass", 100},
                       {"chord", 100}, {"arp", 100}, {"clap", 100}, {"perc", 100},
                       {"tick", 100}}) do

@@ -64,6 +64,7 @@ function O.setup_params(vport_names, vport_ids)
   params:add_number("cc_dub", "dub cc", 0, 127, 0)
   params:add_number("cc_tone", "tone cc", 0, 127, 0)
   params:add_number("cc_phrase", "phrase pulse cc", 0, 127, 0)
+  params:add_number("cc_kickless", "kickless cc", 0, 127, 0)
 end
 
 ------------------------------------------------------------------------
@@ -132,10 +133,11 @@ end
 -- once a bar: energy cv + ccs
 ------------------------------------------------------------------------
 
-local function cc(num, val)
+-- always: send even if unchanged (the phrase pulse doubles as a heartbeat)
+local function cc(num, val, always)
   if num == 0 or not devs.cc then return end
   val = math.max(0, math.min(127, math.floor(val + 0.5)))
-  if cc_last[num] == val then return end
+  if cc_last[num] == val and not always then return end
   cc_last[num] = val
   devs.cc:cc(num, val, params:get("cc_ch"))
 end
@@ -149,10 +151,8 @@ function O.bar(S, phrase_start)
   cc(params:get("cc_energy"), S.energy * 127)
   cc(params:get("cc_dub"), params:get("dub") * 1.27)
   cc(params:get("cc_tone"), params:get("tone") * 1.27)
-  local pc = params:get("cc_phrase")
-  if pc > 0 and devs.cc then
-    cc(pc, phrase_start and 127 or 0)
-  end
+  cc(params:get("cc_phrase"), phrase_start and 127 or 0, true)
+  cc(params:get("cc_kickless"), S.kickless and 127 or 0)
 end
 
 return O

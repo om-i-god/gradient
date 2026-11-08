@@ -291,7 +291,7 @@ for th, name in ipairs(NAMES) do
 
     -- audio reactivity: identical runs are identical, and ramping out_hi or
     -- out_lo (everything else held) changes the picture
-    test("visuals " .. name .. " reacts to out_hi and out_lo", function()
+    test("visuals " .. name .. " reacts to every band", function()
       local function with(over)
         return function(t)
           local v = SCEN.mid.audio(t)
@@ -310,9 +310,43 @@ for th, name in ipairs(NAMES) do
       assert(same == 0, "two identical runs differ: " .. same)
       local dhi = paired(with({out_hi = 0}), with({out_hi = 1}))
       local dlo = paired(with({out_lo = 0}), with({out_lo = 1}))
-      if REPORT then print(string.format("react %-9s hi %.3f lo %.3f", name, dhi, dlo)) end
+      local dmid = paired(with({out_mid = 0}), with({out_mid = 1}))
+      local damp = paired(with({out_amp = 0}), with({out_amp = 1}))
+      if REPORT then print(string.format("react %-9s hi %.3f lo %.3f mid %.3f amp %.3f", name, dhi, dlo, dmid, damp)) end
       assert(dhi > 0.01, string.format("out_hi barely changes it: %.4f", dhi))
       assert(dlo > 0.02, string.format("out_lo barely changes it: %.4f", dlo))
+      assert(dmid > 0.01, string.format("out_mid barely changes it: %.4f", dmid))
+      assert(damp > 0.01, string.format("out_amp barely changes it: %.4f", damp))
+    end)
+
+    -- every part of the music moves every theme: fire one event at frame 60
+    -- (strict: no hat fallback) and compare frames 60..72 against a control
+    -- that never fires it. both reseed right after, so the groove's random
+    -- stream matches whatever a handler did. the control runs once.
+    test("visuals " .. name .. " reacts to every part", function()
+      local EVENTS = {
+        {"kick"}, {"pump"}, {"hat"}, {"clap"}, {"perc", 2, 62}, {"tick", 3},
+        {"stab", {50, 57, 60, 65}}, {"bass", 38}, {"arp", 2, 67, 3}, {"pad", {50, 57, 60, 65}}}
+      local function probe(ev)
+        return function(f, VIS)
+          if f == 1 then VIS.strict = true end
+          if f == 60 then
+            if ev then VIS.event(ev[1], ev[2], ev[3], ev[4]) end
+            math.randomseed(60)
+          end
+        end
+      end
+      local ctl = run(th, "mid", {frames = 90, keep = true, at = probe(nil)})
+      local dead = {}
+      for _, ev in ipairs(EVENTS) do
+        local A = run(th, "mid", {frames = 90, keep = true, at = probe(ev)})
+        local d = 0
+        for i = 60, 72 do d = d + bufdiff(A.frames[i], ctl.frames[i]) end
+        d = d / 13
+        if REPORT then print(string.format("part %-9s %-5s %.4f", name, ev[1], d)) end
+        if not (d > 0.003) then dead[#dead + 1] = string.format("%s (%.4f)", ev[1], d) end
+      end
+      assert(#dead == 0, name .. " does not react to: " .. table.concat(dead, ", "))
     end)
 
     -- bad input: garbage audio, short / empty chords, no lanes, tempo flapping
@@ -460,7 +494,8 @@ if not ONLY then
     for th = 1, #NAMES do
       for _, ev in ipairs({{"clap"}, {"perc", 2, 60}, {"perc", "x", nil}, {"tick", 9},
                            {"glitch", 0 / 0, 1e9}, {"glitch", -3, -1}, {"glitch"}, {42}, {nil},
-                           {"nonsense", {}, {}}, {"perc", math.huge, -math.huge}}) do
+                           {"nonsense", {}, {}}, {"perc", math.huge, -math.huge},
+                           {"pad", {}}, {"pad", {60}}, {"pad", {0 / 0, 50}}, {"pad", "x"}, {"pad", nil}}) do
         VIS.event(ev[1], ev[2], ev[3])
       end
       screen.clear(); RAST.reset_ops()

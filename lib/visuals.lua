@@ -25,8 +25,10 @@
 -- refreshed every frame) and returns {draw = fn(S), stab = fn(notes),
 -- bass = fn(note), arp = fn(lane, note, step), kick = fn(), pump = fn(),
 -- hat = fn(), clap = fn(), perc = fn(voice, note), tick = fn(kind),
--- bar = fn(S), init = fn(), clear = fn()}; all but draw are optional (a
--- theme without clap / perc / tick hears them as hats). events reach only
+-- pad = fn(notes), bar = fn(S), init = fn(), clear = fn()}; all but draw
+-- are optional (a theme without clap / perc / tick hears them as hats,
+-- unless VIS.strict is set, which the tests use to find themes that never
+-- answer them; pad has no fallback: K.env.pad rises for every theme). events reach only
 -- the theme on screen; the kit keeps shared history (K.hist, the
 -- envelopes) for every theme.
 --
@@ -70,9 +72,9 @@ local heard = -1                                -- NOW when a poll last arrived
 
 -- envelopes: events set them to 1, they decay on time
 local env = {kick = 0, pump = 0, stab = 0, bass = 0, arp = 0, hat = 0,
-  clap = 0, perc = 0, tick = 0}
+  clap = 0, perc = 0, tick = 0, pad = 0}
 local ENV_TAU = {kick = 0.12, pump = 0.2, stab = 0.18, bass = 0.2, arp = 0.12, hat = 0.06,
-  clap = 0.1, perc = 0.1, tick = 0.05}
+  clap = 0.1, perc = 0.1, tick = 0.05, pad = 0.6}
 
 -- the glitch tear (see the header): time left, length, mode, band, shift
 local gl_t, gl_dur, gl_mode = 0, 0, 0
@@ -602,7 +604,10 @@ end
 -- dispatch
 ------------------------------------------------------------------------
 
+VIS.strict = false
+
 function VIS.init()
+  VIS.strict = false
   for i = #grains, 1, -1 do grains[i] = nil end
   for i = #hist, 1, -1 do hist[i] = nil end
   for k in pairs(lane_note) do lane_note[k] = nil end
@@ -643,7 +648,7 @@ function VIS.audio(name, v)
 end
 
 -- kind: "kick", "pump", "hat", "stab" (notes), "bass" (note),
--- "arp" (lane, note, step), "bar" (S)
+-- "arp" (lane, note, step), "pad" (notes), "bar" (S)
 function VIS.event(kind, a, b, c)
   if type(kind) ~= "string" then return end
   if env[kind] then env[kind] = 1 end
@@ -661,6 +666,16 @@ function VIS.event(kind, a, b, c)
     lane_note[lane] = num(b, lane_note[lane] or 72)
     lane_step[lane] = num(c, lane_step[lane] or 1)
     if i then call(i, "arp", lane, lane_note[lane], lane_step[lane]) end
+  elseif kind == "pad" then
+    -- up to four finite numbers, copied; anything else is an empty list
+    local notes = {}
+    if type(a) == "table" then
+      for k = 1, 4 do
+        local m = num(a[k], nil)
+        if m then notes[#notes + 1] = m end
+      end
+    end
+    if i then call(i, "pad", notes) end
   elseif kind == "pump" then
     duck_age = 0
     if i then call(i, "pump") end
@@ -674,6 +689,8 @@ function VIS.event(kind, a, b, c)
         if kind == "perc" then call(i, "perc", clamp(math.floor(num(a, 1)), 1, 3), num(b, 60))
         elseif kind == "tick" then call(i, "tick", clamp(math.floor(num(a, 1)), 1, 4))
         else call(i, "clap") end
+      elseif VIS.strict then
+        -- no fallback
       elseif kind ~= "tick" or rnd() < 0.5 then
         call(i, "hat")
       end

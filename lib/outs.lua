@@ -133,7 +133,7 @@ end
 -- once a bar: energy cv + ccs
 ------------------------------------------------------------------------
 
--- always: send even if unchanged (the phrase pulse doubles as a heartbeat)
+-- always: send even if unchanged
 local function cc(num, val, always)
   if num == 0 or not devs.cc then return end
   val = math.max(0, math.min(127, math.floor(val + 0.5)))
@@ -148,11 +148,13 @@ function O.bar(S, phrase_start)
       if out_mode(n) == 7 then crow.output[n].volts = S.energy * 5 end
     end
   end
-  cc(params:get("cc_energy"), S.energy * 127)
-  cc(params:get("cc_dub"), params:get("dub") * 1.27)
-  cc(params:get("cc_tone"), params:get("tone") * 1.27)
+  -- the arc goes out on every bar, so a listener that joins late (or
+  -- reloads mid-breakdown) has the whole picture within a bar
+  cc(params:get("cc_energy"), S.energy * 127, true)
+  cc(params:get("cc_dub"), params:get("dub") * 1.27, true)
+  cc(params:get("cc_tone"), params:get("tone") * 1.27, true)
   cc(params:get("cc_phrase"), phrase_start and 127 or 0, true)
-  cc(params:get("cc_kickless"), S.kickless and 127 or 0)
+  cc(params:get("cc_kickless"), S.kickless and 127 or 0, true)
 end
 
 return O

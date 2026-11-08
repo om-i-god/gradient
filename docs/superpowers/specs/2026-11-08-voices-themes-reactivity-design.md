@@ -10,6 +10,21 @@ Several themes also ignore the chord stabs, the arps or the mid band.
 
 What the user approved in chat (2026-11-08) is below, in sections 1–3.
 
+## Add, never replace
+
+The user (2026-11-08): "I don't want to replace anything though, just add
+more variation."
+
+- Every existing voice, option, theme and behaviour stays exactly as it is.
+  New voices are extra choices next to the old ones, and new themes are
+  extra entries after the old 16.
+- The existing themes keep their compositions and their current reactions.
+  Full audioreactivity *adds* reactions to the parts each theme ignores
+  today, and doesn't redraw the theme.
+- Existing param IDs, option orders and indices don't change, so saved
+  PSETs load the same as before. New options are appended to the end of
+  each list.
+
 ## Goals
 
 1. **Voice options** for bass, chord stabs, hats, pads and arp lanes. Each has
@@ -33,8 +48,9 @@ What the user approved in chat (2026-11-08) is below, in sections 1–3.
 - Anything strobes, or the screen gets bright and busy. The existing
   limits stay as they are: lit area ≤ 40%, frame-to-frame change
   ≤ `DIFF_MAX` 0.7, level 15 ≤ 12% of pixels, ≤ 1200 draw calls per frame.
-- A new voice is much louder or quieter than the one it replaces. Each
-  type should sit at about the same level as the default.
+- A new voice is much louder or quieter than the existing voices for the
+  same part. Each new type should sit at about the same level as the part's
+  first fixed choice.
 - CPU climbs. The norns idles at about 16–18% today. A peak with the
   heaviest choices on every part should stay under about 45%.
 - NaN or inf from any new voice. The norns' ARM `sqrt` returns NaN at 0,
@@ -184,7 +200,7 @@ reaction to each part.
   `lua test/sim.lua` pass on both Lua 5.4 and Lua 5.3.
 - `test/sc/run.sh` and `test/sc/run.sh test/sc/sound.scd` play every new
   voice with no errors. Add a level check: each new type's peak is within
-  about ±4 dB of the default type for the same part.
+  about ±4 dB of the existing first fixed type for the same part.
 - `lua test/contact.lua out.pgm` gives a contact sheet of all 24 themes. A
   person looks at it before shipping.
 - **On a norns,** via the websocket REPL at :5555/:5556: compile, load, play,

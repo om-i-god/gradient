@@ -40,7 +40,19 @@ engine = setmetatable({}, {__index = function(_, k)
 end})
 TWV = {}   -- last value sent per tweak key
 
-function include(p) return dofile(p .. ".lua") end
+-- VIS.event calls are counted by kind (evcalls) so the sim can pair them with engine calls
+evcalls = {}
+function include(p)
+  local m = dofile(p .. ".lua")
+  if p == "lib/visuals" and m.event then
+    local ev = m.event
+    m.event = function(kind, ...)
+      evcalls[kind] = (evcalls[kind] or 0) + 1
+      return ev(kind, ...)
+    end
+  end
+  return m
+end
 
 -- params ---------------------------------------------------------------
 local P = {order = {}, defs = {}}
@@ -419,6 +431,10 @@ table.sort(ls)
 print(string.format("harmony: %d bars changed, avg %.1f semitones moved, max %d;  %s",
   changes, changes > 0 and moves / changes or 0, max_leap, table.concat(ls, " ")))
 
+assert((calls.wash_chord or 0) > 0, "no wash chords")
+assert((evcalls.pad or 0) == calls.wash_chord,
+  string.format("pad events (%d) must match engine.wash_chord calls (%d)", evcalls.pad or 0, calls.wash_chord))
+print(string.format("pad events %d == wash_chord calls %d", evcalls.pad, calls.wash_chord))
 assert((calls.bass_glide or 0) > 0, "no bass glides")
 assert((calls.tom or 0) > 0, "no toms")
 local keys = {}

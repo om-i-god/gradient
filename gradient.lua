@@ -196,6 +196,7 @@ local function apply_bar()
     S.chord_changed = false
     local c = S.chord
     engine.wash_chord(mtof(c[1] - 12), mtof(c[2] - 12), mtof(c[3]), mtof(c[4]))
+    VIS.event("pad", {c[1] - 12, c[2] - 12, c[3], c[4]})
   end
 end
 

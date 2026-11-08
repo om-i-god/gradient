@@ -65,6 +65,11 @@ function O.setup_params(vport_names, vport_ids)
   params:add_number("cc_tone", "tone cc", 0, 127, 0)
   params:add_number("cc_phrase", "phrase pulse cc", 0, 127, 0)
   params:add_number("cc_kickless", "kickless cc", 0, 127, 0)
+  -- the key as plain numbers: root and chord root 0-11 (C = 0), mode = its
+  -- index in KEY > mode (1 aeolian, 2 dorian ...)
+  params:add_number("cc_key", "key root cc", 0, 127, 0)
+  params:add_number("cc_mode", "mode cc", 0, 127, 0)
+  params:add_number("cc_chord", "chord root cc", 0, 127, 0)
 end
 
 ------------------------------------------------------------------------
@@ -155,6 +160,9 @@ function O.bar(S, phrase_start)
   cc(params:get("cc_tone"), params:get("tone") * 1.27, true)
   cc(params:get("cc_phrase"), phrase_start and 127 or 0, true)
   cc(params:get("cc_kickless"), S.kickless and 127 or 0, true)
+  cc(params:get("cc_key"), S.root_pc % 12, true)
+  cc(params:get("cc_mode"), S.mode or 1, true)
+  cc(params:get("cc_chord"), (S.root_pc + (S.chord_root_pc or 0)) % 12, true)
 end
 
 return O

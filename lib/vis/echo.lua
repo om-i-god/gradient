@@ -28,11 +28,12 @@ return function(K)
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * K.trail))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
   function M.kick() mark("kick") end
+  function M.pump() mark("pump") end
   function M.hat() mark("hat") end
   function M.clap() mark("clap") end
   function M.bass() mark("bass") end
@@ -89,6 +90,11 @@ return function(K)
   function M.draw(S)
     local T, DT = K.T, K.DT
     kl = K.kickless
+    local fine, dense, RX = K.detail ~= "classic", K.detail == "dense", K.react
+    if RX > 1 then RX = 1 + (RX - 1) * 0.25 end     -- eased above 1: the frame change bound is tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RX, 13) or l end
     -- the echo: each emitter repeats at the echo time into the next arch
     for i = #emits, 1, -1 do
       local em = emits[i]
@@ -104,8 +110,9 @@ return function(K)
     end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, cl, hh, bh, tk = fade("kick", 0.3), fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
+    local pf = fade("pump", 0.3)
     local pd, mid = pdz, A[K.MID]
-    lamp = K.follow(lamp, (1 - K.duck * 0.7) * (0.7 + 0.3 * A[K.AMP]) + K.env.kick * 0.3 + pd * 0.15, 0.05, DT)
+    lamp = K.follow(lamp, (1 - K.duck * 0.7) * (fp and (0.62 + 0.6 * A[K.AMP]) or (0.7 + 0.3 * A[K.AMP])) + K.env.kick * 0.3 + pd * 0.15, 0.05, DT)
     bs = K.follow(bs, math.max(K.env.bass * 0.8, A[K.LO], bh * 0.9) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.07, DT)
     local duckv = 1 - 0.55 * K.duck * K.duck
 
@@ -118,15 +125,19 @@ return function(K)
     -- hats glint the stars and run a spark along the overhead wire
     if hh > 0.03 then
       for i = 0, 8 do
-        put(5 * hh, math.floor(K.hash(i, 21) * 126), 1 + (i * 5) % 9, 1, 1)
+        put(E(5 * hh), math.floor(K.hash(i, 21) * 126), 1 + (i * 5) % 9, 1, 1)
       end
-      K.dashes(5 * hh, 3, 3, 9, T * 40, 0, 128)
+      if fine then      -- and catch on the water
+        K.dashes(E(4 * hh), QUAY + 5, 1, 8, T * 25, 0, 128)
+      end
+      K.dashes(E(5 * hh), 3, 3, 9, T * 40, 0, 128)
     end
     -- the overhead wire on its masts over the deck
-    line(1.5, 0, 3, 127, 3)
-    for k = 0, NA do put(1.5, X0 + k * PITCH - 1, 3, 1, DECK - 3) end
+    local wl = 1.5 + (fine and E(5 * pf) or 0)    -- a pump flickers the wire and its masts
+    line(wl, 0, 3, 127, 3)
+    for k = 0, NA do put(wl, X0 + k * PITCH - 1, 3, 1, DECK - 3) end
     -- the deck: parapet, the deck's edge
-    line(3 + K.bar_pulse * 2, 0, DECK, 127, DECK)
+    line(3 + K.bar_pulse * 2 + (fine and E(3 * pf) or 0), 0, DECK, 127, DECK)
     line(2, 0, DECK + 2, 127, DECK + 2)
 
     -- the masonry: mortar courses between the openings, pier joints
@@ -137,10 +148,20 @@ return function(K)
         local c = ax(k) + OW / 2
         local a, b = math.floor(c - h + 0.5), math.floor(c + h + 0.5)
         if h <= 0 then a, b = math.floor(c), math.floor(c) end
-        if a > xs then put(1, xs, y, a - xs, 1) end
+        if a > xs then
+          if fp then K.dashes(1, y, 2, 4, xs + ((y // 4) % 2) * 2, xs, a) else put(1, xs, y, a - xs, 1) end
+        end
         xs = b
       end
-      if xs < 128 then put(1, xs, y, 128 - xs, 1) end
+      if xs < 128 then
+        if fp then K.dashes(1, y, 2, 4, xs + ((y // 4) % 2) * 2, xs, 128) else put(1, xs, y, 128 - xs, 1) end
+      end
+    end
+    -- dense: the brick joints in the piers, staggered course to course
+    if dense and K.playing then
+      for y = DECK + 4, QUAY - 5, 8 do
+        for k = 0, NA - 2 do put(1, ax(k) + OW + 2 + ((y // 8) % 2) * 2, y + 1, 1, 3) end
+      end
     end
     -- the arch rings and their lamps
     for k = 0, NA - 1 do
@@ -151,7 +172,7 @@ return function(K)
         local a = math.pi - s / 6 * math.pi
         local nx, ny = c + math.cos(a) * R, SPRING - math.sin(a) * R
         line(2.5, px, py, nx, ny)
-        if cl > 0.03 then line(7 * cl, px, py, nx, ny) end
+        if cl > 0.03 then line(E(7 * cl), px, py, nx, ny) end
         px, py = nx, ny
       end
       line(2, x0, SPRING, x0, QUAY)
@@ -163,16 +184,17 @@ return function(K)
       put(1 + 2.5 * ll, c - 4, QUAY - 1, 9, 1)
       -- a tick flickers one arch's lamp
       if tk > 0.03 and hit.tk == k then
-        put(7 * tk, c - 1, SPRING - R + 3, 3, 1)
-        line(6 * tk, x0, SPRING, x0, QUAY)
-        line(6 * tk, x0 + OW, SPRING, x0 + OW, QUAY)
-        put(4 * tk, c - 4, QUAY - 1, 9, 1)
+        put(E(7 * tk) + (fine and 2 or 0), c - 1, SPRING - R + 3, 3, 1)
+        line(E(6 * tk) + (fine and 1.5 or 0), x0, SPRING, x0, QUAY)
+        line(E(6 * tk) + (fine and 1.5 or 0), x0 + OW, SPRING, x0 + OW, QUAY)
+        put(E(4 * tk), c - 4, QUAY - 1, 9, 1)
         for r = 0, 3 do put(3 * tk, c - 1 - r, QUAY + 3 + r * 3, 3 + r * 2, 1) end
       end
     end
 
     -- haze in the arches, thick when the kick is away
-    K.haze(0, SPRING - 6, 128, QUAY, 0.04 + 0.22 * kl + 0.08 * K.throw + 0.15 * mid + 0.2 * pd, 1, T * 2)
+    K.haze(0, SPRING - 6, 128, QUAY, fp and ((0.04 + 0.22 * kl + 0.08 * K.throw) * 0.2 + 0.15 * mid + 0.2 * pd)
+      or (0.04 + 0.22 * kl + 0.08 * K.throw + 0.15 * mid + 0.2 * pd), 1, T * 2)
 
     -- the mids thicken the air over the deck
     if mid > 0.05 then K.haze(0, 6, 128, SPRING - 6, 0.25 * mid, 1, -T * 2) end
@@ -195,10 +217,13 @@ return function(K)
     -- the bass thumps the piers' feet into the water
     if bh > 0.03 then
       for k = 0, NA - 1 do
-        put(4.5 * bh, ax(k) - 1, QUAY + 1, 2, 11)
-        put(4.5 * bh, ax(k) + OW, QUAY + 1, 2, 11)
+        put(E(4.5 * bh), ax(k) - 1, QUAY + 1, 2, 11)
+        put(E(4.5 * bh), ax(k) + OW, QUAY + 1, 2, 11)
       end
-      put(4 * bh, 0, QUAY, 128, 1)
+      put(E(4 * bh), 0, QUAY, 128, 1)
+      if fine then      -- and the bass shakes a dotted row loose on the water
+        K.dashes(E(4 * bh), QUAY + 2, 2, 4, T * 6, 0, 128)
+      end
     end
     -- the kick sends a ring across the canal
     if kk > 0.03 then
@@ -207,26 +232,27 @@ return function(K)
       for s = 1, 20 do
         local a = s / 20 * K.TAU
         local nx, ny = 64 + math.cos(a) * rx, QUAY + 7 + math.sin(a) * ry
-        line(5 * kk, px, py, nx, ny)
+        line(E(5 * kk) + (fine and 0.8 or 0), px, py, nx, ny)
         px, py = nx, ny
       end
     end
     -- a perc strikes a spark on the wire at its voice's mast; it falls to the deck
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local f = math.exp(-(K.NOW - p.t) / 0.55)
+      local f = math.exp(-(K.NOW - p.t) / (0.55 * K.trail))
       if f < 0.03 then table.remove(percs, i)
       else
         local x = X0 + p.a * PITCH + p.b * PITCH
-        put(6 * f, x - 1, 2, 3, 3)
-        put(3 * f, x - 3, 3, 7, 1)
-        put(5 * f, x, 4, 2, 4 + (1 - f) * 8)
+        put(E(6 * f), x - 1, 2, 3, 3)
+        put(E(3 * f), x - 3, 3, 7, 1)
+        put(E(5 * f), x, 4, 2, 4 + (1 - f) * 8)
+        if fine then K.put_sub(E(8 * f), x, 4 + (1 - f) * 8 + 2, 2, 2) end    -- the spark itself, falling
       end
     end
 
     -- ripples drifting on the canal
     for r = 0, 2 do
-      K.dashes(1, QUAY + 4 + r * 4, 2 + r, 11 + r * 4, T * (3 + r * 2) + r * 5, 0, 128)
+      if not (fp and r == 1) then K.dashes(1, QUAY + 4 + r * 4, 2 + r, 11 + r * 4, T * (3 + r * 2) + r * 5, 0, 128) end
     end
 
     -- train windows on the deck, running right to left at their lane's row
@@ -235,7 +261,12 @@ return function(K)
       local x = 130 - (T - w.t0) * 70
       if x < -6 then table.remove(wins, i)
       else
-        put(3 + 4 * K.lane_kick[w.lane] + 1.5 * lamp, x, w.y, w.w, 1)
+        local wv = 3 + E(4 * K.lane_kick[w.lane]) + 1.5 * lamp
+        put(wv, x, w.y, w.w, 1)
+        if fine then      -- the carriage behind it: two more windows and a lit roof
+          put(wv * 0.75, x + w.w + 2, w.y, w.w, 1)
+          put(wv * 0.4, x - 1, w.y - 1, w.w + 2, 1)           -- the lead car's lit roof
+        end
       end
     end
 
@@ -247,7 +278,7 @@ return function(K)
     for i = #copies, 1, -1 do
       local c = copies[i]
       local age = T - c.t0
-      local fade = math.exp(-age / 1.7) * math.min(1, age * 6 + 0.15)
+      local fade = math.exp(-age / (1.7 * K.trail)) * math.min(1, age * 6 + 0.15)
       local lv = c.lv * fade * duckv
       if lv < 0.6 or age > 6 then table.remove(copies, i)
       else
@@ -255,7 +286,14 @@ return function(K)
         local w = OW - 3
         for k = 1, 4 do
           local y = c.ys[k] + math.sin(T * 1.1 + c.ph + k * 0.7) * wow
-          put(lv, x, y, w, 1)
+          if fine then
+            -- glide in x and y; near a whole row it snaps, so a bar is not smeared over two rows
+            local fy = y - math.floor(y)
+            if fy < 0.22 then y = math.floor(y) elseif fy > 0.78 then y = math.floor(y) + 1 end
+            K.put_sub(lv, x, y, w, 1)
+          else
+            put(lv, x, y, w, 1)
+          end
           if th > 0.05 and c.arch > 0 then
             local sl = math.floor(PITCH * 0.7 * th)
             put(lv * 0.2 * th, x - sl, y, sl, 1)

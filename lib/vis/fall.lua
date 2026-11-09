@@ -63,10 +63,11 @@ return function(K)
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * K.trail))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
+  function M.pump() mark("pump") end
   function M.hat() mark("hat") end
   function M.clap() mark("clap") end
   function M.bass() mark("bass") end
@@ -129,6 +130,7 @@ return function(K)
     if l < 0.5 or rx < 0.5 then return end
     local px, py = cx + rx, cy
     local n = rx < 4 and 4 or 8
+    if K.detail ~= "classic" and K.playing then n = rx < 4 and 6 or (rx < 9 and 8 or 10) end
     for k = 1, n do
       local a = k / n * K.TAU
       local x, y = cx + math.cos(a) * rx, cy + math.sin(a) * ry
@@ -140,12 +142,18 @@ return function(K)
   function M.draw(S)
     local T, DT, e = K.T, K.DT, K.energy
     local kl = K.kickless
+    local fine, dense, RX = K.detail ~= "classic", K.detail == "dense", K.react
+    if RX > 1 then RX = 1 + (RX - 1) * 0.2 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RX, 13) or l end
     -- the street lamp beyond breathes with the pump; the bass fills the puddle
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local cl, hh, bh, tk = fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
     local pd, mid = pdz, A[K.MID]
+    local pf = fine and E(fade("pump", 0.3)) or 0
     lamp = K.follow(lamp, (0.55 + 0.45 * e) * (1 - K.duck * 0.55) * (1 - kl * 0.3) * (1 + 0.3 * A[K.AMP]) + pd * 0.2, 0.06, DT)
-    glow = K.follow(glow, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.4), A[K.LO] * 0.85, bh * 1.3), 0.08, DT)
+    glow = K.follow(glow, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.4), A[K.LO] * 0.85, bh * (fine and 1.6 or 1.3)), 0.08, DT)
 
     -- the brick face of the near arch: courses, joints, the voussoirs
     for y = 1, 63, 4 do K.row_above(1, y, face) end
@@ -173,7 +181,7 @@ return function(K)
       for k = 0, 16 do
         local X = -1 + k / 8
         local x, y = VX + X * S0, VY + arch(X) * S0
-        if qx then line(7 * cl, qx, qy, x, y) end
+        if qx then line(E(7 * cl), qx, qy, x, y) end
         qx, qy = x, y
       end
     end
@@ -193,10 +201,29 @@ return function(K)
       if v > -0.3 then put(1.2 + fl * 1.2 + v * 0.8 + A[K.HI] * 1.2 + hh * 4, w[1], w[2], 1, 1) end
     end
     K.mass(1, city, math.floor(FAR_FLOOR) - 1, math.floor(VX - SF + 2), math.floor(VX + SF - 1))
-    put(2 + fl * 2.5, VX - SF + 1, math.floor(FAR_FLOOR) - 1, 2 * SF - 2, 1)  -- the street's own light
+    put(2 + fl * 2.5 - 1.5 * pf, VX - SF + 1, math.floor(FAR_FLOOR) - 1, 2 * SF - 2, 1)  -- the street's own light
     line(1, 57, 32, 57, FAR_FLOOR - 2)                 -- a lamp post, its head
-    put(7 + 4 * fl, 58, 32, 1, 1)
+    put(7 + 4 * fl - 3 * pf, 58, 32, 1, 1)
     put(1.5 + fl * 1.5, 57, 33, 3, 1)
+
+    -- dense: the soffit sweats, a bead hanging at each voussoir, glinting on the wet
+    if dense and K.playing then
+      for k = 1, 15, 2 do
+        local X = -1 + k / 8
+        local x, y = VX + X * S0, VY + arch(X) * S0
+        put(2 + 1.5 * math.sin(T * 0.8 + k * 1.7), x, y + 2, 1, 1)
+      end
+    end
+    -- a pump traces the far opening's rim as the lamp ducks
+    if pf > 0.05 then
+      local qx, qy
+      for k = 0, 12 do
+        local X = -1 + k / 6
+        local x, y = VX + X * SF, VY + arch(X) * SF
+        if qx then line(5 * pf, qx, qy, x, y) end
+        qx, qy = x, y
+      end
+    end
 
     -- the tunnel: ribs, the crown and springing lines, the floor's joints
     for zi, z in ipairs({0.22, 0.5}) do
@@ -205,7 +232,7 @@ return function(K)
       for k = 0, 10 do
         local X = -1 + k / 5
         local x, y = VX + X * s, VY + arch(X) * s
-        if px0 then line(1 + (hit.tk == zi - 1 and 5 * tk or 0), px0, py0, x, y) end
+        if px0 then line(1 + (hit.tk == zi - 1 and E(5 * tk) or 0), px0, py0, x, y) end
         px0, py0 = x, y
       end
       line(1, VX - s, VY, VX - s, VY + FLOORY * s)
@@ -215,13 +242,16 @@ return function(K)
     line(1, VX + S0, VY, VX + SF, VY)
     for k = -4, 4 do
       local X = k / 4
-      line(1 + 10 * bh, VX + X * SF, FAR_FLOOR + 1, VX + X * S0 * 1.25, 63)
+      line(1 + E(10 * bh) + (fine and bh or 0), VX + X * SF, FAR_FLOOR + 1, VX + X * S0 * 1.25, 63)
     end
 
     -- hats throw a mist of spray across the far light
     if hh > 0.03 then
+      if fine then      -- and a few fine flecks high in the light
+        for k = 0, 5 do put(E(6 * hh), VX - SF + 3 + math.floor(K.hash(k, math.floor(T * 8)) * (2 * SF - 6)), VY - 14 + k * 4, 1, 1) end
+      end
       for y = VY - 16, math.floor(FAR_FLOOR) - 2, 3 do
-        K.dashes(5 * hh, y, 1, 3, T * 25 + y * 5, VX - SF + 2, VX + SF - 2)
+        K.dashes(E(5 * hh), y, 1, 3, T * 25 + y * 5, VX - SF + 2, VX + SF - 2)
       end
     end
 
@@ -243,12 +273,18 @@ return function(K)
         put(0.6 + glow * 4.5 * (1 - math.abs(u) * 0.5), PX - hw, PY + dy, 2 * hw, 1)
       end
     end
+    if dense and K.playing then       -- and the puddle's rim, dotted
+      for k = 0, 23 do
+        local a = k / 24 * K.TAU
+        put(1 + glow, PX + math.cos(a) * (PRX + 2), PY + math.sin(a) * (PRY + 1), 1, 1)
+      end
+    end
     for i = #ripples, 1, -1 do
       local r = ripples[i]
       local u = (T - r.t0) / 0.9
       if u >= 1 or u < 0 then table.remove(ripples, i)
       else
-        local l = (2 + 6 * r.a) * (1 - u) ^ 1.5 * (0.7 + 0.5 * A[K.LO])
+        local l = (2 + E(6 * r.a) + (fine and 1.5 * r.a or 0)) * (1 - u) ^ 1.5 * (0.7 + 0.5 * A[K.LO])
         ring(l, PX, PY, 3 + u * PRX * 1.2, 0.8 + u * PRY * 1.2)
         if u > 0.15 and r.a > 0.9 then ring(l * 0.6, PX, PY, 3 + (u - 0.15) * PRX * 1.2, 0.8 + (u - 0.15) * PRY * 1.2) end
       end
@@ -257,13 +293,18 @@ return function(K)
     -- a perc strikes a ring on the floor, placed by its voice and note
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      local f = math.exp(-(K.NOW - p.t) / (0.5 * K.trail))
       if f < 0.03 then table.remove(percs, i)
       else
         local s = scale(p.z)
         local u = 1 - f
-        ring(6 * f, VX + p.X * s, VY + FLOORY * s, (2 + u * 9) * s / S0 * 1.6, (2 + u * 9) * s / S0 * 0.45)
-        put(7 * f, VX + p.X * s, VY + FLOORY * s - 1 - u * 5 * s / S0, 1, 2)
+        ring(E(6 * f), VX + p.X * s, VY + FLOORY * s, (2 + u * 9) * s / S0 * 1.6, (2 + u * 9) * s / S0 * 0.45)
+        if fine then      -- the bead lifts off smoothly and a second ring follows it out
+          K.put_sub(E(7 * f), VX + p.X * s, VY + FLOORY * s - 1 - u * 5 * s / S0, 1, 2)
+          ring(E(3.5 * f), VX + p.X * s, VY + FLOORY * s, (1 + u * 6) * s / S0 * 1.6, (1 + u * 6) * s / S0 * 0.45)
+        else
+          put(7 * f, VX + p.X * s, VY + FLOORY * s - 1 - u * 5 * s / S0, 1, 2)
+        end
       end
     end
 
@@ -292,11 +333,13 @@ return function(K)
         local trail = math.min(d.v * s * 0.09, 9)
         local lv = d.lv * (0.55 + 0.45 * near) + A[K.HI] * 1.5
         if d.heavy then
-          if trail >= 1 then put(lv * 0.35, x, y - trail, 1, trail) end
+          if trail >= 1 then put(lv * (fp and 0.5 or 0.35), x, y - trail, 1, trail) end
           put(lv, x, y, 2, 2)
         else
-          if trail >= 1 then put(lv * 0.3, x, y - trail, 1, trail) end
-          put(lv, x, y, 1, near > 0.6 and 2 or 1)
+          if trail >= 1 then put(lv * (fp and 0.5 or 0.3), x, y - trail, 1, trail) end
+          if fp and trail < 2 then K.put_sub(lv, x, y, 1, near > 0.6 and 2 or 1)
+          elseif fp and near > 0.3 then put(lv, x, y, 1, near > 0.6 and 2 or 1); put(lv * 0.5, x + 1, y, 1, 1)
+          else put(lv, x, y, 1, near > 0.6 and 2 or 1) end
         end
         -- its reflection rising to meet it on the wet floor
         local fy = VY + FLOORY * s
@@ -317,13 +360,15 @@ return function(K)
         ring(p.lv * (1 - u) * 0.8, x, y, rx, rx * 0.28)
         for _, q in ipairs(p.parts) do
           local h = q[2] * 4 * u * (1 - u) * 4 * s / S0
-          put(p.lv * (1 - u) * 0.9, x + q[1] * u * 4 * s / S0, y - h, 1, 1)
+          if fp then K.put_sub(E(p.lv * (1 - u) * 0.9), x + q[1] * u * 4 * s / S0, y - h, 1, 1)
+          else put(p.lv * (1 - u) * 0.9, x + q[1] * u * 4 * s / S0, y - h, 1, 1) end
         end
       end
     end
 
     -- haze in the arch, heavier with the dub's throws and kickless stretches
-    K.haze(20, 14, 108, 48, 0.08 + 0.12 * K.dub * K.throw + 0.15 * kl + 0.3 * mid + 0.2 * pd, 1, T * 3)
+    K.haze(20, 14, 108, 48, fp and ((0.08 + 0.12 * K.dub * K.throw + 0.15 * kl) * 0.5 + 0.33 * mid + 0.2 * pd)
+      or (0.08 + 0.12 * K.dub * K.throw + 0.15 * kl + 0.3 * mid + 0.2 * pd), 1, T * 3)
     -- the highs: a mist of fine spray caught in the far light
     K.grain(function(u, v)
       return VX - SF + u * 2 * SF, VY - 6 + v * 26

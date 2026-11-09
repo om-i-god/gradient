@@ -37,13 +37,14 @@ return function(K)
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * K.trail))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
   function M.kick() mark("kick") end
   function M.pump() mark("pump") end
   function M.hat() mark("hat") end
+  function M.bass() mark("bass") end
   function M.clap() mark("clap") end
   function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 4 end
   function M.perc(voice, note)
@@ -71,11 +72,17 @@ return function(K)
 
   function M.draw(S)
     local T, DT, env = K.T, K.DT, K.env
+    local fine, dense, RX = K.detail ~= "classic", K.detail == "dense", K.react
+    if RX > 1 then RX = 1 + (RX - 1) * 0.6 end     -- eased above 1
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RX, 13) or l end
     local hist, n = K.hist, #K.hist
     local ph = K.playing and K.bar_ph or 0
     local hi = A[K.HI]
     pdz = follow(pdz, env.pad, 0.25, DT)
     local kk, pf, hh, cl, tk = fade("kick", 0.25), fade("pump", 0.3), fade("hat", 0.25), fade("clap", 0.3), fade("tick", 0.4)
+    local bh = fade("bass", 0.4)
     local pd, mid, amp = pdz, A[K.MID], A[K.AMP]
     -- the land, per column: age in bars back from the live edge
     for c = 0, 63 do
@@ -129,28 +136,39 @@ return function(K)
     for i, s in ipairs(STARS) do
       if s.y < math.min(far[s.x // 2], top[math.min(63, s.x // 2)]) - 3 then
         local tw = 0.5 + 0.5 * math.sin(T * (1.4 + K.hash(i, 44) * 1.4 + hi * 3) + s.ph)
-        put(0.8 + tw * (1.6 + hi * 6) + hh * 5, s.x, s.y, 1, 1)
+        put(0.8 + tw * (1.6 + hi * 6) + E(hh * 5), s.x, s.y, 1, 1)
       end
+    end
+    -- dense: a fainter second field of stars, and a thin high cloud
+    if dense and K.playing then
+      for i = 1, 24 do
+        local x, y = 1 + math.floor(K.hash(i, 51) * 126), 1 + math.floor(K.hash(i, 52) ^ 1.4 * 30)
+        if y < math.min(far[x // 2], top[math.min(63, x // 2)]) - 3 then
+          put(0.6 + (0.5 + 0.5 * math.sin(T * (0.9 + K.hash(i, 53)) + i * 1.9)) * (1.2 + hi * 4), x, y, 1, 1)
+        end
+      end
+      K.dashes(1, 6, 5, 17, T * 1.7 + 5, 0, 128)
     end
     -- the moon on its way across with the track
     local pr = clamp(K.num(S.progress, 0), 0, 1)
     local mx, my = 10 + pr * 108, 18 - math.sin(pr * math.pi) * 12
     for dy = -3, 3 do
       local hw = math.floor(math.sqrt(11 - dy * dy) + 0.5)
-      put(4.5, mx - hw, my + dy, 2 * hw, 1)
+      if fp then K.put_sub(4.5, mx - hw, my + dy, 2 * hw, 1) else put(4.5, mx - hw, my + dy, 2 * hw, 1) end
     end
     -- a clap swells a halo round the moon
     if cl > 0.03 then
       for dy = -8, 8 do
         local hw = math.floor(math.sqrt(64 - dy * dy) + 0.5)
-        put(5 * cl, mx - hw, my + dy, 2, 1); put(5 * cl, mx + hw - 2, my + dy, 2, 1)
+        put(E(5 * cl), mx - hw, my + dy, 2, 1); put(E(5 * cl), mx + hw - 2, my + dy, 2, 1)
       end
     end
     -- a tick draws a short streak across the sky
     if tk > 0.03 then
       local sx, sy = 14 + hit.tk * 26 + (1 - tk) * 22, 4 + (1 - tk) * 14
-      line(6 * tk, sx, sy, sx - 14, sy - 6 * 0.6)
-      line(3 * tk, sx - 14, sy - 3.6, sx - 24, sy - 6)
+      line(E(6 * tk), sx, sy, sx - 14, sy - 6 * 0.6)
+      line(E(3 * tk), sx - 14, sy - 3.6, sx - 24, sy - 6)
+      if fine then line(E(2 * tk), sx - 24, sy - 6, sx - 34, sy - 8.4) end
     end
     for dy = -5, 5, 2 do
       local hw = math.floor(math.sqrt(30 - dy * dy) + 0.5)
@@ -176,7 +194,8 @@ return function(K)
             local hgt = (GROUND - t) / RISE
             if d <= 2 then l = math.floor((1.6 + 2 * hgt) * breathe + 0.5)
             elseif d <= 8 then l = (y % 2 == 0) and math.floor(1 + 1.3 * hgt + 0.5) or 0
-            elseif y % 6 == 0 then l = 1 end
+            elseif y % 6 == 0 then l = 1
+            elseif fp and d <= (dense and 18 or 12) and y % 3 == 0 then l = 1 end
           end
         end
         if l ~= rl then
@@ -193,6 +212,8 @@ return function(K)
         local rl = (3 + (GROUND - t) / RISE * 5 + kick * near * 5) * breathe
         if hollow[c] then
           put(rl * 0.4, x, t, 2, 1)
+        elseif fp then
+          K.put_sub(rl, x, t, 2, 1)       -- the crest glides instead of stepping a row at a time
         else
           put(rl, x, t, 2, 1)
         end
@@ -231,47 +252,59 @@ return function(K)
         local x = X_NOW - 2 * (bars + ph - w.p)
         local cc = math.floor(x / 2)
         if cc >= 0 and cc < 64 and not hollow[cc] and top[cc] + w.d < GROUND - 1 then
-          put((3 + 5 * K.lane_kick[w.lane or 1]) * (1 - age / 2.5), x, top[cc] + w.d, 1, 1)
+          local wl = (3 + E(5 * K.lane_kick[w.lane or 1])) * (1 - age / 2.5)
+          put(wl, x, top[cc] + w.d, 1, 1)
+          if fine then      -- a lit pane with its glow, and the light running down the slope
+            local wy = top[cc] + w.d
+            put(wl * 0.85, x - 1, wy - 1, 3, 3)
+            put(wl * 0.35, x - 2, wy - 2, 5, 5)
+            put(wl * 0.3, x, wy + 2, 1, 3)
+          end
         end
       end
     end
     -- hats glint along the rim
     if hh > 0.03 then
       for c = 1, 62, 2 do
-        if top[c] < GROUND and not hollow[c] then put(6 * hh, c * 2, top[c] - 1, 2, 1) end
+        if top[c] < GROUND and not hollow[c] then put(E(6 * hh), c * 2, top[c] - 1, 2, 1) end
       end
-      K.dashes(4 * hh, 9, 3, 7, -T * 30, 0, 128)
+      K.dashes(E(4 * hh), 9, 3, 7, -T * 30, 0, 128)
     end
     -- a perc lights a window on a slope, placed by its note and voice
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local f = math.exp(-(K.NOW - p.t) / 0.55)
+      local f = math.exp(-(K.NOW - p.t) / (0.55 * K.trail))
       if f < 0.03 then table.remove(percs, i)
       else
         local cc = clamp(p.c + p.v, 0, 63)
         local x, y = cc * 2, math.min(top[cc], GROUND - 8) + 3 + p.v
-        put(7 * f, x - 1, y - 1, 3, 3)
-        put(4 * f, x - 4, y, 9, 1)
-        put(4 * f, x, y - 4, 1, 9)
+        put(E(7 * f), x - 1, y - 1, 3, 3)
+        put(E(4 * f), x - 4, y, 9, 1)
+        put(E(4 * f), x, y - 4, 1, 9)
+        if fine then put(E(3 * f), x - 2, y - 2, 5, 5) end
       end
     end
     -- the ground, warmed by the bass
     vb = follow(vb, math.max(env.bass, A[K.LO] * 0.7) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.06, DT)
     put(2 + vb * 3 + K.bar_pulse * 2, 0, GROUND, X_NOW + 2, 1)
-    K.gradient(GROUND + 1, 61, function(y) return (0.4 + vb * 3 + A[K.LO] * 1.2) * math.exp(-(y - GROUND - 1) / 2.5) end)
+    if fine then      -- the bass note itself drives the ground's glow harder, and further down
+      K.gradient(GROUND + 1, 61, function(y) return (0.4 + vb * 3 + A[K.LO] * 1.2 + E(5 * bh)) * math.exp(-(y - GROUND - 1) / 2.5) end)
+    else
+      K.gradient(GROUND + 1, 61, function(y) return (0.4 + vb * 3 + A[K.LO] * 1.2) * math.exp(-(y - GROUND - 1) / 2.5) end)
+    end
     -- the live edge: a now-line and the lamp on the newest land
     local lt = top[X_NOW // 2 - 1] or GROUND - 2
     if lt > GROUND then lt = GROUND - 2 end
-    for y = 2, math.floor(lt) - 3, 3 do put(1 + 5 * kk, X_NOW, y, 1, 1)
-      if kk > 0.03 then put(3 * kk, X_NOW, y + 1, 1, 1) end end
+    for y = 2, math.floor(lt) - 3, 3 do put(1 + E(5 * kk), X_NOW, y, 1, 1)
+      if kk > 0.03 then put(E(3 * kk), X_NOW, y + 1, 1, 1) end end
     lamp = follow(lamp, math.max(kick * (1 - K.kickless), K.duck * 0.4), 0.03, DT)
     put(5 + lamp * 7, X_NOW - 1, lt - 2, 2, 2)
     -- the kick sends a ring out from the lamp
     if kk > 0.03 then
       local r = 2 + (1 - kk) * 18
-      for k = 0, 23 do
-        local a = k / 24 * K.TAU
-        put(5 * kk, X_NOW + math.cos(a) * r, lt - 2 + math.sin(a) * r, 1, 1)
+      for k = 0, (fine and 31 or 23) do
+        local a = k / (fine and 32 or 24) * K.TAU
+        put(E(5 * kk) + (fine and 1.5 or 0), X_NOW + math.cos(a) * r, lt - 2 + math.sin(a) * r, 1, 1)
       end
     end
     -- a throw: the lamp's echoes left behind on the land
@@ -288,6 +321,13 @@ return function(K)
     if K.num(S.mode_play, 1) == 2 and S.total_bars then
       put(1.5, 0, 63, 128, 1)
       put(6, 0, 63, math.floor(pr * 128), 1)
+    end
+    -- fine: the far range's rim, stippled; the highs catch in it
+    if fp then
+      for x = 1, 126, 3 do
+        local on = (x // 3) % 2 == 0
+        K.put_sub((on and 1.4 or 0.8) + hi * 7, x, far[x // 2] - 0.5, 1, 1)
+      end
     end
     -- the highs glint along the rim
     K.grain(function(u)

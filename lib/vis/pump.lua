@@ -53,6 +53,10 @@ return function(K)
     end
   end
 
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  -- (a short trail would make every hit a frame-to-frame jump)
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+
   local sq, sqs = {}, {}                 -- each line's squeeze: ground, sky (j = 1..NMAX)
   local lv_sky, lv_gnd = {0, 0, 0, 0}, 0 -- the stab bands and the bass, eased in
   local flare, lo = 0, 0                 -- the kick on the horizon; the lows, slow
@@ -69,7 +73,7 @@ return function(K)
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -114,6 +118,11 @@ return function(K)
   function M.draw(S)
     local T, DT, e = K.T, K.DT, K.energy
     local w = K.kickless
+    local fine, dense, RX = K.detail ~= "classic", K.detail == "dense", K.react
+    if RX > 1 then RX = 1 + (RX - 1) * 0.15 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RX, 13) or l end
     local n = math.floor(5 + e * (NMAX - 5) + 0.5)
     -- the squeeze: the duck takes the near field first, rolls in to the
     -- skyline and up into the sky a moment later; then all spring back
@@ -138,7 +147,7 @@ return function(K)
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local cl, hh, bh, tk = fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
     bz = K.follow(bz, bh, 0.1, DT)
-    local dk = math.exp(-DT / 0.3)
+    local dk = math.exp(-DT / (0.3 * TR()))
     for k, v in pairs(acc) do acc[k] = v < 0.01 and 0 or v * dk end
     local pd, mid, amp = pdz, A[K.MID], A[K.AMP]
 
@@ -156,7 +165,7 @@ return function(K)
       local y = math.floor(HY - dist(j, n, sqs, 34) + 0.5)
       if y >= 0 then
         local v = (j - 1) % 4 + 1
-        local l = 1 + f * (0.4 + e * 0.7) + cl * 0.25
+        local l = 1 + f * (0.4 + e * 0.7) + (fine and E(cl * 0.4) or cl * 0.25)
         local cx = 64 + clamp((c[v] - mean) * 4, -50, 50) + math.sin(T * 0.21 + v * 1.9) * 12
         local hw = 12 + 8 * f
         local sl = lv_sky[v] * (1.5 + 2 * f) * 1.7
@@ -177,55 +186,73 @@ return function(K)
     local pu = (T / 47) % 1
     if pu < 0.6 then
       local px = -4 + pu / 0.6 * 136
-      put(1.5 + 5 * (math.sin(T * 5) > 0.7 and 1 or 0), px, 5 + pu * 3, 1, 1)
+      if fp then K.put_sub(1.5 + 5 * (math.sin(T * 5) > 0.7 and 1 or 0), px, 5 + pu * 3, 1, 1)
+      else put(1.5 + 5 * (math.sin(T * 5) > 0.7 and 1 or 0), px, 5 + pu * 3, 1, 1) end
     end
     -- stars, twinkling with the highs, above the bands' reach
     for i = 0, 9 do
       local x, y = math.floor(K.hash(i, 31) * 126), 1 + math.floor(K.hash(i, 32) * 12)
       local tw = 0.5 + 0.5 * math.sin(T * (0.7 + K.hash(i, 33)) + i * 2.3)
-      put(1 + tw * (0.6 + hi * 3) + hh * 4, x, y, 1, 1)
+      put(1 + tw * (0.6 + hi * 3) + E(hh * 4), x, y, 1, 1)
     end
 
     -- the skyline: dark masses with their windows; the mast's red light
     for i, wn in ipairs(WIN) do
       local v = math.sin(T * 0.23 + wn[3])
-      if v > -0.4 then put((1.5 + v + e * 1.2 + hi * 1.5) * (1 + 0.4 * amp) + hh * 4, wn[1], wn[2], 1, 1) end
+      if v > -0.4 then
+        local wl = (1.5 + v + e * 1.2 + hi * 1.5 + (fp and 1.0 * mid or 0)) * (1 + (fp and 0.7 or 0.4) * amp) + E(hh * 4)
+        put(fp and math.min(wl, 12) or wl, wn[1], wn[2], 1, 1)
+      end
     end
     put(1 + 7 * (0.5 + 0.5 * math.sin(T * 2.2)) ^ 4, MAST, HY - 25, 1, 1)
+    -- dense: the tall towers carry their own slow warning lights
+    if dense and K.playing then
+      for i, b in ipairs(BLK) do
+        if b.h >= 12 then
+          put(1 + 5 * (0.5 + 0.5 * math.sin(T * 1.3 + i * 2.1)) ^ 4, b.x + b.w // 2, HY - b.h - 1, 1, 1)
+        end
+      end
+    end
     -- a tick runs a flicker down the mast
     if tk > 0.03 then
-      line(6 * tk, MAST, HY - 25, MAST, HY - 2)
-      put(8 * tk, MAST - 1, HY - 26, 3, 1)
+      line(E(6 * tk), MAST, HY - 25, MAST, HY - 2)
+      put(E(8 * tk), MAST - 1, HY - 26, 3, 1)
+      if fine then put(E(4 * tk), MAST - 2, HY - 24, 5, 1) end
     end
     -- a perc fires a beacon on a rooftop, picked by its note
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      local f = math.exp(-(K.NOW - p.t) / (0.5 * TR()))
       if f < 0.03 then table.remove(percs, i)
       else
         local bx, by = p.b.x + p.b.w // 2, HY - p.b.h - 1
-        put(7 * f, bx - 1, by - 1, 3, 3)
-        put(4 * f, bx - 4, by, 9, 1)
-        put(4 * f, bx, by - 5, 1, 9)
+        put(E(7 * f), bx - 1, by - 1, 3, 3)
+        put(E(4 * f), bx - 4, by, 9, 1)
+        put(E(4 * f), bx, by - 5, 1, 9)
+        if fine then put(E(3 * f), bx - 2, by - 2, 5, 5) end
       end
     end
     -- an arp note flashes where its light enters the field
     for i = #flashes, 1, -1 do
       local fl = flashes[i]
-      local f = math.exp(-(K.NOW - fl.t) / 0.5)
+      local f = math.exp(-(K.NOW - fl.t) / (0.5 * (fine and 1 or K.trail)))
       if f < 0.03 then table.remove(flashes, i)
       else
-        put(8 * f, fl.x - 6, HY + 1, 13, 1)
-        put(6 * f, fl.x - 1, HY - 12 - fl.lane * 4, 3, 12 + fl.lane * 4)
-        put(3 * f, fl.x - 8, HY + 2, 17, 1)
+        put(E(8 * f), fl.x - 6, HY + 1, 13, 1)
+        put(E(6 * f), fl.x - 1, HY - 12 - fl.lane * 4, 3, 12 + fl.lane * 4)
+        put(E(3 * f), fl.x - 8, HY + 2, 17, 1)
       end
     end
     -- haze lying along the horizon, thicker in kickless stretches
-    K.haze(0, HY - 6, 128, HY + 6, 0.2 + 0.2 * w + 0.1 * K.dub * K.throw + 0.1 * mid + 0.15 * pd, 1, T * 4)
+    K.haze(0, HY - 6, 128, HY + 6, fp and ((0.2 + 0.2 * w + 0.1 * K.dub * K.throw) * 0.6 + 0.1 * mid + 0.24 * pd)
+      or (0.2 + 0.2 * w + 0.1 * K.dub * K.throw + 0.1 * mid + 0.15 * pd), 1, T * 4)
     if mid > 0.05 then K.haze(0, 4, 128, HY - 6, 0.2 * mid, 1, -T * 2) end
 
     -- hats glitter along the horizon
-    if hh > 0.03 or acc.hat > 0.03 then K.dashes(4 * hh + 4 * acc.hat, HY - 1, 2, 10, T * 30, 0, 128) end
+    if hh > 0.03 or acc.hat > 0.03 then
+      K.dashes(E(4 * hh) + E(4 * acc.hat), HY - 1, 2, 10, T * 30, 0, 128)
+      if fine then K.dashes(E(3 * hh), HY + 3, 1, 8, -T * 20, 36, 92) end
+    end
     -- the horizon: flares with the kick (eased, never a slab)
     put(math.min(12, 2 + flare * 7 + K.bar_pulse * 1.5 + 8 * acc.arp), 0, HY, 128, 1)
 
@@ -284,7 +311,7 @@ return function(K)
         local y = HY + 1 + z * 27
         local x = 64 + L.dir * (6 + z * 70)
         local lv = L.a * (4 + 7 * z) * (1 - u ^ 6)
-        put(lv, x, y, 1, 1)
+        if fine then K.put_sub(lv, x, y, 1, 1) else put(lv, x, y, 1, 1) end
         local zt = math.max(0, u - 0.12) ^ 2
         line(lv * 0.3, 64 + L.dir * (6 + zt * 70), HY + 1 + zt * 33, x, y - 1)
       end

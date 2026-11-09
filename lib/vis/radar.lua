@@ -130,7 +130,7 @@ return function(K)
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
 
     -- the arm: once a bar, a little quicker as the set builds
-    sa = sa + K.DTS * TAU / (K.beat_sec * 4) * (0.9 + 0.2 * e)
+    sa = sa + K.DTS * TAU / (K.beat_sec * (K.beats or 4)) * (0.9 + 0.2 * e)
     if sa > 1e4 then sa = sa - 1e4 * 0 - math.floor(sa / TAU) * TAU end
 
     local pmp = fade(pump_t, 0.3)

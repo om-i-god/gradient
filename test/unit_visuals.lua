@@ -52,7 +52,7 @@ local LABELS = {"i", "VI", "VII", "v/i"}
 -- one 16th of the groove: kick + pump on beats, hats offbeat, stabs on the
 -- dub offbeats, bass on most 8ths, arp lanes ticking at their lengths
 local function groove(S, VIS, k, o)
-  local s = k % 16 + 1
+  local s = k % (o.len or 16) + 1
   if s == 1 then
     S.track_bar = S.track_bar + 1
     S.energy = o.energy or S.energy
@@ -130,6 +130,17 @@ SCEN.kickless = {
   end,
 }
 
+-- 5/4: the mid groove on a 20-step bar, the way gradient advances S.bar_step
+SCEN.meter5 = {
+  setup = function(S)
+    SCEN.mid.setup(S)
+    S.bar = {beats = 5, n = 20, feel = "even", groups = {4, 4, 4, 4, 4}, starts = {true, true, true, true, true}, last = 4}
+    S.bar_step = 1
+  end,
+  on_step = function(S, VIS, k) groove(S, VIS, k, {stabs = true, bass = true, hats = true, lanes = 2, len = 20}) end,
+  audio = SCEN.mid.audio,
+}
+
 local function lit_stats()
   local lit, l15, sum = 0, 0, 0
   local buf = RAST.buf
@@ -178,6 +189,7 @@ local function run(theme, scen, opts)
       if S.playing then
         SC.on_step(S, VIS, k)
         S.step = S.step + 1
+        if S.bar then S.bar_step = S.bar_step % S.bar.n + 1 end
       end
       k = k + 1
       next_step = next_step + 60 / S.tempo / 4
@@ -223,7 +235,7 @@ end
 VIS_HARNESS = {run = run, bufdiff = bufdiff, NAMES = NAMES, RAST = RAST}
 if not test then return end
 
-local SCENS = {"silence", "mid", "peak", "kickless"}
+local SCENS = {"silence", "mid", "peak", "kickless", "meter5"}
 
 -- bounds
 local OPS_BUDGET = 1200       -- draw calls per frame, any theme, any scenario
@@ -486,6 +498,31 @@ if not ONLY then
     end})
     -- released: the shift is gone a second after (themes keep their own state)
     assert(bufdiff(a.frames[40], c.frames[40]) < 0.4, "glitch never let go")
+  end)
+
+  test("visuals the bar phase follows the meter", function()
+    env()
+    local VIS = include("lib/visuals"); VIS.init()
+    assert(VIS.kit, "VIS.kit not exposed")
+    local S = mkS()
+    S.bar = {beats = 7, n = 28}
+    -- hold one step for a while so the smoothed sub-step runs to its end
+    local function probe(step, bs)
+      S.step, S.bar_step = step, bs
+      for f = 1, 40 do screen.clear(); VIS.draw(1, S, 1 / 30) end
+      return VIS.kit.bar_ph, VIS.kit.beats
+    end
+    local ph, beats = probe(27, 28)
+    assert(beats == 7, "K.beats " .. tostring(beats))
+    assert(ph >= 0.95 and ph < 1, "bar_ph at step 27 of 7/4: " .. tostring(ph))
+    ph = probe(0, 1)
+    assert(ph >= 0 and ph < 0.05, "bar_ph at the downbeat: " .. ph)
+    for bs = 1, 28 do
+      ph = probe(bs - 1, bs)
+      assert(ph >= 0 and ph < 1, "bar_ph out of range " .. ph)
+    end
+    S.bar = nil; probe(5, 1)
+    assert(VIS.kit.beats == 4 and VIS.kit.bar_ph >= 5 / 16 and VIS.kit.bar_ph < 6 / 16, "no bar: the 4/4 of 16")
   end)
 
   test("visuals new drum events and garbage never throw", function()

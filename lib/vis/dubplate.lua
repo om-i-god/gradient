@@ -95,7 +95,7 @@ return function(K)
     local kk, hh, cl, bh, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("bass", 0.4), fade("tick", 0.4)
     local pd = pdz
     -- once a bar, locked to the bar phase while playing
-    local rate = TAU / (4 * K.beat_sec)
+    local rate = TAU / ((K.beats or 4) * K.beat_sec)
     rot = rot + rate * DTS
     if K.playing then rot = rot + wrap(K.bar_ph * TAU - rot) * math.min(1, DT * 2) end
     rot = rot % TAU

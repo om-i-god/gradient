@@ -50,3 +50,63 @@ test("meter: label", function()
   assert(MT.label(4, "even") == "4/4")
   assert(MT.label(7, "short-long") == "7/4 4+3")
 end)
+
+------------------------------------------------------------------------
+-- generators at the bar length
+------------------------------------------------------------------------
+
+local C = include("lib/conductor")
+
+local function new_S()
+  return {pat = {}, lanes = {}, gain = {}, jitter = {}, want = {}, mute = {}, solo = {},
+          chord = {57, 60, 64, 67}, root_pc = 9, mode = 1, voicing = 1, harmony = 3,
+          phrase_len = 32, bar = MT.bar(4, "even"), bar_step = 1}
+end
+
+-- deterministic serialiser (sorted keys, 14 significant digits)
+local function ser(v)
+  local t = type(v)
+  if t == "number" then return string.format("%.14g", v) end
+  if t ~= "table" then return tostring(v) end
+  local ks = {}
+  for k in pairs(v) do ks[#ks + 1] = k end
+  table.sort(ks, function(a, b)
+    if type(a) == type(b) then return a < b end
+    return type(a) == "number"
+  end)
+  local out = {}
+  for _, k in ipairs(ks) do out[#out + 1] = "[" .. ser(k) .. "]=" .. ser(v[k]) end
+  return "{" .. table.concat(out, ",") .. "}"
+end
+
+local SNAP_KEYS = {"kick", "clap", "hats", "shaker", "rim", "toms", "ride", "ticks", "stabs", "perc", "bass_lines"}
+local SNAP_SEEDS = {4218, 7, 99}
+
+-- everything the 4/4 even track draws: the patterns, plus what is drawn
+-- after them (lanes, pair, harmony length), so any extra draw shows up
+local function snapshot(seed)
+  local S = new_S()
+  C.new_track(S, seed)
+  local parts = {}
+  for _, k in ipairs(SNAP_KEYS) do parts[#parts + 1] = k .. "=" .. ser(S.pat[k]) end
+  parts[#parts + 1] = "lanes=" .. ser(S.lanes)
+  parts[#parts + 1] = "pair=" .. ser(S.pair)
+  parts[#parts + 1] = "harm_bars=" .. ser(S.harm_bars)
+  parts[#parts + 1] = "cycle_bars=" .. ser(S.cycle_bars)
+  return table.concat(parts, ";")
+end
+
+if os.getenv("GEN_FIXTURE") then
+  local f = assert(io.open("test/fixtures/patterns_44.lua", "w"))
+  f:write("-- generated from the pre-meter generators (4/4 even); do not regenerate\nreturn {\n")
+  for _, seed in ipairs(SNAP_SEEDS) do f:write(string.format("  [%d] = %q,\n", seed, snapshot(seed))) end
+  f:write("}\n")
+  f:close()
+end
+
+test("gen: 4/4 even patterns are identical to the pre-meter snapshot", function()
+  local want = dofile("test/fixtures/patterns_44.lua")
+  for _, seed in ipairs(SNAP_SEEDS) do
+    assert(snapshot(seed) == want[seed], "seed " .. seed .. " drifted from the snapshot")
+  end
+end)

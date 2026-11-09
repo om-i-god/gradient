@@ -32,6 +32,7 @@ local L   = include("lib/listen")
 local GU  = include("lib/gridui")
 local O   = include("lib/outs")
 local TB  = include("lib/timbre")
+local MT  = include("lib/meter")
 
 local ECHO_DIVS      = {0.5, 0.75, 1, 1.5}          -- in beats
 local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
@@ -57,6 +58,7 @@ local S = {
   on_kick = false, on_pump = false, kickless = false,
   drop_bars = 0, phrase_len = 32, force_mutate = false, freeze = false, throw = false,
   cycle_bars = 96,
+  bar = MT.bar(4, "even"), bar_step = 1, meter_pending = nil,
   follow = false, pending_root = nil,
   mute = {}, solo = {}, hand_throw = 0, lead_throw = 0,
 }
@@ -227,8 +229,14 @@ local function glitch(mode, slice16, len16)
   VIS.event("glitch", mode, dur)
 end
 
+-- a pattern shorter than the bar (until the generators build full-length
+-- ones) reads as rests past its end
+local REST1     = {0}
+local REST_BASS = {0, 0, false}
+
 local function play_step()
-  local s = (S.step % 16) + 1
+  -- bar step: 1..S.bar.n (S.step stays a global 16th counter)
+  local s = S.bar_step
 
   if s == 1 then
     if S.hand_throw > 0 then S.hand_throw = S.hand_throw - 1 end
@@ -292,7 +300,7 @@ local function play_step()
   if ghost and S.on_ghost and not gap then
     engine.kick(0.9 * ghost, params:get("kick_tune"), params:get("kick_decay") / 200, 0.1)
   end
-  if S.pat.kick[s] > 0 then
+  if (S.pat.kick[s] or 0) > 0 then
     if S.on_pump then
       engine.pump(1)
       O.pump(beat)
@@ -317,7 +325,7 @@ local function play_step()
 
   -- hats: the groove's offbeat spine always (when on); ghosts thin with
   -- energy; marked offbeats open up while the energy builds
-  local hg, hv = S.gain.hats or 0, hp[s]
+  local hg, hv = S.gain.hats or 0, hp[s] or 0
   if hg > 0 and hv > 0 and not gap then
     local spine = (s - 1) % 4 == 2
     local open = fill == "open" and (s == 11 or s == 15)
@@ -339,22 +347,22 @@ local function play_step()
   -- shaker and tom ghosts ride with the hats, on some phrases, when it's up
   if hg > 0 and not gap then
     if S.roll_shaker and e > 0.55 and math.random() < 0.5 + e * 0.5 then
-      local v = S.pat.shaker[s] * hg * 0.16
+      local v = (S.pat.shaker[s] or 0) * hg * 0.16
       late(function() engine.shaker(v, 0.05 + (1 - e) * 0.04, (math.random() - 0.5) * 0.6) end)
     end
-    local t = S.pat.toms[s]
+    local t = S.pat.toms[s] or REST1
     if S.roll_toms and e > 0.35 and t[1] > 0 and fill ~= "toms" then
       engine.tom(t[1] * hg * 0.3, mtof(S.chord[t[2]] - 24), 0.25 + (1 - e) * 0.2,
         (t[2] - 2) * 0.3)
     end
   end
   -- tom fill: a run down the chord on the last beat
-  if fill == "toms" and s >= 13 then
+  if fill == "toms" and s >= 13 and s <= 16 then
     engine.tom(0.3 + (s - 13) * 0.05, mtof(S.chord[17 - s] - 24), 0.3, (14.5 - s) * 0.25)
   end
 
   -- rim
-  local rg, rv = S.gain.rim or 0, S.pat.rim[s]
+  local rg, rv = S.gain.rim or 0, S.pat.rim[s] or 0
   if fill == "open" and (s == 14 or s == 16) and rv == 0 then rv = 0.4 end
   if rg > 0 and rv > 0 then
     engine.rim(rv * rg * 0.25, 1500 + math.random(0, 500), (math.random() - 0.5) * 0.8)
@@ -362,7 +370,7 @@ local function play_step()
 
   -- clap / snare / snap: the backbeat, a little behind the grid on some
   -- tracks; thrown into the echo with the stabs
-  local clg, clv = S.gain.clap or 0, S.pat.clap[s]
+  local clg, clv = S.gain.clap or 0, S.pat.clap[s] or 0
   if clg > 0 and clv > 0 and not gap then
     local cp = S.pat.clap
     local kind = params:get("clap_kind")
@@ -396,14 +404,14 @@ local function play_step()
   end
 
   -- ride near the top, riding with the hats
-  local rdv = S.pat.ride[s]
+  local rdv = S.pat.ride[s] or 0
   if S.on_ride and hg > 0 and rdv > 0 and not gap then
     engine.ride(rdv * hg * 0.12, 0.4 + e * 0.5, 6500 + e * 2000, 0.35)
   end
 
   -- glitch ticks: clicks, blips, crushed noise and zaps, some ratcheted
   -- inside the 16th
-  local tg, tk = S.gain.ticks or 0, S.pat.ticks[s]
+  local tg, tk = S.gain.ticks or 0, S.pat.ticks[s] or REST1
   if tg > 0 and tk[1] > 0 and not gap and math.random() < 0.55 + e * 0.4 then
     local n = tk[3]
     local hz = mtof(S.chord[math.random(4)] + 36)
@@ -421,7 +429,7 @@ local function play_step()
   end
 
   -- chord stabs
-  local cg, cv = S.gain.chords or 0, S.pat.stabs[s]
+  local cg, cv = S.gain.chords or 0, S.pat.stabs[s] or 0
   if fill == "throw" and s == 15 and cv == 0 then cv = 0.8 end
   if cg > 0 and cv > 0 then
     local amp = cv * cg * 0.32
@@ -441,7 +449,7 @@ local function play_step()
   -- bass: chord root, its 3rd / 5th, or a tonic pedal (lib/harmony), on
   -- the line for this energy (lib/gen). every 4th bar the last beat can
   -- walk into the next chord, or turn around if the chord holds
-  local bg, bv = S.gain.bass or 0, S.pat.bass[s]
+  local bg, bv = S.gain.bass or 0, S.pat.bass[s] or REST_BASS
   if bg > 0 and not gap then
     local base = 12 * (params:get("bass_oct") + 1) + S.root_pc
     local vel, iv, slide = bv[1], bv[2], bv[3]
@@ -514,6 +522,7 @@ local function play_step()
   end
 
   S.step = S.step + 1
+  S.bar_step = S.bar_step % S.bar.n + 1
 end
 
 ------------------------------------------------------------------------
@@ -553,6 +562,7 @@ local function loop(my)
   clock.sync(4)
   if S.playing and my == loop_gen then O.start() end
   S.step = 0
+  S.bar_step = 1
   while true do
     clock.sync(1 / 4)
     local swing = params:get("swing") / 100
@@ -568,6 +578,8 @@ start = function()
   if S.playing then return end
   S.playing = true
   loop_gen = loop_gen + 1
+  MT.apply_pending(S)
+  S.bar_step = 1
   local my = loop_gen
   main_clock = clock.run(function() loop(my) end)
   flash("play")
@@ -967,6 +979,35 @@ local function setup_params()
     S.phrase_len = ({8, 16, 32, 64})[v]
     S.cycle_bars = math.floor(S.cycle_bars * S.phrase_len / old)
   end)
+  -- a meter or feel change lands on the next phrase boundary while playing
+  -- (the conductor applies it), at once when stopped
+  local function meter_changed()
+    local beats = MT.METERS[params:get("meter")]
+    local feel  = MT.FEELS[params:get("feel")]
+    if S.playing then
+      if beats == S.bar.beats and feel == S.bar.feel then S.meter_pending = nil
+      else S.meter_pending = {beats = beats, feel = feel} end
+    else
+      S.meter_pending = {beats = beats, feel = feel}
+      MT.apply_pending(S)
+      S.bar_step = 1
+    end
+  end
+  params:add_option("meter", "time signature", {"4/4", "3/4", "5/4", "7/4"}, 1)
+  params:set_action("meter", meter_changed)
+  params:add_option("feel", "feel", MT.FEELS, 1)
+  params:set_action("feel", meter_changed)
+  -- option params can't relabel per meter: show the actual grouping instead
+  do
+    local fp = params:lookup_param("feel")
+    local function show()
+      local beats = MT.METERS[params:get("meter")]
+      local g = MT.groups(beats, MT.FEELS[params:get("feel")])
+      return #g == beats and "even" or table.concat(g, "+")
+    end
+    fp.formatter = show
+    fp.string = show
+  end
   params:add_number("track_minutes", "track length (min)", 4, 32, 8)
   params:set_action("track_minutes", function(v) S.track_minutes = v end)
   params:add_option("end_action", "track end", {"stop", "next track"}, 2)

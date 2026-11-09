@@ -7,6 +7,7 @@ local T = include("lib/theory")
 local G = include("lib/gen")
 local H = include("lib/harmony")
 local TB = include("lib/timbre")
+local MT = include("lib/meter")
 
 local C = {}
 
@@ -249,6 +250,9 @@ function C.bar(S)
     S.key_moved = true
     C.update_chord(S)
   end
+
+  -- a meter or feel picked mid-phrase lands here, on the phrase's first bar
+  if bar_in_phrase == 1 then MT.apply_pending(S) end
 
   -- phrase boundary: who plays, what mutates; re-check every 4 bars
   -- (and every outro bar) so long phrases still follow the energy arc

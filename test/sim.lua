@@ -89,7 +89,8 @@ function params:delta(id, n)
   if d.trig then return end
   params:set(id, math.max(d.lo, math.min(d.hi, d.v + n * (d.f and 0.01 or 1))))
 end
-function params:lookup_param(id) return {name = id} end
+local LP = {}
+function params:lookup_param(id) LP[id] = LP[id] or {name = id}; return LP[id] end
 function params:bang()
   for _, id in ipairs(P.order) do
     local d = P.defs[id]
@@ -414,6 +415,76 @@ do
   params:set("bass_type", 1)
   TLOG = nil
   print("timbre ok")
+end
+
+-- meter: every meter x feel runs 64 bars; a bar is beats*4 steps; a change
+-- lands once, on the phrase boundary; stopped changes land at once
+do
+  local S = getS()
+  local MTm = include("lib/meter")
+  local function playing() return S.playing end
+  local function stop_play() if S.playing then key(2, 1); key(3, 1); key(3, 0); key(2, 0) end end
+  local function start_play() if not S.playing then key(2, 1); key(3, 1); key(3, 0); key(2, 0) end end
+  -- run until n bars have started; returns the list of {track_bar, beats, steps in the previous bar}
+  local function run_bars(n)
+    local out, lastb, lasts = {}, S.track_bar, S.step
+    local guard = 0
+    while #out < n do
+      tick_all(); guard = guard + 1
+      assert(guard < n * 28 * 4 + 400, "meter sim stalled")
+      if S.track_bar ~= lastb then
+        out[#out + 1] = {bar = S.track_bar, beats = S.bar.beats, prev = S.step - lasts, sstep = S.bar_step}
+        lastb, lasts = S.track_bar, S.step
+      end
+    end
+    return out
+  end
+  params:set("play_mode", 1)
+  params:set("phrase_len", 1)               -- 8 bars
+  stop_play()
+  assert(not S.playing)
+  for mi = 1, #MTm.METERS do
+    for fi = 1, #MTm.FEELS do
+      params:set("meter", mi); params:set("feel", fi)
+      local beats = MTm.METERS[mi]
+      assert(S.bar.beats == beats and S.bar.n == beats * 4, "stopped meter change not immediate")
+      start_play()
+      local bars = run_bars(64)
+      for i = 2, #bars do
+        assert(bars[i].prev == beats * 4,
+          string.format("%d/4 %s: bar %d was %d steps", beats, MTm.FEELS[fi], bars[i].bar, bars[i].prev))
+        assert(bars[i].beats == beats, "bar descriptor drifted")
+      end
+      stop_play()
+    end
+  end
+  print("meters x feels: 64 bars each, bar = beats*4 steps")
+
+  -- three sets mid-phrase: one change, at the next boundary, to the last value
+  params:set("meter", 1); params:set("feel", 1)
+  start_play()
+  run_bars(3)
+  while (S.track_bar % 8) ~= 3 do run_bars(1) end
+  params:set("meter", 2); params:set("meter", 4); params:set("meter", 3)
+  assert(S.bar.beats == 4 and S.meter_pending and S.meter_pending.beats == 5, "pending not held")
+  local bars = run_bars(14)
+  local changes, prev = 0, 4
+  for i, b in ipairs(bars) do
+    if b.beats ~= prev then
+      changes = changes + 1
+      assert(b.beats == 5, "went to " .. b.beats)
+      assert(b.bar % 8 == 1, "meter changed mid-phrase at bar " .. b.bar)
+      prev = b.beats
+    end
+    if i > 1 then assert(bars[i].prev == bars[i - 1].beats * 4, "bar cut or doubled at " .. b.bar) end
+  end
+  assert(changes == 1, "meter changed " .. changes .. " times")
+  stop_play()
+  params:set("meter", 1); params:set("feel", 1)
+  params:set("phrase_len", 3)
+  params:set("play_mode", PMODE)
+  start_play()
+  print("meter change: pending until the phrase boundary, one change")
 end
 
 -- poke the performance controls mid-run

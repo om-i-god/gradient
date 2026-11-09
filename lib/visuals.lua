@@ -46,7 +46,8 @@ local VIS = {}
 
 VIS.audio_level = 0
 VIS.names = {"gradient", "voices", "lanes", "phase", "echo", "fall", "pump", "arc",
-  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate"}
+  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate",
+  "radar", "subway"}
 
 local FPS = 20
 local TAU = 2 * math.pi

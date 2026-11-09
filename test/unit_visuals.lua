@@ -43,7 +43,8 @@ end
 -- the eight v1 themes first, in their old order (saved psets keep pointing
 -- at the same theme), then the eight new ones
 local NAMES = {"gradient", "voices", "lanes", "phase", "echo", "fall", "pump", "arc",
-  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate"}
+  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate",
+  "radar", "subway"}
 
 local CHORDS = {{50, 57, 60, 65}, {46, 53, 58, 62}, {48, 55, 58, 63}, {45, 52, 57, 60}}
 local LABELS = {"i", "VI", "VII", "v/i"}

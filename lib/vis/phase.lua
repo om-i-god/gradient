@@ -28,7 +28,36 @@ return function(K)
   local rot, gap, sq, sw, bs, lk1, lk2, lamp
   local vk, vy = {}, {}
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, hn, percs, arps = {}, 0, {}, {}
+  local pdz = 0                           -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  local function push(list, e, cap)
+    list[#list + 1] = e
+    while #list > cap do table.remove(list, 1) end
+  end
+  function M.kick() mark("kick") end
+  function M.hat() mark("hat"); hn = hn + 1 end
+  function M.clap() mark("clap") end
+  function M.bass() mark("bass") end
+  function M.tick() mark("tick") end
+  function M.perc(voice, note)
+    push(percs, {t = K.NOW, v = clamp(math.floor(K.num(voice, 1)), 1, 4), n = math.floor(K.num(note, 60))}, 4)
+  end
+  function M.arp(lane, note, step)
+    push(arps, {t = K.NOW, g = clamp(math.floor(K.num(lane, 1)), 1, 4) % 2 + 1,
+      m = (math.floor(K.num(step, 1)) * 3) % 15 - 7}, 3)
+  end
+
   function M.init()
+    hit, hn, percs, arps, pdz = {}, 0, {}, {}, 0
     rot, gap, sq, sw, bs, lk1, lk2, lamp = 0.35, 0, 0, 0, 0, 0, 0, 0
     for i = 1, 4 do vk[i], vy[i] = 0, 30 end
   end
@@ -150,17 +179,41 @@ return function(K)
     end
   end
 
+  -- wire m of grating g clipped to the fence box: x0, y0, x1, y1 (or nil)
+  local function wire(g, m)
+    local o = G[g]
+    local dx, dy = -o.s, o.c
+    local off = (m + o.ph) * o.sp
+    local ox, oy = CX + o.c * off, CY + o.s * off
+    local t0, t1 = -300, 300
+    if math.abs(dx) > 1e-6 then
+      local a, b = (X0 - ox) / dx, (X1 - ox) / dx
+      if a > b then a, b = b, a end
+      t0, t1 = math.max(t0, a), math.min(t1, b)
+    elseif ox < X0 or ox > X1 then return nil end
+    if math.abs(dy) > 1e-6 then
+      local a, b = (Y0 - oy) / dy, (Y1 - oy) / dy
+      if a > b then a, b = b, a end
+      t0, t1 = math.max(t0, a), math.min(t1, b)
+    elseif oy < Y0 or oy > Y1 then return nil end
+    if t1 <= t0 + 1 then return nil end
+    return ox + dx * t0, oy + dy * t0, ox + dx * t1, oy + dy * t1
+  end
+
   function M.draw(S)
     lift_y = nil                          -- the voices moved since last frame
     local T, DT, kl = K.T, K.DT, K.kickless
+    pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    local kk, cl, hh, bh = fade("kick", 0.25), fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.35)
+    local pd, mid = pdz, A[K.MID]
     -- the turn between the fences: the phase gap of lanes 1 and 2
     local d = (cycle(K.lane(S, 1)) - cycle(K.lane(S, 2))) % 1
     gap = K.follow(gap, math.sin(d * TAU) * 0.07, 1.2, DT)
     rot = rot + 0.012 * K.DTS * (1 + kl)
     sw = K.follow(sw, kl, 1, DT)
     sq = K.follow(sq, K.duck, 0.14, DT)
-    bs = K.follow(bs, math.max(K.env.bass * 0.8, A[K.LO]) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.08, DT)
-    lamp = K.follow(lamp, 0.75 * (1 - K.duck * 0.7) + 0.3 * A[K.AMP] + K.env.kick * 0.2, 0.08, DT)
+    bs = K.follow(bs, math.max(K.env.bass * 0.8, A[K.LO], bh * 0.9) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.08, DT)
+    lamp = K.follow(lamp, 0.75 * (1 - K.duck * 0.7) + 0.3 * A[K.AMP] + K.env.kick * 0.2 + cl * 0.15 + pd * 0.1, 0.08, DT)
     lk1 = K.follow(lk1, K.lane_kick[1], 0.05, DT)
     lk2 = K.follow(lk2, K.lane_kick[2], 0.05, DT)
     local c = K.chord
@@ -196,9 +249,30 @@ return function(K)
     K.haze(0, Y0, 128, GROUND, 0.02 + 0.14 * kl + 0.08 * K.throw, 1, T * 3)
 
     -- the far fence then the near one
-    bands(2.3 + 0.3 * e)
-    grating(2, 3 + lk2 * 4 + A[K.HI] * 2, 0)
+    bands((2.3 + 0.3 * e) * (0.7 + 0.3 * mid) + kk * 0.3)
+    grating(2, 3 + lk2 * 4 + A[K.HI] * 2 + pd * 1.5, 0)
     grating(1, 4 + lk1 * 4 + A[K.HI] * 2, 1)
+
+    -- an arp note lights a wire of its fence end to end
+    for j = #arps, 1, -1 do
+      local a = arps[j]
+      local f = math.exp(-(K.NOW - a.t) / 0.3)
+      if f < 0.03 then table.remove(arps, j)
+      else
+        local x0, y0, x1, y1 = wire(a.g, a.m)
+        if x0 then line(7 * f, x0, y0, x0 + (x1 - x0) * 0.4, y0 + (y1 - y0) * 0.4) end
+      end
+    end
+    -- the hats glint on the near fence's wire
+    if hh > 0.02 then
+      for k = 1, 18 do
+        local x0, y0, x1, y1 = wire(1, math.floor((K.hash(k, hn) - 0.5) * 22))
+        if x0 then
+          local u = K.hash(k, hn + 5)
+          put(7 * hh, x0 + (x1 - x0) * u, y0 + (y1 - y0) * u, 1, 1)
+        end
+      end
+    end
 
     -- posts and top rail
     for p = 0, 2 do
@@ -207,6 +281,20 @@ return function(K)
       put(3 + lamp, x, Y0 - 2, 1, GROUND - Y0 + 2)
     end
     line(3 + lamp * 1.5, 0, Y0 - 1, 127, Y0 - 1)
+    -- a tick runs along the rail as a string of dim beads
+    local tf = fade("tick", 0.4)
+    if tf > 0 then K.dashes(4 * tf, Y0 - 2, 1, 6, -T * 40, 0, 128) end
+    -- a perc: a lit window in the city, placed by voice and note
+    for j = #percs, 1, -1 do
+      local p = percs[j]
+      local f = math.exp(-(K.NOW - p.t) / 0.7)
+      if f < 0.03 then table.remove(percs, j)
+      else
+        local x = (p.v * 29 + p.n * 3) % 116 + 4
+        local y = math.min(K.at(city, x) + 3, GROUND - 5)
+        put(8 * f, x, y, 2, 4)
+      end
+    end
 
     -- the floodlight on its pole, breathing with the pump
     put(2, LX + 1, LY + 2, 1, Y0 - LY - 3)
@@ -215,13 +303,13 @@ return function(K)
 
     -- the ground: the lamp's pool, the bass glowing in it, the fence's
     -- shadow raked across
-    put(2 + K.bar_pulse * 2, 0, GROUND, 128, 1)
+    put(2 + K.bar_pulse * 2 + bh * 4, 0, GROUND, 128, 1)
     K.gradient(GROUND + 1, 63, function(y)
       return (0.3 + bs * 1.8) * math.exp(-(y - GROUND) / (1 + bs * 1.6))
     end)
     for r = 0, 3 do
       local y = GROUND + 3 + r * 3
-      K.dashes(1.2 + lamp * 1.2 + bs, y, 2, 7 + r, T * 2 + r * 5 - (G[1].ph % 1) * 7, 0, 128)
+      K.dashes(1.2 + lamp * 1.2 + bs + bh * 3, y, 2, 7 + r, T * 2 + r * 5 - (G[1].ph % 1) * 7, 0, 128)
     end
 
     -- the highs glint on the wire

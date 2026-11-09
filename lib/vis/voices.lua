@@ -34,7 +34,31 @@ return function(K)
     return clamp(62 - (n - 24) * 0.4, BASS_TOP + 1, BASS_BOT - 1)
   end
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit = {}
+  local marks = {}                        -- perc beads scrolling with the ribbons: {t, x0, y}
+  local tick_seen, arp_seen = nil, nil
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+
+  function M.kick() beat_seen = 2; mark("kick") end
+  function M.hat() mark("hat") end
+  function M.clap() mark("clap") end
+  function M.tick(kind) tick_seen = clamp(math.floor(K.num(kind, 1)), 1, 4) end
+  function M.arp(lane, note) arp_seen = vrow(note or 72) end
+  function M.perc(voice, note)
+    marks[#marks + 1] = {t = K.T, y = math.floor(vrow(note or 60)), v = clamp(math.floor(K.num(voice, 1)), 1, 4)}
+    while #marks > 5 do table.remove(marks, 1) end
+  end
+
   function M.init()
+    hit, marks, tick_seen, arp_seen = {}, {}, nil, nil
     cols, next_t, echoes = {}, nil, {}
     ys, by = {40, 33, 29, 22}, 57
     stab_hit, beat_seen, bar_seen, bs, glow = 0, 0, 0, 0, 0
@@ -54,7 +78,6 @@ return function(K)
     while #echoes > 24 do table.remove(echoes) end   -- drop this stab's furthest, not the due ones
   end
 
-  function M.kick() beat_seen = 2 end
   function M.pump() if beat_seen < 1 then beat_seen = 1 end end
   function M.bar() bar_seen = 1 end
 
@@ -66,6 +89,8 @@ return function(K)
       c.y[i] = math.floor(ys[i] + math.sin(t * 1.7 + i * 1.9) * wob + 0.5)
       c.s[i] = vk[i]
     end
+    c.tick, c.arpy = tick_seen, arp_seen
+    tick_seen, arp_seen = nil, nil
     c.stem = stab_hit > 0.5 and stab_hit or nil
     stab_hit = 0
     c.beat, c.bar = beat_seen, bar_seen
@@ -121,11 +146,18 @@ return function(K)
     local function cx(k) return x0 - 2 * (k - 1) end
 
     local breathe = 1 - K.duck * (0.35 + 0.1 * (1 - K.kickless))
-    local base = (playing and (2.2 + K.energy * 1.8) or 2.2) * (0.8 + 0.4 * A[K.MID])
+    local base = (playing and (2.2 + K.energy * 1.8) or 2.2) * (0.8 + 0.4 * A[K.MID]) * (0.65 + 0.4 * A[K.AMP])
+    local kk, cl, hh, pd = fade("kick", 0.25), fade("clap", 0.3), fade("hat", 0.25), K.env.pad
 
     -- the staff: dotted lines drifting with the scroll
     for _, n2 in ipairs(STAFF) do
-      K.dashes(1 + A[K.HI] * 1.6, math.floor(vrow(n2)), 1, 6, -T * RATE, 0, HEAD)
+      K.dashes(1 + A[K.HI] * 1.6 + pd * 1.5, math.floor(vrow(n2)), 1, 6, -T * RATE, 0, HEAD)
+      -- the hats catch on the staff near the playhead
+      if hh > 0.02 then K.dashes(4.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
+    end
+    -- the kick throws a short glow back from the playhead
+    if kk > 0.05 then
+      for y = 4, BASS_TOP - 2, 2 do put(3.5 * kk, HEAD - 2, y, 1, 1) end
     end
     -- the playhead: the pump breathes it, the kick lights it
     put(1.5 + (1 - breathe) * 6 + K.env.kick * 4, HEAD + 2, 3, 1, BASS_BOT - 3)
@@ -145,6 +177,12 @@ return function(K)
           for y = 6, BASS_TOP - 6, 4 do put(fade, x, y, 1, 1) end
         end
       end
+      if col.tick then
+        -- a tick: a dotted hair through its voice's ribbon
+        local yy = col.y[col.tick]
+        for y = yy - 14, yy + 14, 2 do put(5 * fade, x, y, 1, 1) end
+      end
+      if col.arpy then put(6 * fade, x, col.arpy - 1, 2, 3) end
       if col.stem then
         local top, bot = math.min(col.y[4], col.y[1]), math.max(col.y[4], col.y[1])
         for y = top + 2, bot - 2, 3 do put((1 + col.stem) * fade, x + 1, y, 1, 1) end
@@ -160,6 +198,10 @@ return function(K)
         if x < -1 then break end
         local fade = 1 - (k / (NCOL + 6)) ^ 1.5
         local hit = math.max(col.s[i], (col.echo or 0) * 0.7)
+        if k <= 16 then
+          local w = 1 - k / 16
+          hit = math.max(hit, kk * 0.5 * w, ((i == 2 or i == 3) and cl * 0.9 * w or 0))
+        end
         local lv = (base + hit * (7 + i * 0.6)) * fade * breathe
         if k > 6 and lv > 3 then lv = math.floor(lv / 2 + 0.5) * 2 end   -- older: coarser, longer runs
         local y = col.y[i]
@@ -200,13 +242,28 @@ return function(K)
     end
     if run_x and run_l > 0 then put(run_l, run_x, run_y, run_w, 2) end
 
+    -- perc beads ride the ribbons out, a small diamond each
+    for j = #marks, 1, -1 do
+      local m = marks[j]
+      local age = T - m.t
+      local f = 1 - age / 1.6
+      local x = math.floor(HEAD - 4 - age * RATE + 0.5)
+      if f <= 0 or x < 2 then table.remove(marks, j)
+      else
+        local l = 8 * f
+        put(l, x, m.y - 2, 1, 1); put(l, x - 2, m.y, 1, 1); put(l, x + 2, m.y, 1, 1); put(l, x, m.y + 2, 1, 1)
+        put(l * 0.6, x - 1, m.y - 1, 1, 1); put(l * 0.6, x + 1, m.y - 1, 1, 1)
+        put(l * 0.6, x - 1, m.y + 1, 1, 1); put(l * 0.6, x + 1, m.y + 1, 1, 1)
+      end
+    end
+
     -- the heads at the playhead: bright points where each voice is written
     for i = 1, 4 do
-      put(4 + vk[i] * 6 + K.env.kick * 2, HEAD, math.floor(ys[i] + 0.5), 2, 1)
+      put(4 + vk[i] * 6 + K.env.kick * 2 + kk * 3, HEAD, math.floor(ys[i] + 0.5), 2, 1)
     end
 
     -- haze: kickless and dub loosen the picture
-    K.haze(0, 4, 128, BASS_TOP, 0.05 + 0.25 * K.kickless + 0.15 * K.dub * K.throw, 1, T * 5)
+    K.haze(0, 4, 128, BASS_TOP, 0.05 + 0.25 * K.kickless + 0.15 * K.dub * K.throw + 0.3 * pd, 1, T * 5)
     -- the highs: sparkle just behind the playhead, along the ribbons
     K.grain(function(u, v)
       local i = 1 + math.floor(u * 4) % 4

@@ -5,6 +5,12 @@
 -- ones are kept for the music. the pulse shows in every theme, the dub
 -- leaves trails, and nothing strobes.
 --
+-- the visuals params reach the kit through VIS.set_trails(v) / VIS.set_react(v)
+-- (0..100, 50 = today) and VIS.set_detail("classic"|"fine"|"dense"). themes
+-- read K.trail (x their fade times; 0.4..2.5, held back near the lit bound),
+-- K.react (x their reaction strength; 0.4..1.8) and K.detail, and place slow
+-- things with K.put_sub / K.line_sub (the level split across two pixels).
+--
 -- the script feeds events as they happen (VIS.event), the engine's output
 -- polls as they arrive (VIS.audio) and the conductor state every frame
 -- (VIS.draw(theme, S)). under every theme runs the same machine:
@@ -113,11 +119,21 @@ local HIST_N = 64
 local rseed = 1                         -- the visuals' own dice
 local energy_seen = false
 
+-- the round-3 visual params (VIS.set_trails / set_detail / set_react) and the
+-- trails clamp: the lit ratio of the last 10 frames, measured as the frame is
+-- flushed (only while trails is above 1; at the default nothing is measured)
+local trail_raw, react_raw, detail = 50, 50, "fine"
+local trail_eff, trail_scale = 1, 1
+local lit_hist, lit_i = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 0
+local LIT_TRAIL_MAX = 0.38
+local lit_seen, lit_stamp = {}, 0
+
 -- the kit every theme draws with (filled in below, refreshed every frame)
 local K = {beats = 4, A = A, AMP = AMP, LO = LO, MID = MID, HI = HI, TAU = TAU,
   env = env, voice_kick = voice_kick, lane_kick = lane_kick,
   lane_note = lane_note, lane_step = lane_step, chord = chord,
-  hist = hist, HIST_N = HIST_N}
+  hist = hist, HIST_N = HIST_N,
+  trail = 1, react = 1, detail = "fine"}
 
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 
@@ -276,6 +292,37 @@ local function flush()
     end
   end
   gl_cap = false
+  if trail_raw > 50 then                   -- the trails clamp needs the lit ratio
+    lit_stamp = lit_stamp + 1
+    local cnt = 0
+    for l = 1, 15 do
+      local b = batch[l]
+      for i = 1, bn[l], 4 do
+        local x0, y0 = math.max(0, b[i]), math.max(0, b[i + 1])
+        local x1, y1 = math.min(128, b[i] + b[i + 2]), math.min(64, b[i + 1] + b[i + 3])
+        for y = y0, y1 - 1 do
+          local row = y * 128
+          for x = x0, x1 - 1 do
+            if lit_seen[row + x] ~= lit_stamp then lit_seen[row + x] = lit_stamp; cnt = cnt + 1 end
+          end
+        end
+      end
+      b = lbatch[l]
+      for i = 1, lbn[l], 4 do
+        local ax, ay, bx, by = b[i], b[i + 1], b[i + 2], b[i + 3]
+        local steps = math.min(200, math.ceil(math.max(math.abs(bx - ax), math.abs(by - ay))))
+        for q = 0, steps do
+          local u = steps > 0 and q / steps or 0
+          local x, y = math.floor(ax + (bx - ax) * u), math.floor(ay + (by - ay) * u)
+          if x >= 0 and x < 128 and y >= 0 and y < 64 and lit_seen[y * 128 + x] ~= lit_stamp then
+            lit_seen[y * 128 + x] = lit_stamp; cnt = cnt + 1
+          end
+        end
+      end
+    end
+    lit_i = lit_i % 10 + 1
+    lit_hist[lit_i] = cnt / 8192
+  end
   for l = 1, 15 do
     local n = bn[l]
     if n > 0 then
@@ -447,7 +494,25 @@ local function take_chord(c)
   for i = 1, 4 do chord[i] = got[(i - 1) % #got + 1] end
 end
 
+-- trails: 2.5^((v-50)/50) is 1 at 50, 0.4 at 0 and 2.5 at 100, smooth through
+-- the middle. past 1 it is held back while the last 10 frames run over the lit
+-- bound (LIT_TRAIL_MAX): the scale eases down fast and back up slowly
+local function trails_clamp()
+  local want = 2.5 ^ ((trail_raw - 50) / 50)
+  if want > 1 then
+    local m = 0
+    for i = 1, 10 do m = m + lit_hist[i] end
+    m = m / 10
+    if m > LIT_TRAIL_MAX then trail_scale = math.max(0, trail_scale - 0.08)
+    elseif m < LIT_TRAIL_MAX - 0.04 then trail_scale = math.min(1, trail_scale + 0.01) end
+    trail_eff = 1 + (want - 1) * trail_scale
+  else
+    trail_scale, trail_eff = 1, want
+  end
+end
+
 local function physics(S)
+  trails_clamp()
   -- the ears: polls when the engine has them, else made up from the music
   local live = heard >= 0 and (NOW - heard) < 1.5
   for k = 1, 4 do
@@ -548,6 +613,8 @@ local function sync(S)
   K.glitch = gl_t > 0 and gl_t / math.max(gl_dur, 0.01) or 0
   K.glitch_mode = gl_t > 0 and gl_mode or 0
   K.playing = S.playing ~= false
+  K.trail, K.detail = trail_eff, detail
+  K.react = react_raw <= 50 and (0.4 + 0.6 * react_raw / 50) or (1 + 0.8 * (react_raw - 50) / 50)
   K.S = S
 end
 
@@ -555,6 +622,43 @@ K.clamp, K.num, K.ease, K.follow, K.rnd, K.hash, K.py, K.px, K.opt =
   clamp, num, ease, follow, rnd, hash, py, px, opt
 K.put, K.line, K.profile, K.at, K.mass, K.row_above, K.gradient, K.dashes, K.haze, K.grain =
   put, line, profile, at, mass, row_above, gradient, dashes, haze, grain
+
+-- sub-pixel placement: the level is split between the pixel at floor(x) and the
+-- next one by the fractional part, and the same in y. whole numbers draw as put
+K.put_sub = function(l, x, y, w, h)
+  x, y = num(x, nil), num(y, nil)
+  if not (x and y and okc(x) and okc(y)) then return end
+  l = num(l, 0)
+  local ix, iy = math.floor(x), math.floor(y)
+  local fx, fy = x - ix, y - iy
+  if fx == 0 and fy == 0 then return put(l, ix, iy, w, h) end
+  for oy = 0, 1 do
+    local wy = oy == 0 and 1 - fy or fy
+    for ox = 0, 1 do
+      local wx = ox == 0 and 1 - fx or fx
+      if wx * wy > 0 then put(l * wx * wy, ix + ox, iy + oy, w, h) end
+    end
+  end
+end
+
+-- the same for a line: its start's fractional part moves the whole line, which
+-- is drawn at the two (four) neighbouring whole-pixel positions
+K.line_sub = function(l, x0, y0, x1, y1)
+  x0, y0, x1, y1 = num(x0, nil), num(y0, nil), num(x1, nil), num(y1, nil)
+  if not (x0 and y0 and x1 and y1 and okc(x0) and okc(y0) and okc(x1) and okc(y1)) then return end
+  l = num(l, 0)
+  local fx, fy = x0 - math.floor(x0), y0 - math.floor(y0)
+  if fx == 0 and fy == 0 then return line(l, x0, y0, x1, y1) end
+  for oy = 0, 1 do
+    local wy = oy == 0 and 1 - fy or fy
+    for ox = 0, 1 do
+      local wx = ox == 0 and 1 - fx or fx
+      if wx * wy > 0 then
+        line(l * wx * wy, x0 - fx + ox, y0 - fy + oy, x1 - fx + ox, y1 - fy + oy)
+      end
+    end
+  end
+end
 
 -- a part's gain on the mixer (0 when muted or missing)
 K.gain = function(S, part)
@@ -622,6 +726,14 @@ end
 VIS.strict = false
 VIS.kit = K
 
+-- the visuals params: trails and reactivity 0..100 (50 is today's behaviour),
+-- detail "classic" / "fine" / "dense"
+function VIS.set_trails(v) trail_raw = clamp(num(v, 50), 0, 100) end
+function VIS.set_react(v) react_raw = clamp(num(v, 50), 0, 100) end
+function VIS.set_detail(name)
+  if name == "classic" or name == "fine" or name == "dense" then detail = name else detail = "fine" end
+end
+
 function VIS.init()
   VIS.strict = false
   for i = #grains, 1, -1 do grains[i] = nil end
@@ -646,6 +758,8 @@ function VIS.init()
   gl_slice, gl_cap, hn = -1, false, 0
   gl_dim = 1
   ops = 0
+  trail_eff, trail_scale, lit_i = 1, 1, 0
+  for i = 1, 10 do lit_hist[i] = 0 end
   discard()
   for i = 1, #THEMES do
     broken[i] = nil

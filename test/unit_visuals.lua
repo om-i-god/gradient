@@ -171,6 +171,11 @@ local function run(theme, scen, opts)
   env()
   local VIS = include("lib/visuals")
   VIS.init()
+  if opts.vis then                              -- {trails=, detail=, react=}
+    if opts.vis.trails then VIS.set_trails(opts.vis.trails) end
+    if opts.vis.detail then VIS.set_detail(opts.vis.detail) end
+    if opts.vis.react then VIS.set_react(opts.vis.react) end
+  end
   math.randomseed(opts.seed or 11)
   local SC = SCEN[scen]
   local S = mkS()
@@ -236,6 +241,7 @@ VIS_HARNESS = {run = run, bufdiff = bufdiff, NAMES = NAMES, RAST = RAST}
 if not test then return end
 
 local SILENCE_V1 = dofile("test/fixtures/silence_v1.lua")
+local CLASSIC = dofile("test/fixtures/classic_frames.lua")
 local function frame_hash(buf)
   local h = 5381
   for i = 0, 128 * 64 - 1 do h = (h * 33 + math.floor((buf[i] or 0) * 1000 + 0.5)) % 2147483647 end
@@ -256,6 +262,11 @@ local LIT_MIN_LIVE = 0.04     -- with music, a scene, not a near-empty screen
 local DIFF_MAX = 0.7          -- mean |level change| per pixel, frame to frame (a
                               -- strobe of the lit 40% at level 5 would be 2.0)
 local L15_MAX = 12            -- level-15 pixels: points at most, never an area
+-- reaction thresholds (mean |level change| per pixel). at detail = fine (the
+-- default) the pass raised them; classic keeps the old ones
+local PART_MIN = {classic = 0.003, fine = 0.0045, dense = 0.0045}
+local BAND_MIN = {classic = 0.01, fine = 0.015, dense = 0.015}
+local LO_MIN = 0.02
 
 local function wanted(name)
   if not ONLY then return true end
@@ -301,6 +312,37 @@ for th, name in ipairs(NAMES) do
         end
       end)
     end
+    -- detail = classic draws exactly the shipped build (test/fixtures/classic_frames.lua),
+    -- at the default trails / reactivity
+    if CLASSIC[name] then
+      for _, sc in ipairs(SCENS) do
+        test("visuals " .. name .. " classic == shipped build at " .. sc, function()
+          local want = CLASSIC[name][sc]
+          assert(want, "no fixture for " .. name .. " " .. sc)
+          local st = run(th, sc, {frames = 240, keep = true, vis = {detail = "classic"}})
+          for j, f in ipairs({60, 120, 180, 240}) do
+            assert(frame_hash(st.frames[f]) == want[j],
+              name .. " " .. sc .. " frame " .. f .. " differs from the shipped build at detail = classic")
+          end
+        end)
+      end
+    end
+
+    -- the extremes keep the bounds on peak and mid, one param at a time
+    for _, ex in ipairs({{"trails", 0}, {"trails", 100}, {"react", 0}, {"react", 100}, {"detail", "dense"}}) do
+      for _, sc in ipairs({"peak", "mid"}) do
+        test(string.format("visuals %s %s=%s bounded on %s", name, ex[1], tostring(ex[2]), sc), function()
+          local st = run(th, sc, {frames = 300, vis = {[ex[1]] = ex[2]}})
+          assert(st.bad == 0, st.bad .. " NaN / inf coordinates or levels")
+          assert(st.ops_max <= OPS_BUDGET, "draw calls " .. st.ops_max)
+          assert(st.lit_max <= LIT_MAX, string.format("lit %.3f > %.2f", st.lit_max, LIT_MAX))
+          assert(st.lit_min > LIT_MIN_LIVE, string.format("near blank: lit %.4f", st.lit_min))
+          assert(st.diff_max <= DIFF_MAX, string.format("frame jump %.3f > %.2f", st.diff_max, DIFF_MAX))
+          assert(st.l15_max <= L15_MAX, st.l15_max .. " pixels at level 15")
+        end)
+      end
+    end
+
     -- silence still moves: most frames differ from the one before
     test("visuals " .. name .. " moves at silence", function()
       local st = run(th, "silence", {frames = 120, keep = true})
@@ -329,7 +371,8 @@ for th, name in ipairs(NAMES) do
 
     -- audio reactivity: identical runs are identical, and ramping out_hi or
     -- out_lo (everything else held) changes the picture
-    test("visuals " .. name .. " reacts to every band", function()
+    for _, det in ipairs({"fine", "classic"}) do
+    test("visuals " .. name .. " reacts to every band (" .. det .. ")", function()
       local function with(over)
         return function(t)
           local v = SCEN.mid.audio(t)
@@ -338,8 +381,8 @@ for th, name in ipairs(NAMES) do
         end
       end
       local function paired(a, b)
-        local Ar = run(th, "mid", {frames = 160, audio = a, keep = true})
-        local Br = run(th, "mid", {frames = 160, audio = b, keep = true})
+        local Ar = run(th, "mid", {frames = 160, audio = a, keep = true, vis = {detail = det}})
+        local Br = run(th, "mid", {frames = 160, audio = b, keep = true, vis = {detail = det}})
         local d = 0
         for i = 21, 160 do d = d + bufdiff(Ar.frames[i], Br.frames[i]) end
         return d / 140
@@ -351,17 +394,20 @@ for th, name in ipairs(NAMES) do
       local dmid = paired(with({out_mid = 0}), with({out_mid = 1}))
       local damp = paired(with({out_amp = 0}), with({out_amp = 1}))
       if REPORT then print(string.format("react %-9s hi %.3f lo %.3f mid %.3f amp %.3f", name, dhi, dlo, dmid, damp)) end
-      assert(dhi > 0.01, string.format("out_hi barely changes it: %.4f", dhi))
-      assert(dlo > 0.02, string.format("out_lo barely changes it: %.4f", dlo))
-      assert(dmid > 0.01, string.format("out_mid barely changes it: %.4f", dmid))
-      assert(damp > 0.01, string.format("out_amp barely changes it: %.4f", damp))
+      local bm = BAND_MIN[det]
+      assert(dhi > bm, string.format("out_hi barely changes it (%.4f)", dhi))
+      assert(dlo > LO_MIN, string.format("out_lo barely changes it: %.4f", dlo))
+      assert(dmid > bm, string.format("out_mid barely changes it: %.4f", dmid))
+      assert(damp > bm, string.format("out_amp barely changes it: %.4f", damp))
     end)
+    end
 
     -- every part of the music moves every theme: fire one event at frame 60
     -- (strict: no hat fallback) and compare frames 60..72 against a control
     -- that never fires it. both reseed right after, so the groove's random
     -- stream matches whatever a handler did. the control runs once.
-    test("visuals " .. name .. " reacts to every part", function()
+    for _, det in ipairs({"fine", "classic"}) do
+    test("visuals " .. name .. " reacts to every part (" .. det .. ")", function()
       local EVENTS = {
         {"kick"}, {"pump"}, {"hat"}, {"clap"}, {"perc", 2, 62}, {"tick", 3},
         {"stab", {50, 57, 60, 65}}, {"bass", 38}, {"arp", 2, 67, 3}, {"pad", {50, 57, 60, 65}}}
@@ -374,18 +420,19 @@ for th, name in ipairs(NAMES) do
           end
         end
       end
-      local ctl = run(th, "mid", {frames = 90, keep = true, at = probe(nil)})
+      local ctl = run(th, "mid", {frames = 90, keep = true, at = probe(nil), vis = {detail = det}})
       local dead = {}
       for _, ev in ipairs(EVENTS) do
-        local A = run(th, "mid", {frames = 90, keep = true, at = probe(ev)})
+        local A = run(th, "mid", {frames = 90, keep = true, at = probe(ev), vis = {detail = det}})
         local d = 0
         for i = 60, 72 do d = d + bufdiff(A.frames[i], ctl.frames[i]) end
         d = d / 13
         if REPORT then print(string.format("part %-9s %-5s %.4f", name, ev[1], d)) end
-        if not (d > 0.003) then dead[#dead + 1] = string.format("%s (%.4f)", ev[1], d) end
+        if not (d > PART_MIN[det]) then dead[#dead + 1] = string.format("%s (%.4f)", ev[1], d) end
       end
       assert(#dead == 0, name .. " does not react to: " .. table.concat(dead, ", "))
     end)
+    end
 
     -- bad input: garbage audio, short / empty chords, no lanes, tempo flapping
     test("visuals " .. name .. " bad input", function()
@@ -490,6 +537,99 @@ if not ONLY then
     local VIS = include("lib/visuals")
     assert(#VIS.names == #NAMES, #VIS.names .. " themes")
     for i, n in ipairs(NAMES) do assert(VIS.names[i] == n, i .. ": " .. tostring(VIS.names[i])) end
+  end)
+end
+
+-- the round-3 kit: trails / reactivity / detail and the sub-pixel helpers
+-- (VISONLY=none VISKIT=1 runs just these)
+if not ONLY or os.getenv("VISKIT") then
+  local function kit_with(v)
+    env()
+    local VIS = include("lib/visuals"); VIS.init()
+    if v then
+      if v.trails then VIS.set_trails(v.trails) end
+      if v.react then VIS.set_react(v.react) end
+      if v.detail then VIS.set_detail(v.detail) end
+    end
+    screen.clear(); VIS.draw(1, mkS(), 1 / FPS)
+    return VIS.kit, VIS
+  end
+  local function near(a, b, tol) return math.abs(a - b) <= tol end
+
+  test("visuals kit: defaults are the identity", function()
+    local K = kit_with()
+    assert(K.trail == 1 and K.react == 1 and K.detail == "fine", K.trail .. " " .. K.react .. " " .. K.detail)
+  end)
+  test("visuals kit: trails scale 1 at 50, ~0.4 at 0, ~2.5 at 100", function()
+    assert(kit_with({trails = 50}).trail == 1)
+    assert(near(kit_with({trails = 0}).trail, 0.4, 0.01), kit_with({trails = 0}).trail)
+    assert(near(kit_with({trails = 100}).trail, 2.5, 0.01), kit_with({trails = 100}).trail)
+    assert(kit_with({trails = 20}).trail < kit_with({trails = 40}).trail)
+    assert(kit_with({trails = 60}).trail < kit_with({trails = 80}).trail)
+  end)
+  test("visuals kit: reactivity scale 1 at 50, 0.4 at 0, 1.8 at 100", function()
+    assert(kit_with({react = 50}).react == 1)
+    assert(near(kit_with({react = 0}).react, 0.4, 1e-9))
+    assert(near(kit_with({react = 100}).react, 1.8, 1e-9))
+  end)
+  test("visuals kit: detail names, junk falls back to fine", function()
+    assert(kit_with({detail = "classic"}).detail == "classic")
+    assert(kit_with({detail = "dense"}).detail == "dense")
+    assert(kit_with({detail = "nope"}).detail == "fine")
+    assert(kit_with({trails = 0 / 0, react = "x"}).trail == 1)
+  end)
+  test("visuals kit: put_sub splits the level across two pixels", function()
+    env(); local VIS = include("lib/visuals"); VIS.init()
+    local KK = VIS.kit
+    local S = mkS()
+    local THEMES
+    for j = 1, 60 do
+      local nm, val = debug.getupvalue(VIS.draw, j)
+      if not nm then break end
+      if nm == "THEMES" then THEMES = val end
+    end
+    local function shot(fn)
+      THEMES[1].draw = function() fn(KK) end
+      screen.clear(); VIS.draw(1, S, 1 / FPS)
+      for _ = 1, 40 do screen.clear(); VIS.draw(1, S, 1 / FPS) end     -- past the fade-in
+      local t = {}
+      for i = 0, 8191 do local v = RAST.buf[i] or 0; if v > 0 then t[i] = v end end
+      return t
+    end
+    local a = shot(function(k) k.put_sub(10, 20, 30, 1, 1) end)
+    assert(a[30 * 128 + 20] == 10, "whole x,y is one pixel")
+    local b = shot(function(k) k.put_sub(10, 20.5, 30, 1, 1) end)
+    assert(b[30 * 128 + 20] == 5 and b[30 * 128 + 21] == 5, "half in x")
+    local c = shot(function(k) k.put_sub(12, 20.25, 30, 1, 1) end)
+    assert(c[30 * 128 + 20] == 9 and c[30 * 128 + 21] == 3, "a quarter in x")
+    local d = shot(function(k) k.put_sub(12, 20.5, 30.5, 1, 1) end)
+    assert(d[30 * 128 + 20] == 3 and d[31 * 128 + 21] == 3 and d[30 * 128 + 21] == 3 and d[31 * 128 + 20] == 3, "bilinear in x and y")
+    local e = shot(function(k) k.line_sub(10, 10.5, 20, 40.5, 20) end)
+    local n5 = 0
+    for i, v in pairs(e) do if v == 5 then n5 = n5 + 1 end end
+    assert(n5 >= 30, "a half-pixel line is two lines at half level: " .. n5)
+    shot(function(k) k.put_sub(10, 0 / 0, 1, 1, 1); k.put_sub(10, "x", 1, 1, 1); k.line_sub(10, nil, 1, 2, 3) end)
+    assert(RAST.bad == 0)
+  end)
+  test("visuals kit: trails 100 holds a trail longer than 0 and the clamp keeps lit under the bound", function()
+    local k0 = kit_with({trails = 0})
+    local k1 = kit_with({trails = 100})
+    assert(k1.trail > k0.trail * 4)
+    -- a theme that fills the screen: the effective trail is pulled back toward 1
+    env(); local VIS = include("lib/visuals"); VIS.init(); VIS.set_trails(100)
+    local THEMES
+    for j = 1, 60 do
+      local nm, val = debug.getupvalue(VIS.draw, j)
+      if not nm then break end
+      if nm == "THEMES" then THEMES = val end
+    end
+    THEMES[1].draw = function() VIS.kit.put(8, 0, 0, 128, 40) end      -- 62% lit
+    local S = mkS()
+    for _ = 1, 80 do screen.clear(); VIS.draw(1, S, 1 / FPS) end
+    assert(VIS.kit.trail < 1.2, "trail not pulled back: " .. VIS.kit.trail)
+    THEMES[1].draw = function() VIS.kit.put(8, 0, 0, 128, 8) end       -- 12% lit
+    for _ = 1, 400 do screen.clear(); VIS.draw(1, S, 1 / FPS) end
+    assert(VIS.kit.trail > 2.3, "trail not restored: " .. VIS.kit.trail)
   end)
 end
 

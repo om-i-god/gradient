@@ -1204,6 +1204,13 @@ local function setup_params()
   params:add_option("hud", "overlay", {"full", "minimal", "off"}, 1)
   params:add_number("vis_speed",      "speed",      1, 10,  3)
   params:add_number("vis_brightness", "brightness", 1, 15, 10)
+  params:add_number("vis_trails", "trails", 0, 100, 50)
+  params:set_action("vis_trails", function(v) VIS.set_trails(v) end)
+  local detail_names = {"classic", "fine", "dense"}
+  params:add_option("vis_detail", "detail", detail_names, 2)
+  params:set_action("vis_detail", function(v) VIS.set_detail(detail_names[v]) end)
+  params:add_number("vis_react", "reactivity", 0, 100, 50)
+  params:set_action("vis_react", function(v) VIS.set_react(v) end)
 end
 
 ------------------------------------------------------------------------

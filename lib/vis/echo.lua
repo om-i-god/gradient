@@ -128,7 +128,7 @@ return function(K)
         put(E(5 * hh), math.floor(K.hash(i, 21) * 126), 1 + (i * 5) % 9, 1, 1)
       end
       if fine then      -- and catch on the water
-        for r = 0, 0 do K.dashes(E(10 * hh), QUAY + 3 + r * 5, 1, 5, T * (25 + r * 9) * (r % 2 == 0 and 1 or -1), 0, 128) end
+        K.dashes(E(10 * hh), QUAY + 3, 1, 5, T * 25, 0, 128)
         for k = 0, NA - 1 do      -- a glint on each arch's crown and lamp
           local c = ax(k) + OW / 2
           put(E(12 * hh), c - 1, SPRING - R - 1, 3, 1)

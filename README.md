@@ -198,7 +198,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
   - **theme cycle:** off / every 8 bars / every phrase / each track; jumps to a random other theme
   - **overlay:** full / minimal (key and chord only) / off (just the picture, plus held-key hints and messages)
   - **speed, brightness**
-  - **trails, detail, reactivity:** trails (0-100, 50 as designed) scales how long marks and afterimages linger; detail is classic (the look before round 3) / fine (the default) / dense; reactivity (0-100, 50 as designed) scales how hard each scene answers the parts and bands
+  - **trails, detail, reactivity:** trails (0-100, 50 as designed) scales how long marks and afterimages linger; detail is classic (exactly the look before round 3; trails only shorten, to 0.95x, there) / fine (the default) / dense (fine plus extra fine texture: more lit windows, finer staff lines, extra hairlines, subtle on some scenes); reactivity (0-100, 50 as designed) scales how hard each scene answers the parts and bands at fine and dense (classic is the look before round 3 and does not react to it)
 
 **seeds.** a seed fixes a track's material: patterns, lanes, progression, harmonic rhythm. the moment-to-moment dice (which notes skip, when mutations land) run live, so a rebuilt seed is the same track played a different night.
 

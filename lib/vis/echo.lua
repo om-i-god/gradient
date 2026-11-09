@@ -164,7 +164,7 @@ return function(K)
     -- dense: the brick joints in the piers, staggered course to course
     if dense and K.playing then
       for y = DECK + 4, QUAY - 5, 12 do
-        for k = 0, NA - 2 do put(1, ax(k) + OW + 2 + ((y // 12) % 2) * 2, y + 1, 1, 3) end
+        for k = 0, NA - 2 do put(1, ax(k) + OW + 2 + ((y // 12) % 2) * 2, y + 1, 1, 2) end
       end
     end
     -- the arch rings and their lamps

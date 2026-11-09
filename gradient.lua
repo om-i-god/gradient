@@ -1174,9 +1174,9 @@ local function setup_params()
     end)
   end
   params:add_option("echo_type", "echo type", {"dub", "tape", "ping-pong", "space"}, 1)
-  params:set_action("echo_type", function(v) engine.echo_type(v) end)
+  params:set_action("echo_type", function(v) if engine.echo_type then engine.echo_type(v) end end)
   params:add_option("character", "character", {"clean", "warm", "dusty"}, 1)
-  params:set_action("character", function(v) engine.tweak("character", v) end)
+  params:set_action("character", function(v) if engine.tweak then engine.tweak("character", v) end end)
   params:add_option("clap_kind", "clap voice", {"auto", "clap", "snare", "snap"}, 1)
   params:add_option("perc_kit", "perc kit", {"auto", "hand", "wood", "metal"}, 1)
   for i = 1, 4 do

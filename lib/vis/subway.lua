@@ -172,11 +172,11 @@ return function(K)
     end
 
     -- the carriage: roof, belt and skirt lines, thumped by the kick
-    local bl = 1.2 + 3.5 * kk
+    local bl = 1.2 + E(3.5 * kk)
     put(bl, 0, 13, 128, 1)
     put(bl, 0, 47, 128, 1)
-    put(1 + 3 * kk, 0, 36, 128, 1)
-    if kk > 0.03 then put(2 * kk, 0, 48, 128, 1); put(2 * kk, 0, 12, 128, 1) end
+    put(1 + E(3 * kk), 0, 36, 128, 1)
+    if kk > 0.03 then put(E(2 * kk), 0, 48, 128, 1); put(E(2 * kk), 0, 12, 128, 1) end
 
     -- the slots, window by window
     local base = 1.8 + 1.0 * mid + 0.4 * amp
@@ -204,7 +204,7 @@ return function(K)
       end
       -- the wheels: a bogie under the end slots of each car
       if k == 0 or k == 4 then
-        local wl2 = 1.2 + 4.5 * lo + 4 * bt
+        local wl2 = 1.2 + 4.5 * lo + E(4 * bt)
         put(wl2, sx + 3, 49, 4, 3); put(wl2, sx + 9, 49, 4, 3)
       end
     end
@@ -219,6 +219,7 @@ return function(K)
         if f < 0.03 or sx < -PITCH or sx > 128 then w.on = false
         else
           local l, kd, x = w.lv * f, w.kind, sx + 2
+          if kd == "bar" then l = E(l) end      -- the stab's bars
           if kd == "full" then
             glass(l, x, false)
             line(l, x - 1, WY - 1, x + 12, WY - 1)

@@ -500,6 +500,8 @@ end
 -- bound (LIT_TRAIL_MAX): the scale eases down fast and back up slowly
 local function trails_clamp()
   local want = 2.5 ^ ((trail_raw - 50) / 50)
+  -- classic is the shipped look: its bounds only hold near the designed trails
+  if detail == "classic" then want = math.max(0.95, math.min(1.0, want)) end
   if want > 1 then
     local m = 0
     for i = 1, 10 do m = m + lit_hist[i] end

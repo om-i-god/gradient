@@ -330,10 +330,13 @@ for th, name in ipairs(NAMES) do
     end
 
     -- the extremes keep the bounds on peak and mid, one param at a time
-    for _, ex in ipairs({{"trails", 0}, {"trails", 100}, {"react", 0}, {"react", 100}, {"detail", "dense"}}) do
+    for _, ex in ipairs({{"trails", 0}, {"trails", 100}, {"react", 0}, {"react", 100}, {"detail", "dense"},
+        {"classic0", 0}, {"classic100", 100}}) do
       for _, sc in ipairs({"peak", "mid"}) do
         test(string.format("visuals %s %s=%s bounded on %s", name, ex[1], tostring(ex[2]), sc), function()
-          local st = run(th, sc, {frames = 300, vis = {[ex[1]] = ex[2]}})
+          local vis = {[ex[1]] = ex[2]}
+          if ex[1] == "classic0" or ex[1] == "classic100" then vis = {detail = "classic", trails = ex[2]} end
+          local st = run(th, sc, {frames = 300, vis = vis})
           assert(st.bad == 0, st.bad .. " NaN / inf coordinates or levels")
           assert(st.ops_max <= OPS_BUDGET, "draw calls " .. st.ops_max)
           assert(st.lit_max <= LIT_MAX, string.format("lit %.3f > %.2f", st.lit_max, LIT_MAX))
@@ -342,6 +345,27 @@ for th, name in ipairs(NAMES) do
           assert(st.l15_max <= L15_MAX, st.l15_max .. " pixels at level 15")
         end)
       end
+    end
+
+    -- the themes the silence fixture does not cover (round 2 and 3): at silence,
+    -- fine, whatever changes between frames is dim (sodium's twinkle peaks at 7) and the change is small
+    if th > 16 then
+      test("visuals " .. name .. " is still at silence", function()
+        local st = run(th, "silence", {frames = 200, keep = true, vis = {detail = "fine"}})
+        local sum, n = 0, 0
+        for i = 101, 200 do          -- after the start-up (subway's train is still pulling away before)
+          local a, b = st.frames[i - 1], st.frames[i]
+          for k = 0, 128 * 64 - 1 do
+            local x, y = a[k] or 0, b[k] or 0
+            if x ~= y then
+              assert(x <= 7 and y <= 7, string.format("%s: pixel %d moves %s -> %s at silence", name, k, x, y))
+            end
+          end
+          sum, n = sum + bufdiff(a, b), n + 1
+        end
+        local cap = name == "subway" and 0.07 or 0.025      -- subway's train always crawls past (levels <= 2)
+        assert(sum / n <= cap, string.format("%s: mean change %.4f at silence", name, sum / n))
+      end)
     end
 
     -- silence still moves: most frames differ from the one before

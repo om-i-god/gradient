@@ -48,23 +48,50 @@ local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 ------------------------------------------------------------------------
 
 function C.regen_material(S)
-  S.pat.kick   = G.kick()
-  S.pat.hats   = G.hats()
-  S.pat.rim    = G.rim()
-  S.pat.stabs  = G.stabs()
-  S.pat.shaker = G.shaker()
-  S.pat.toms   = G.toms()
-  S.pat.clap   = G.clap()
+  S.pat.kick   = G.kick(S.bar)
+  S.pat.hats   = G.hats(S.bar)
+  S.pat.rim    = G.rim(S.bar)
+  S.pat.stabs  = G.stabs(S.bar)
+  S.pat.shaker = G.shaker(S.bar)
+  S.pat.toms   = G.toms(S.bar)
+  S.pat.clap   = G.clap(S.bar)
   S.pat.perc   = G.perc()
-  S.pat.ride   = G.ride()
-  S.pat.ticks  = G.ticks()
-  S.pat.bass_lines = G.bass_lines()
+  S.pat.ride   = G.ride(S.bar)
+  S.pat.ticks  = G.ticks(S.bar)
+  S.pat.bass_lines = G.bass_lines(S.bar)
   S.pat.bass   = S.pat.bass_lines[1]
   for i = 1, 4 do S.lanes[i] = G.lane(i) end
   S.pair       = G.pick(T.PAIRS)
   S.harm_bars  = G.pick({2, 4, 4, 8})
   H.new_prog(S)
   TB.roll(S)
+end
+
+-- a meter or feel changed: rebuild only the patterns that follow the bar
+-- (kick + ghosts, clap, hats, shaker, rim, toms, ride, ticks, stabs, bass)
+-- from a sub-stream of the track seed and the meter. lanes, perc, harmony
+-- and the rest of the material stay as they are.
+function C.remeter(S)
+  local bar = S.bar
+  local fi = 1
+  for i, f in ipairs(MT.FEELS) do if f == bar.feel then fi = i end end
+  math.randomseed((S.seed or 0) * 31 + bar.beats * 7 + fi)
+  local P = S.pat
+  if P.kick   then P.kick   = G.kick(bar) end
+  if P.clap   then P.clap   = G.clap(bar) end
+  if P.hats   then P.hats   = G.hats(bar) end
+  if P.shaker then P.shaker = G.shaker(bar) end
+  if P.rim    then P.rim    = G.rim(bar) end
+  if P.toms   then P.toms   = G.toms(bar) end
+  if P.ride   then P.ride   = G.ride(bar) end
+  if P.ticks  then P.ticks  = G.ticks(bar) end
+  if P.stabs  then P.stabs  = G.stabs(bar) end
+  if P.bass_lines then
+    local cur = 1
+    for i, l in ipairs(P.bass_lines) do if l == P.bass then cur = i end end
+    P.bass_lines = G.bass_lines(bar)
+    P.bass = P.bass_lines[cur]
+  end
 end
 
 -- new track: seed drives the material; key moves to a neighbour if asked
@@ -252,7 +279,7 @@ function C.bar(S)
   end
 
   -- a meter or feel picked mid-phrase lands here, on the phrase's first bar
-  if bar_in_phrase == 1 then MT.apply_pending(S) end
+  if bar_in_phrase == 1 and MT.apply_pending(S) then C.remeter(S) end
 
   -- phrase boundary: who plays, what mutates; re-check every 4 bars
   -- (and every outro bar) so long phrases still follow the energy arc
@@ -402,19 +429,19 @@ function C.mutate(S)
   for i = 1, 4 do
     if math.random() < 0.35 * m then G.mutate_lane(S.lanes[i]) end
   end
-  if math.random() < 0.20 * m then S.pat.hats  = G.hats() end
-  if math.random() < 0.10 * m then S.pat.shaker = G.shaker() end
-  if math.random() < 0.15 * m then S.pat.toms  = G.toms() end
-  if math.random() < 0.15 * m then S.pat.stabs = G.stabs() end
+  if math.random() < 0.20 * m then S.pat.hats  = G.hats(S.bar) end
+  if math.random() < 0.10 * m then S.pat.shaker = G.shaker(S.bar) end
+  if math.random() < 0.15 * m then S.pat.toms  = G.toms(S.bar) end
+  if math.random() < 0.15 * m then S.pat.stabs = G.stabs(S.bar) end
   if math.random() < 0.12 * m and S.pat.bass_lines then
     local j = math.random(3)
     S.pat.bass_lines[j] = G.bass(G.pick(({{"root", "slide"}, {"octave", "slide"},
-                                           {"rolling", "octave"}})[j]))
+                                           {"rolling", "octave"}})[j]), S.bar)
   end
-  if math.random() < 0.10 * m then S.pat.rim   = G.rim() end
-  if math.random() < 0.10 * m then S.pat.clap  = G.clap() end
-  if math.random() < 0.12 * m then S.pat.ride  = G.ride() end
-  if math.random() < 0.18 * m then S.pat.ticks = G.ticks() end
+  if math.random() < 0.10 * m then S.pat.rim   = G.rim(S.bar) end
+  if math.random() < 0.10 * m then S.pat.clap  = G.clap(S.bar) end
+  if math.random() < 0.12 * m then S.pat.ride  = G.ride(S.bar) end
+  if math.random() < 0.18 * m then S.pat.ticks = G.ticks(S.bar) end
   -- the perc lane rotates or regrows, like an arp lane; it keeps its kit
   if math.random() < 0.30 * m then
     local pc = S.pat.perc

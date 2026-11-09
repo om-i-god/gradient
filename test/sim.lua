@@ -434,6 +434,10 @@ do
       assert(guard < n * 28 * 4 + 400, "meter sim stalled")
       if S.track_bar ~= lastb then
         out[#out + 1] = {bar = S.track_bar, beats = S.bar.beats, prev = S.step - lasts, sstep = S.bar_step}
+        for _, k in ipairs({"kick", "clap", "hats", "shaker", "rim", "toms", "ride", "ticks", "stabs"}) do
+          assert(#S.pat[k] == S.bar.n, string.format("bar %d: %s has %d steps in %d/4", S.track_bar, k, #S.pat[k], S.bar.beats))
+        end
+        for _, l in ipairs(S.pat.bass_lines) do assert(#l == S.bar.n, "bass line not bar-length") end
         lastb, lasts = S.track_bar, S.step
       end
     end

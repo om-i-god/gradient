@@ -578,7 +578,7 @@ start = function()
   if S.playing then return end
   S.playing = true
   loop_gen = loop_gen + 1
-  MT.apply_pending(S)
+  if MT.apply_pending(S) then C.remeter(S) end
   S.bar_step = 1
   local my = loop_gen
   main_clock = clock.run(function() loop(my) end)
@@ -989,7 +989,7 @@ local function setup_params()
       else S.meter_pending = {beats = beats, feel = feel} end
     else
       S.meter_pending = {beats = beats, feel = feel}
-      MT.apply_pending(S)
+      if MT.apply_pending(S) then C.remeter(S) end
       S.bar_step = 1
     end
   end

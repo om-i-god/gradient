@@ -56,6 +56,7 @@ end)
 ------------------------------------------------------------------------
 
 local C = include("lib/conductor")
+local G_ = include("lib/gen")
 
 local function new_S()
   return {pat = {}, lanes = {}, gain = {}, jitter = {}, want = {}, mute = {}, solo = {},
@@ -96,8 +97,11 @@ local function snapshot(seed)
   return table.concat(parts, ";")
 end
 
+-- math.random differs between Lua 5.3 (norns) and 5.4, so each has a fixture
+local FIXTURE = _VERSION == "Lua 5.3" and "test/fixtures/patterns_44_lua53.lua" or "test/fixtures/patterns_44.lua"
+
 if os.getenv("GEN_FIXTURE") then
-  local f = assert(io.open("test/fixtures/patterns_44.lua", "w"))
+  local f = assert(io.open(FIXTURE, "w"))
   f:write("-- generated from the pre-meter generators (4/4 even); do not regenerate\nreturn {\n")
   for _, seed in ipairs(SNAP_SEEDS) do f:write(string.format("  [%d] = %q,\n", seed, snapshot(seed))) end
   f:write("}\n")
@@ -105,8 +109,105 @@ if os.getenv("GEN_FIXTURE") then
 end
 
 test("gen: 4/4 even patterns are identical to the pre-meter snapshot", function()
-  local want = dofile("test/fixtures/patterns_44.lua")
+  local want = dofile(FIXTURE)
   for _, seed in ipairs(SNAP_SEEDS) do
     assert(snapshot(seed) == want[seed], "seed " .. seed .. " drifted from the snapshot")
+  end
+end)
+
+local STEP_KEYS = {"kick", "clap", "hats", "shaker", "rim", "toms", "ride", "ticks", "stabs"}
+
+local function check_lengths(S, label)
+  local n = S.bar.n
+  for _, k in ipairs(STEP_KEYS) do
+    assert(#S.pat[k] == n, label .. " " .. k .. " has " .. #S.pat[k] .. " steps, want " .. n)
+  end
+  for i, l in ipairs(S.pat.bass_lines) do
+    assert(#l == n, label .. " bass line " .. i .. " has " .. #l .. " steps, want " .. n)
+  end
+  for s in pairs(S.pat.kick.ghost) do assert(s >= 1 and s <= n, label .. " kick ghost off the bar") end
+  for _, s in ipairs(S.pat.hats.open) do assert(s >= 1 and s <= n, label .. " hat open off the bar") end
+end
+
+local function in_meter(seed, beats, feel)
+  local S = new_S()
+  S.bar = MT.bar(beats, feel)
+  C.new_track(S, seed)
+  return S
+end
+
+test("gen: every pattern has bar.n steps in every meter and feel", function()
+  for _, seed in ipairs({4218, 7, 99}) do
+    for _, beats in ipairs(MT.METERS) do
+      for _, feel in ipairs(MT.FEELS) do
+        check_lengths(in_meter(seed, beats, feel), beats .. "/4 " .. feel)
+      end
+    end
+  end
+end)
+
+test("gen: the kick lands on the beats the feel says", function()
+  for _, beats in ipairs(MT.METERS) do
+    for _, feel in ipairs(MT.FEELS) do
+      local S = in_meter(4218, beats, feel)
+      local bar = S.bar
+      for i = 1, bar.n do
+        local want = ((i - 1) % 4 == 0 and bar.starts[(i - 1) // 4 + 1]) and 1 or 0
+        assert(S.pat.kick[i] == want, string.format("%d/4 %s kick[%d]", beats, feel, i))
+      end
+    end
+  end
+  -- 2+2 leans on beats 1 and 3, 3+2 on 1 and 4
+  local k = in_meter(4218, 4, "short-long").pat.kick
+  for i = 1, 16 do assert((k[i] == 1) == (i == 1 or i == 9)) end
+  k = in_meter(4218, 5, "short-long").pat.kick
+  for i = 1, 20 do assert((k[i] == 1) == (i == 1 or i == 13)) end
+end)
+
+test("gen: claps follow the groups", function()
+  local function hits(S)
+    local out = {}
+    for i = 1, S.bar.n do if S.pat.clap[i] >= 0.85 then out[#out + 1] = i end end
+    return out
+  end
+  eq(hits(in_meter(4218, 5, "short-long")), {9, 17})    -- 3+2: beats 3 and 5
+  eq(hits(in_meter(4218, 5, "long-short")), {5, 17})    -- 2+3: beats 2 and 5
+  eq(hits(in_meter(4218, 7, "short-long")), {13, 25})   -- 4+3: beats 4 and 7
+  eq(hits(in_meter(4218, 3, "even")), {5})              -- 3/4 even: beat 2
+  eq(hits(in_meter(4218, 3, "short-long")), {5})        -- 2+1: beat 2
+  eq(hits(in_meter(4218, 3, "long-short")), {9})        -- 1+2: beat 3
+  eq(hits(in_meter(4218, 4, "short-long")), {5, 13})
+end)
+
+test("gen: a generator at the default bar equals the 4/4 even bar", function()
+  for _, g in ipairs({"kick", "clap", "hats", "shaker", "rim", "toms", "ride", "ticks", "stabs"}) do
+    math.randomseed(5); local a = ser(G_[g]())
+    math.randomseed(5); local b = ser(G_[g](MT.bar(4, "even")))
+    assert(a == b, g)
+  end
+end)
+
+test("remeter: bar-length patterns change, lanes, perc and harmony stay", function()
+  for _, seed in ipairs({4218, 7}) do
+    local S = new_S()
+    C.new_track(S, seed)
+    local lanes, perc, pair, hb = ser(S.lanes), ser(S.pat.perc), ser(S.pair), S.harm_bars
+    local prog = S.h and ser(S.h.prog)
+    S.bar = MT.bar(7, "short-long")
+    C.remeter(S)
+    check_lengths(S, "remeter 7/4")
+    assert(ser(S.lanes) == lanes and ser(S.pat.perc) == perc and ser(S.pair) == pair and S.harm_bars == hb,
+      "remeter touched lanes, perc or harmony")
+    assert(prog == (S.h and ser(S.h.prog)), "remeter touched the progression")
+    assert(S.pat.bass == S.pat.bass_lines[1], "bass is one of the lines")
+    -- deterministic from the track seed and the meter
+    local first = ser(S.pat)
+    C.remeter(S)
+    assert(ser(S.pat) == first, "remeter is not repeatable")
+    -- and it follows the meter
+    S.bar = MT.bar(5, "even")
+    C.remeter(S)
+    check_lengths(S, "remeter 5/4")
+    assert(ser(S.lanes) == lanes and ser(S.pat.perc) == perc)
   end
 end)

@@ -25,7 +25,7 @@ return function(K)
   local MX = 51                          -- the far mast, on the fifth roof
   local MLIGHTS = {3, 11, 19}            -- its aviation lights
   local TB0, TB1, TBT = 100, 124, 10     -- the tower block: left, right, roof
-  local TIPS = {{32, 15}, {42, 25}, {92, 33}, {112, 2}}   -- the aerials' tips
+  local TIPS = {{32, 15, 58}, {42, 25, 58}, {92, 33, 46}, {112, 2, 10}}   -- the aerials: tip x, y, foot
   local FCX, FCY, FR = 55, 51, 4         -- the air-con fan
   local DCX, DCY, DR = 85, 38, 6         -- the dish's cup
   local DA = -0.8                        -- the way the dish looks (up and right)
@@ -64,6 +64,9 @@ return function(K)
   for i = 1, #TWINS do lit[i] = -99 end
   local tips = {}                        -- per aerial tip: the arp's light
   for i = 1, #TIPS do tips[i] = 0 end
+  local runs = {}                        -- each note sends light down its mast: when, which
+  for i = 1, 8 do runs[i] = {t = -99, i = 1} end
+  local rni = 0
   local glints = {}                      -- the dish's glints
   for i = 1, 3 do glints[i] = {t = -99, v = 1} end
   local gli = 0
@@ -80,6 +83,7 @@ return function(K)
     rot, tick_n, pdz = 0, 0, 0
     for i = 1, #TWINS do lit[i] = -99 end
     for i = 1, #TIPS do tips[i] = 0 end
+    for i = 1, #runs do runs[i].t = -99 end
     for i = 1, #glints do glints[i].t = -99 end
     for i = 1, #blink do blink[i] = i end
     for k in pairs(acc) do acc[k] = 0 end
@@ -106,7 +110,9 @@ return function(K)
   end
   function M.arp(lane, note)
     local i = (math.floor(K.num(note, 72)) + clamp(math.floor(K.num(lane, 1)), 1, 4)) % #TIPS + 1
-    tips[i] = math.min(3, tips[i] + 1)
+    tips[i] = math.min(1.5, tips[i] + 0.8)
+    rni = rni % #runs + 1
+    runs[rni].t, runs[rni].i = K.NOW, i
   end
   function M.bar() end
 
@@ -134,7 +140,7 @@ return function(K)
     local pf = fade(pump_t, 0.3) * rise(pump_t)
     local dk = math.exp(-DT / (0.3 * TR()))
     for k, v in pairs(acc) do acc[k] = v < 0.01 and 0 or v * dk end
-    local tk = math.exp(-DT / (0.5 * TR()))
+    local tk = math.exp(-DT / (0.25 * TR()))      -- short: each note steps up and dies away
     for i = 1, #TIPS do tips[i] = tips[i] < 0.01 and 0 or tips[i] * tk end
     local kk, bt, ap, hf, tf = acc.kick * rise(kick_t), acc.bass, acc.pump, acc.hat, acc.tick
     -- the fan: slow at rest, spun up by the bass
@@ -201,7 +207,7 @@ return function(K)
 
     -- the second water tower, on a far roof
     local oc = 1.6 + 0.6 * mid
-    local shake = kk > 0.05 and math.sin((NOW - kick_t) * 50) * 1.6 * kk or 0
+    local shake = kk > 0.05 and math.sin((NOW - kick_t) * 35) * 1.6 * kk or 0
     local rl = 1.6 + 0.6 * mid + E(6 * kk)
     tower(oc, rl, shake, 71, 77, 21, 27, 2)
     line(oc, 72, 27, 71, 30); line(oc, 76, 27, 77, 30)
@@ -256,15 +262,28 @@ return function(K)
     for x = 39, 46, 3 do line(al, x, 26, x, 30) end
     line(oc, 92, PY, 92, 34)
     line(oc, 112, TBT, 112, 3)
+    -- each note: a short run of light down its mast from the tip
+    for k = 1, #runs do
+      local a = NOW - runs[k].t
+      if a >= 0 and a < 0.7 then
+        local tp = TIPS[runs[k].i]
+        local v = (1 - a / 0.7) * math.min(1, a / 0.05 + 0.4)
+        local ry = math.min(tp[3] - 4, tp[2] + 2 + a * 45)
+        line(math.min(13, 1.6 + E(10 * v)), tp[1], ry, tp[1], ry + 4)
+        line(math.min(13, 1.4 + E(5.5 * v)), tp[1], ry - 6, tp[1], ry - 1)
+        put(E(3.6 * v), tp[1] - 2, ry + 1, 2, 2); put(E(3.6 * v), tp[1] + 1, ry + 1, 2, 2)
+      end
+    end
     for i = 1, #TIPS do
       local x, y, f = TIPS[i][1], TIPS[i][2], tips[i]
-      put(math.min(13, 1.8 + E(9 * f)), x, y, 1, 1)
+      put(math.min(13, 1.8 + E(5 * f)), x, y, 1, 1)
       if f > 0 then
-        -- the tip light: a round beacon glow (no rays: that is the dish's glint),
-        -- its light running down the mast (a line: the mast would hide a rect)
-        put(E(5 * f), x - 1, y - 1, 3, 3)
-        put(E(2.6 * f), x - 3, y - 2, 7, 5); put(E(2.6 * f), x - 2, y - 3, 5, 7)
-        line(math.min(13, 1.6 + E(4.5 * f)), x, y + 2, x, y + 7)
+        -- the tip light: a small round beacon glow (no rays: that is the dish's
+        -- glint), dimmer than a stab's window, its light running down the mast
+        -- (a line: the mast would hide a rect)
+        put(E(3.2 * f), x - 1, y - 1, 3, 3)
+        put(E(1.6 * f), x - 2, y - 1, 5, 3); put(E(1.6 * f), x - 1, y - 2, 3, 5)
+        line(math.min(13, 1.6 + E(3 * f)), x, y + 2, x, y + 7)
       end
     end
 

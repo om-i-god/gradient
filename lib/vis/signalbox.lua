@@ -100,7 +100,7 @@ return function(K)
   function M.arp(lane, note)
     local n = math.floor(K.num(note, 72))
     local h = heads[(n + clamp(math.floor(K.num(lane, 1)), 1, 4) * 3) % #HEADS + 1]
-    h.f, h.asp = math.min(3, h.f + 0.9), n % 3 + 1
+    h.f, h.asp = math.min(2, h.f + 0.9), n % 3 + 1
   end
   function M.bar() end
 
@@ -144,7 +144,7 @@ return function(K)
       local tx = 42 + (NOW - clap_t) * 70
       line(E(2.6 * cf), tx, HZ - 1, tx + 46, HZ - 1)
       for k = 0, 11 do
-        local fl = K.hash(k + math.floor((NOW - clap_t) * 24), 7) > 0.3 and 1 or 0.45
+        local fl = K.hash(k + math.floor((NOW - clap_t) * 8), 7) > 0.3 and 1 or 0.45
         put(E(8 * cf * fl), tx + 1 + k * 4, HZ - 3, 2, 1)
       end
       put(E(3.4 * cf), tx - 6, HZ + 1, 58, 1)

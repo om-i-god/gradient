@@ -75,6 +75,7 @@ function C.remeter(S)
   local bar = S.bar
   local fi = 1
   for i, f in ipairs(MT.FEELS) do if f == bar.feel then fi = i end end
+  local resume = math.random(1 << 30)    -- later material carries on from here
   math.randomseed((S.seed or 0) * 31 + bar.beats * 7 + fi)
   local P = S.pat
   if P.kick   then P.kick   = G.kick(bar) end
@@ -92,6 +93,7 @@ function C.remeter(S)
     P.bass_lines = G.bass_lines(bar)
     P.bass = P.bass_lines[cur]
   end
+  math.randomseed(resume)
 end
 
 -- new track: seed drives the material; key moves to a neighbour if asked

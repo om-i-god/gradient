@@ -82,7 +82,8 @@ function G.clap(bar)
     t[s] = main and (0.85 + math.random() * 0.15) or (0.35 + math.random() * 0.2)
   end
   local p = lay(t, bar)
-  -- even feel: today's patterns, mapped (3/4 takes beat 2 alone). a grouped
+  -- 4/4 even: today's patterns. other even bars clap on the even beats
+  -- (3/4: 2; 5/4: 2, 4; 7/4: 2, 4, 6). a grouped
   -- feel claps on the last beat of each group longer than one beat.
   local beats
   if bar.feel ~= "even" then
@@ -92,8 +93,9 @@ function G.clap(bar)
       if len > 1 then beats[#beats + 1] = b + len - 1 end
       b = b + len
     end
-  elseif bar.beats == 3 then
-    beats = {2}
+  elseif bar.beats ~= 4 then
+    beats = {}                                   -- even feel: the even-numbered beats
+    for b = 2, bar.beats, 2 do beats[#beats + 1] = b end
   end
   if beats then
     for i = 1, bar.n do if p[i] >= 0.85 then p[i] = 0 end end   -- keep the soft ghosts

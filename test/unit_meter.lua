@@ -173,6 +173,9 @@ test("gen: claps follow the groups", function()
   eq(hits(in_meter(4218, 5, "short-long")), {9, 17})    -- 3+2: beats 3 and 5
   eq(hits(in_meter(4218, 5, "long-short")), {5, 17})    -- 2+3: beats 2 and 5
   eq(hits(in_meter(4218, 7, "short-long")), {13, 25})   -- 4+3: beats 4 and 7
+  eq(hits(in_meter(4218, 5, "even")), {5, 13})          -- even: beats 2 and 4
+  eq(hits(in_meter(4218, 7, "even")), {5, 13, 21})      -- even: beats 2, 4 and 6
+  eq(hits(in_meter(7, 5, "even")), {5, 13})
   eq(hits(in_meter(4218, 3, "even")), {5})              -- 3/4 even: beat 2
   eq(hits(in_meter(4218, 3, "short-long")), {5})        -- 2+1: beat 2
   eq(hits(in_meter(4218, 3, "long-short")), {9})        -- 1+2: beat 3
@@ -187,23 +190,27 @@ test("gen: a generator at the default bar equals the 4/4 even bar", function()
   end
 end)
 
-test("remeter: bar-length patterns change, lanes, perc and harmony stay", function()
+test("remeter: bar-length patterns change; lanes, perc and harmony stay", function()
   for _, seed in ipairs({4218, 7}) do
     local S = new_S()
     C.new_track(S, seed)
     local lanes, perc, pair, hb = ser(S.lanes), ser(S.pat.perc), ser(S.pair), S.harm_bars
-    local prog = S.h and ser(S.h.prog)
+    local before = ser({S.pat.kick, S.pat.hats, S.pat.ride})
     S.bar = MT.bar(7, "short-long")
     C.remeter(S)
     check_lengths(S, "remeter 7/4")
     assert(ser(S.lanes) == lanes and ser(S.pat.perc) == perc and ser(S.pair) == pair and S.harm_bars == hb,
       "remeter touched lanes, perc or harmony")
-    assert(prog == (S.h and ser(S.h.prog)), "remeter touched the progression")
+    assert(ser({S.pat.kick, S.pat.hats, S.pat.ride}) ~= before, "remeter did not change the patterns")
     assert(S.pat.bass == S.pat.bass_lines[1], "bass is one of the lines")
     -- deterministic from the track seed and the meter
     local first = ser(S.pat)
     C.remeter(S)
     assert(ser(S.pat) == first, "remeter is not repeatable")
+    -- the global stream resumes deterministically after it
+    S.bar = MT.bar(7, "short-long")
+    math.randomseed(11); C.remeter(S); local r1 = math.random()
+    math.randomseed(11); C.remeter(S); assert(math.random() == r1, "stream after remeter not deterministic")
     -- and it follows the meter
     S.bar = MT.bar(5, "even")
     C.remeter(S)

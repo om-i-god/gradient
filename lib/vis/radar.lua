@@ -59,6 +59,16 @@ return function(K)
   local pump_t, kick_t, bass_t, arp_t = -99, -99, -99, -99
   local hats_n, tick_n, bass_n = 0, 0, 0
   local pdz = 0
+  -- fine: each part's own range-gate mark (an arc and end ticks at its bearing)
+  local marks, mi = {}, 0
+  for i = 1, 16 do marks[i] = {t = -99, a = 0, r = 0, lv = 0, w = 0.2} end
+  local function mark(a, r, lv, w)
+    mi = mi % #marks + 1
+    local m = marks[mi]
+    m.t, m.a, m.r, m.lv, m.w = K.NOW, a, r, lv, w
+  end
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
 
   local function blip(a, r, lv, sz, spoke)
     bi = bi % #blips + 1
@@ -76,6 +86,8 @@ return function(K)
     for _, c in ipairs(cells) do c.t = -99 end
     bass_n = 0
     ci, pump_t, kick_t, bass_t, arp_t, hats_n, tick_n, pdz = 0, -99, -99, -99, -99, 0, 0, 0
+    for _, m in ipairs(marks) do m.t = -99 end
+    mi = 0
   end
   M.clear = M.init
 
@@ -84,6 +96,7 @@ return function(K)
   function M.hat()
     hats_n = hats_n + 1
     blip(hats_n * 2.399, RING[4], 7, 4)
+    mark(hats_n * 2.399, RING[4], 6.5, 0.13)
   end
   function M.clap()
     sector.a = sa + math.pi * (0.4 + 0.6 * K.hash(math.floor(K.NOW * 10), 5)); sector.t = K.NOW
@@ -91,24 +104,28 @@ return function(K)
   function M.perc(voice, note)
     voice = clamp(math.floor(K.num(voice, 1)), 1, 4)
     blip(bearing(note), RING[2] + (voice - 1) * 3, 7, 3)
+    mark(bearing(note), RING[2] + (voice - 1) * 3, 6.5, 0.22)
   end
   function M.tick(kind)
     kind = clamp(math.floor(K.num(kind, 1)), 1, 4)
     tick_n = tick_n + 1
     blip((kind + tick_n * 0.07) * TAU / 4 + 0.3, RING[3] + 3, 7, 2)
+    mark((kind + tick_n * 0.07) * TAU / 4 + 0.3, RING[3] + 3, 7, 0.3)
   end
   function M.stab(notes)
-    for i = 1, 4 do blip(bearing(K.chord[i]), RING[3], 6, 2) end
+    for i = 1, 4 do blip(bearing(K.chord[i]), RING[3], 6, 2); mark(bearing(K.chord[i]), RING[3], 5.5, 0.16) end
   end
   function M.bass(note)
     bass_t = K.NOW; bass_n = bass_n + 1
     blip(bearing(note) + 0.12 * (bass_n % 5), RING[1], 7, 4, true)
     blip(bearing(note) - 0.18, RING[1] - 3, 5, 2)
+    mark(bearing(note) + 0.12 * (bass_n % 5), RING[1], 6.5, 0.4)
   end
   function M.arp(lane, note, step)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
     arp_t = K.NOW
     blip(bearing(note) + lane * 0.4, RING[2] - 3 + lane * 0.5, 7, 3, true)
+    mark(bearing(note) + lane * 0.4, RING[2] + 3, 7.5, 0.4)
   end
   function M.pad(notes)
     ci = ci % 2 + 1
@@ -119,7 +136,7 @@ return function(K)
   function M.bar() end
 
   local function fade(t, tau)
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
   end
 
@@ -127,6 +144,10 @@ return function(K)
     local T, DT, e, NOW = K.T, K.DT, K.energy, K.NOW
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
     local kl = K.kickless
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.5 end      -- eased above 1: a hit never reaches white
+    -- an event's level: scaled by the reactivity, capped (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
 
     -- the arm: once a bar, a little quicker as the set builds
@@ -140,9 +161,9 @@ return function(K)
     local kk = fade(kick_t, 0.3)
 
     -- the scope: rim, range rings, bearing cross, rim ticks
-    draw_circle(1.5 + 0.5 * amp, RIM)
+    draw_circle(fine and (1.5 + 1.6 * amp) or (1.5 + 0.5 * amp), RIM)
     for i = 1, 4 do
-      draw_circle(0.8 + mid * 1.2 + 4.5 * pmp * (i == 2 and 1 or 0.7) + (i == 1 and lo * 2 or 0), CIRC[i])
+      draw_circle(0.8 + mid * (fine and 1.8 or 1.2) + (fine and 6.5 or 4.5) * pmp * (i == 2 and 1 or 0.7) + (i == 1 and lo * 2 or 0), CIRC[i])
     end
     local cl = 1 + 0.8 * K.duck + 0.5 * mid
     line(cl, CX - R, CY, CX + R, CY); line(cl, CX, CY - R, CX, CY + R)
@@ -150,7 +171,29 @@ return function(K)
       local a = k / 24 * TAU + T * 0.12
       local c, s = math.cos(a), math.sin(a)
       local len = (k % 6 == 0) and 3 or 1.5
-      line(k % 6 == 0 and 3 or 1.5, CX + c * (R + 1), CY + s * (R + 1), CX + c * (R + 1 + len), CY + s * (R + 1 + len))
+      if fine then
+        K.line_sub(k % 6 == 0 and 3 or 1.5, CX + c * (R + 1), CY + s * (R + 1), CX + c * (R + 1 + len), CY + s * (R + 1 + len))
+      else
+        line(k % 6 == 0 and 3 or 1.5, CX + c * (R + 1), CY + s * (R + 1), CX + c * (R + 1 + len), CY + s * (R + 1 + len))
+      end
+    end
+    -- fine: ground clutter that the arm lights as it passes (dense: more of it)
+    if fine then
+      for k = 1, dense and 40 or 14 do
+        local ca = K.hash(k, 21) * TAU
+        local cr = 5 + K.hash(k, 22) * 21
+        local pass = math.exp(-((sa - ca) % TAU) / 1.1)
+        put(0.6 + 0.5 * K.hash(k, 23) + 3 * pass * (0.6 + 0.4 * amp), CX + math.cos(ca) * cr, CY + math.sin(ca) * cr, 1, 1)
+      end
+    end
+    -- dense: a fine scale of dots on the range rings, creeping round
+    if dense and K.playing then
+      for ri = 1, 4 do
+        for k = 0, 11 + ri * 3 do
+          local a = (k / (12 + ri * 3)) * TAU - T * 0.04 * (ri % 2 == 0 and 1 or -1)
+          K.put_sub(1.1 + 0.5 * mid, CX + math.cos(a) * RING[ri], CY + math.sin(a) * RING[ri], 1, 1)
+        end
+      end
     end
 
     -- weather: dither drifting over the mid rings with the pad
@@ -158,7 +201,7 @@ return function(K)
       local c = cells[ci2]
       local age = NOW - c.t
       if age >= 0 and age < 14 then
-        local lv = math.min(1, age / 1.5) * math.exp(-age / 6) * (1 + 0.8 * pdz)
+        local lv = math.min(1, age / 1.5) * math.exp(-age / 6) * (1 + 0.8 * pdz) * (fine and 1.3 or 1)
         if lv > 0.1 then
           local a0 = c.a + T * 0.05
           for ri = 0, 3 do
@@ -167,7 +210,8 @@ return function(K)
             for j = 0, n do
               local a = a0 + (j / n - 0.5) * c.w
               if (j + ri) % 2 == 0 then
-                put(1.6 * lv, CX + math.cos(a) * r, CY + math.sin(a) * r, 1, 1)
+                if fine then K.put_sub(1.6 * lv, CX + math.cos(a) * r, CY + math.sin(a) * r, 1, 1)
+                else put(1.6 * lv, CX + math.cos(a) * r, CY + math.sin(a) * r, 1, 1) end
               end
             end
           end
@@ -183,7 +227,8 @@ return function(K)
     -- the pad itself, before any cell: a faint cloud at the rim
     if pdz > 0.03 then
       local a = T * 0.3
-      put(2 * pdz, CX + math.cos(a) * 28, CY + math.sin(a) * 28, 2, 2)
+      if fine then K.put_sub(2 * pdz, CX + math.cos(a) * 28, CY + math.sin(a) * 28, 2, 2)
+      else put(2 * pdz, CX + math.cos(a) * 28, CY + math.sin(a) * 28, 2, 2) end
     end
 
     -- a clap's sector: a wedge of lines from the hub
@@ -191,7 +236,7 @@ return function(K)
     if sc > 0.03 then
       for k = -3, 3 do
         local a = sector.a + k * 0.07
-        line(5 * sc * (1 - math.abs(k) / 5), CX + math.cos(a) * 6, CY + math.sin(a) * 6,
+        line((fine and 6.5 or 5) * sc * (1 - math.abs(k) / 5), CX + math.cos(a) * 6, CY + math.sin(a) * 6,
           CX + math.cos(a) * R, CY + math.sin(a) * R)
       end
     end
@@ -202,7 +247,7 @@ return function(K)
       if age > 0.3 then table.remove(pings, i)
       else
         local r = 2 + age / 0.3 * (R - 2)
-        local lv = 6.5 * (1 - age / 0.3)
+        local lv = (fine and 8.5 or 6.5) * (1 - age / 0.3)
         local prev
         local n = 24
         local px, py = CX + r, CY
@@ -217,17 +262,48 @@ return function(K)
       end
     end
 
-    if lo > 0.03 then draw_circle(lo * 3.5, CIRC[1]); draw_circle(lo * 2.5, CIRC[2]); arc(lo * 3, 0, TAU, 6); arc(lo * 2.5, 0, TAU, 4) end
+    if lo > 0.03 then
+      local lg = fine and 1.25 or 1
+      draw_circle(lo * 3.5 * lg, CIRC[1]); draw_circle(lo * 2.5 * lg, CIRC[2]); arc(lo * 3 * lg, 0, TAU, 6); arc(lo * 2.5 * lg, 0, TAU, 4)
+    end
     -- the hub: lit by the lows and the kick
     put(2 + 4 * kk + 2 * lo + 2 * K.duck, CX - 2, CY - 2, 5, 5)
 
     -- the wake and the arm
     local lenw = 0.35 + 0.35 * e
-    for k = 0, 3 do
-      local a = sa - k / 3 * lenw
-      local l = (1.8 + 2.4 * amp) * (1 - k / 4) ^ 2 + (k == 0 and 1.5 or 0)
-      local ca, sn = math.cos(a), math.sin(a)
-      line(l, CX + ca * 3, CY + sn * 3, CX + ca * R, CY + sn * R)
+    if fine then
+      -- a longer wake in more steps; the lit head of the arm glides on the sub-pixel
+      for k = 0, 6 do
+        local a = sa - k / 6 * lenw
+        local l = (1.8 + 3.6 * amp) * (1 - k / 7) ^ 2 + (k == 0 and 1.5 + amp or 0)
+        local ca, sn = math.cos(a), math.sin(a)
+        if k <= 1 then K.line_sub(l, CX + ca * 3, CY + sn * 3, CX + ca * R, CY + sn * R)
+        else line(l, CX + ca * 3, CY + sn * 3, CX + ca * R, CY + sn * R) end
+      end
+    else
+      for k = 0, 3 do
+        local a = sa - k / 3 * lenw
+        local l = (1.8 + 2.4 * amp) * (1 - k / 4) ^ 2 + (k == 0 and 1.5 or 0)
+        local ca, sn = math.cos(a), math.sin(a)
+        line(l, CX + ca * 3, CY + sn * 3, CX + ca * R, CY + sn * R)
+      end
+    end
+
+    -- fine: the parts' range-gate marks
+    if fine then
+      for i = 1, #marks do
+        local m = marks[i]
+        local f = fade(m.t, 0.35)
+        if f > 0 then
+          local l = E(m.lv * f)
+          arc(l, m.a - m.w, m.a + m.w, m.r)
+          arc(l * 0.5, m.a - m.w * 0.7, m.a + m.w * 0.7, m.r + 2)
+          for sg = -1, 1, 2 do
+            local ca, sn = math.cos(m.a + sg * m.w), math.sin(m.a + sg * m.w)
+            line(l * 0.8, CX + ca * (m.r - 2), CY + sn * (m.r - 2), CX + ca * (m.r + 2.5), CY + sn * (m.r + 2.5))
+          end
+        end
+      end
     end
 
     -- the blips: a flare when struck, then the phosphor of the last pass
@@ -261,8 +337,8 @@ return function(K)
         local ph = math.sin(T * (0.8 + K.hash(k, 3) * 1.4) + k * 1.7)
         if ph > -0.2 then
           local a = (k + K.hash(k, 4)) / 36 * TAU
-          put(hi * 6 * ph, CX + math.cos(a) * (R - 0.5 * (k % 3)), CY + math.sin(a) * (R - 0.5 * (k % 3)), 2, 2)
-          put(hi * 4 * ph, CX + math.cos(a) * RING[4], CY + math.sin(a) * RING[4], 2, 2)
+          put(hi * (fine and 7.5 or 6) * ph, CX + math.cos(a) * (R - 0.5 * (k % 3)), CY + math.sin(a) * (R - 0.5 * (k % 3)), 2, 2)
+          put(hi * (fine and 5 or 4) * ph, CX + math.cos(a) * RING[4], CY + math.sin(a) * RING[4], 2, 2)
         end
       end
     end

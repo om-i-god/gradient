@@ -47,8 +47,10 @@ return function(K)
   local pad_notes = {}
   local pdz = 0
 
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function fade(t, tau)
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
   end
 
@@ -126,7 +128,21 @@ return function(K)
       local yy = ym + r * 2
       if yy < 63 then
         local off = math.sin(yy * 0.9 + K.T * 1.7 + x * 0.3) * sway
-        put(l * (1 - r / (len + 1.5)), x + off - 0.5, yy, 2, 1)
+        if K.detail ~= "classic" then
+          -- the ripple slides on the sub-pixel: its level split across two columns
+          local px = x + off - 0.5
+          local ix = math.floor(px)
+          local fx = px - ix
+          local lv = l * (1 - r / (len + 1.5))
+          if lv >= 2.6 then
+            put(lv * (1 - fx), ix, yy, 2, 1)
+            if fx > 0 then put(lv * fx, ix + 1, yy, 2, 1) end
+          else
+            put(lv, math.floor(px + 0.5), yy, 2, 1)
+          end
+        else
+          put(l * (1 - r / (len + 1.5)), x + off - 0.5, yy, 2, 1)
+        end
       end
     end
   end
@@ -134,6 +150,11 @@ return function(K)
   function M.draw(S)
     local T, DT, NOW, e = K.T, K.DT, K.NOW, K.energy
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.4 end      -- eased above 1: the lit bound is tight here
+    local fp = fine and K.playing                   -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, pf, cf = fade(kick_t, 0.3), fade(pump_t, 0.3), fade(clap_t, 0.35)
     local bf = fade(bridge_t, 0.35)
@@ -144,7 +165,7 @@ return function(K)
       K.dashes(0.8 + 3.5 * pf * (y - 26) / 7, y, 3, 8, y * 5 + T * 2, 0, 128)
       if pf > 0.05 then K.dashes(3.2 * pf, y + 1, 5, 7, y * 3 - T * 3, 0, 128) end
     end
-    if pf > 0.05 then put(3 * pf, 28, 38, 72, 1); put(2 * pf, 0, 37, 128, 1) end
+    if pf > 0.05 then put(E(3 * pf), 28, 38, 72, 1); put(E(2 * pf), 0, 37, 128, 1) end
 
     -- the quay, behind the ship at both ends
     put(1.6, 0, 34, 30, 1); put(1.6, 100, 34, 28, 1)
@@ -155,10 +176,11 @@ return function(K)
       local cx = c == 1 and 18 or 112
       local dir = c == 1 and 1 or -1
       local tipx = c == 1 and 58 or 76
-      line(2, cx - 4, 34, cx - 4, 12); line(2, cx + 4, 34, cx + 4, 12)
-      line(1.5, cx - 4, 12, cx + 4, 12); line(1.5, cx - 4, 22, cx + 4, 22)
-      line(1.2, cx - 4, 34, cx + 4, 22); line(1.2, cx + 4, 34, cx - 4, 22)
-      line(2, cx - 4, 12, tipx, 11); line(2, cx, 8, tipx, 11)
+      local cp = fine and 3.4 * pf or 0         -- the pump lifts the crane steel (fine)
+      line(2 + cp, cx - 4, 34, cx - 4, 12); line(2 + cp, cx + 4, 34, cx + 4, 12)
+      line(1.5 + cp, cx - 4, 12, cx + 4, 12); line(1.5 + cp, cx - 4, 22, cx + 4, 22)
+      line(1.2 + cp, cx - 4, 34, cx + 4, 22); line(1.2 + cp, cx + 4, 34, cx - 4, 22)
+      line(2 + cp, cx - 4, 12, tipx, 11); line(2 + cp, cx, 8, tipx, 11)
       line(1.3, cx, 8, cx + dir * 14, 11)
       line(1.5, cx, 8, cx, 12)
       -- the hoist cable dropping from the boom
@@ -166,18 +188,21 @@ return function(K)
     end
 
     -- the ship: hull, boxes, bridge, funnel
-    local hl = 2 + 3.5 * kk
+    local hl = 2 + (fine and 5 or 3.5) * kk
     line(hl, 28, 31, 100, 31)
     line(hl * 0.8, 28, 31, 34, 38); line(hl * 0.8, 100, 31, 96, 38)
     line(hl, 34, 38, 96, 38)
     for x = 30, 68, 8 do
-      put(1.4, x, 24, 7, 1); put(1.4, x, 30, 7, 1); put(1.4, x, 24, 1, 7); put(1.4, x + 6, 24, 1, 7)
-      if x < 54 then put(1.4, x + 1, 18, 6, 1); put(1.4, x + 1, 18, 1, 6); put(1.4, x + 6, 18, 1, 6) end
+      local bx = fine and 1.4 + 1.2 * mid or 1.4
+      put(bx, x, 24, 7, 1); put(bx, x, 30, 7, 1); put(bx, x, 24, 1, 7); put(bx, x + 6, 24, 1, 7)
+      if x < 54 then put(bx, x + 1, 18, 6, 1); put(bx, x + 1, 18, 1, 6); put(bx, x + 6, 18, 1, 6) end
+      if dense then put(0.8, x + 3, 25, 1, 5); if x < 54 then put(0.8, x + 3, 19, 1, 5) end end   -- the containers' ribs
     end
     put(1.6, 76, 22, 20, 1); put(1.6, 76, 22, 1, 9); put(1.6, 95, 22, 1, 9)
     put(1.6, 84, 15, 1, 7); put(1.6, 88, 15, 1, 7)
     line(1.8, 83, 15, 89, 15)
-    put(0.9 + 5 * kk, 28, 38, 72, 1)
+    put(0.9 + (fine and 6.5 or 5) * kk, 28, 38, 72, 1)
+    if dense then K.dashes(0.9, 33, 2, 5, 0, 30, 98) end      -- the hull's plating
     if kk > 0.03 then
       put(2.5 * kk, 30, 32, 66, 6)
       put(3 * kk, 24, 39, 80, 1); put(2 * kk, 20, 40, 88, 1)
@@ -190,7 +215,8 @@ return function(K)
       local l, len
       if s.k == 1 then
         local b = fade(blink[s.g], 0.28)
-        l = 2.5 + 4.5 * b; len = 3 + math.floor(b * 3)
+        l = 2.5 + (fine and 6.5 or 4.5) * b; len = 3 + math.floor(b * 3)
+        if fine and b > 0.05 then put(E(3.5 * b), s.x - 2, s.y - 1, 5, 3) end
       elseif s.k == 2 then
         local p = port[i]
         local pv = p and fade(p, 0.4) or 0
@@ -198,27 +224,28 @@ return function(K)
           -- bridge windows: stabs fill them from the bottom as bars
           local j = i - 14
           local h = bridge[j] * bf
-          l = 1.5 + mid * 1.5
+          l = 1.5 + mid * (fine and 2.6 or 1.5)
           if h > 0.05 then
             local hh = math.max(1, math.floor(h * 4 + 0.5))
-            put(5.2 * bf + 1.5, s.x, s.y + 4 - hh, 3, hh)
+            put((fine and 6.4 or 5.2) * bf + 1.5, s.x, s.y + 4 - hh, 3, hh)
           end
           put(l, s.x, s.y, 3, 4)
-          if bf > 0.03 then put(3.5 * bf, 76, 22, 20, 9) end
+          if bf > 0.03 then put(E((fine and 4.6 or 3.5) * bf), 76, 22, 20, 9) end
           len = 2 + math.floor(bf * 2)
           l = l + 4 * bf
         else
-          l = 1.6 + mid * 2.2 + 5.5 * pv
+          l = 1.6 + mid * 2.2 + (fine and 6.5 or 5.5) * pv
           if K.hash(i, 5) < 0.25 and pv < 0.05 then l = 0 end
-          len = 2 + math.floor(pv * 2)
+          len = 2 + math.floor(pv * (fine and 3 or 2))
           if l > 0 then put(l, s.x, s.y, 2, 2) end
-          if pv > 0.05 then put(4 * pv, s.x - 3, s.y - 3, 8, 8); put(3 * pv, s.x - 6, s.y + 2, 14, 1) end
+          if pv > 0.05 then put(E((fine and 5.2 or 4) * pv), s.x - 3, s.y - 3, 8, 8); put(E((fine and 3.8 or 3) * pv), s.x - 6, s.y + 2, 14, 1) end
         end
       elseif s.k == 3 then
         l = lamp; len = 3
         put(l, s.x - 1, s.y, 3, 1); line(1.2 + amp * 2, s.x, s.y + 1, s.x, 34); put(amp * 4, s.x - 4, s.y + 2, 9, 1); put(amp * 3, s.x - 3, s.y + 3, 7, 3)
       else
         l = 1.5; len = 1
+        if fine then l = 1.1 + 0.9 * mid + 0.3 * math.sin(T * 0.9 + i) end      -- the far shore twinkles
         put(l, s.x, s.y, 1, 1)
       end
       if s.k == 1 then put(l, s.x - 1, s.y, 3, 2) end
@@ -232,10 +259,11 @@ return function(K)
       if a < 0.4 then
         local l = 7 * (1 - a / 0.4)
         put(l * 0.6, sp.x - 7, 34 - a * 4, 14, 1)
+        if fine then put(E(l * 0.45), sp.x - 9, 33, 18, 2); line(E(l * 0.6), sp.x, 22, sp.x, 32); put(E(l * 0.5), sp.x - 4, 28, 9, 1) end
         for q = -3, 3 do line(l * 0.7, sp.x, 33, sp.x + q * 3, 33 - 9 * (1 - math.abs(q) / 5)) end
         put(l, sp.x, 32 - a * 10, 2, 2); put(l * 0.7, sp.x - 3 - a * 14, 30 + a * 8, 1, 1)
         put(l * 0.7, sp.x + 3 + a * 14, 31 + a * 8, 1, 1)
-        refl(l * 0.5, sp.x, 32, sway, 2)
+        refl(l * (fine and 0.8 or 0.5), sp.x, 32, sway, fine and 4 or 2)
       end
     end
 
@@ -243,8 +271,18 @@ return function(K)
     for k = 0, 9 do
       local y = WL + 3 + k * k * 0.25 + k * 1.4
       if y < 63 then
-        K.dashes(1 + (k % 2) * 0.5 + lo * 2 + hi * 3, math.floor(y), 5 + k, 14 + 2 * k,
-          T * (4 + k) * (k % 2 == 0 and 1 or -1) + k * 17, 0, 128)
+        local wlv = 1 + (k % 2) * 0.5 + lo * (fine and 2.8 or 2) + hi * (fine and 3.8 or 3)
+        local woff = T * (4 + k) * (k % 2 == 0 and 1 or -1) + k * 17
+        if false then
+          -- the wave lines glide on the sub-pixel
+          local gap, w = 14 + 2 * k, 5 + k
+          for x = (woff % gap) - gap, 127, gap do
+            local a, b = math.max(0, x), math.min(128, x + w)
+            if b > a then K.put_sub(wlv, a, math.floor(y), math.max(1, math.floor(b - a + 0.5)), 1) end
+          end
+        else
+          K.dashes(wlv, math.floor(y), 5 + k, 14 + 2 * k, woff, 0, 128)
+        end
       end
     end
 
@@ -254,7 +292,7 @@ return function(K)
         local x = K.px(pad_notes[i])
         for r = 0, 5 do
           local w = 6 + r * 4 + math.floor(math.sin(T * 0.6 + i + r) * 4)
-          put(pdz * (3.4 - r * 0.45), x - w / 2, 44 + r * 3, w, 1)
+          put(pdz * (3.4 - r * 0.45) * (fine and 1.2 or 1), x - w / 2, 44 + r * 3, w, 1)
         end
       end
     end
@@ -270,6 +308,7 @@ return function(K)
         local l = 6 * (1 - u)
         put(l, r.x - w / 2, y, w, 1)
         put(l * 0.5, r.x - w / 2 - 3, y + 1, w + 6, 1)
+        if fine then put(E(l * 0.5), r.x - w / 2 + 3, y - 1, w - 6, 1) end
       end
     end
 
@@ -277,9 +316,10 @@ return function(K)
     if cf > 0.03 then
       for r = 0, 3 do
         local w = 30 - r * 6
-        put(4.5 * cf, clap_x - w / 2, 42 + r * 2, w, 1)
+        put(E((fine and 5.6 or 4.5) * cf), clap_x - w / 2, 42 + r * 2, w, 1)
       end
       put(3 * cf, clap_x - 1, 34, 2, 4)
+      if fine then put(E(3.4 * cf), clap_x - 18, 40, 36, 1); put(E(2.4 * cf), clap_x - 3, 30, 6, 4) end
     end
 
     -- buoys out on the water, one per lane
@@ -288,7 +328,18 @@ return function(K)
       local f = fade(b.t, 0.5)
       local by = 46 + b.lane * 3 + math.floor(b.n * 3)
       if f > 0 then put(1.2 + 6 * f, b.x, by, 2, 2) end
+      if fine and f > 0.05 then put(E(5 * f), b.x - 1, by - 1, 4, 4); put(E(3 * f), b.x - 5, by - 1, 12, 3) end
       if f > 0.05 then put(2.5 * f, b.x - 3, by + 2, 8, 1); line(4 * f, b.x, by - 10, b.x, by); put(1.8 * f, b.x - 12, by + 4, 24, 1); refl(4 * f, b.x, by - 6, sway, 1) end
+    end
+
+    -- dense: a far ferry's lights crawl along the horizon, and the channel buoys wink
+    if dense and fp then
+      local fx = (T * 1.5) % 170 - 20
+      K.put_sub(2.4, fx, 33, 1, 1); K.put_sub(1.8, fx + 3, 33, 1, 1); K.put_sub(2.2, fx + 6, 32, 1, 1)
+      for i = 1, 6 do
+        local tw = math.sin(T * (0.7 + 0.13 * i) + i * 2.1)
+        if tw > 0 then put(1.6 * tw, 6 + i * 20 % 117, 56 + i % 3 * 2, 1, 1) end
+      end
     end
 
     -- the highs glint on the water

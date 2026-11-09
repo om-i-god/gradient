@@ -41,8 +41,10 @@ return function(K)
     return n
   end
 
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function fade(t, tau)
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
   end
 
@@ -118,6 +120,10 @@ return function(K)
     local T, DT, e, NOW = K.T, K.DT, K.energy, K.NOW
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
     local kl = K.kickless
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.3 end      -- eased above 1: the frame change is tight here
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
 
     -- the speed: energy and the pulse; kickless stretches crawl
@@ -134,16 +140,28 @@ return function(K)
     put(1, 0, 11, 128, 1)
     for c = 0, 2 do
       local x = (c * 64 - pdist) % 192 - 32
-      line(1.2, x, 0, x, 10)
-      line(0.8, x + 2, 0, x + 2, 10)
+      if fine then
+        K.line_sub(1.2, x, 0, x, 10)
+        K.line_sub(0.8, x + 2, 0, x + 2, 10)
+      else
+        line(1.2, x, 0, x, 10)
+        line(0.8, x + 2, 0, x + 2, 10)
+      end
     end
-    local lamp = 1.5 + 2.5 * amp + 3 * pf
+    local lamp = 1.5 + (fine and 3.6 or 2.5) * amp + 3 * pf
     for c = 0, 3 do
       local x = (c * 56 - pdist * 1.25) % 224 - 24
-      put(lamp, x, 4, 8, 1)
-      if lamp > 2.2 then put(lamp * 0.4, x + 1, 5, 6, 1) end
+      if fine then
+        K.put_sub(lamp, x, 4, 8, 1)
+        if lamp > 2.2 then K.put_sub(lamp * 0.4, x + 1, 5, 6, 1) end
+      else
+        put(lamp, x, 4, 8, 1)
+        if lamp > 2.2 then put(lamp * 0.4, x + 1, 5, 6, 1) end
+      end
     end
     if pf > 0.03 then put(3.5 * pf, 0, 10, 128, 1) end
+    -- dense: the cable runs along the tunnel wall
+    if dense then put(0.8, 0, 7, 128, 1); put(0.6, 0, 9, 128, 1) end
     -- the pad glows in the roof, its notes as soft lights
     if pdz > 0.03 then
       put(1.5 * pdz, 0, 0, 128, 2)
@@ -178,7 +196,10 @@ return function(K)
       else
         local dark = K.hash(n, 11) < 0.08
         local rider = K.hash(n, 12) < 0.4
-        if not dark then glass(base, sx + 2, rider) end
+        if not dark then
+          glass(base, sx + 2, rider)
+          if fine then put(base * 0.4, sx + 2, WY + WH, 12, 1) end      -- the sill
+        end
         if hi > 0.03 then put(hi * 4, sx + 2, WY - 1, 12, 1) end
       end
       -- the wheels: a bogie under the end slots of each car
@@ -192,7 +213,8 @@ return function(K)
     for _, w in ipairs(wl) do
       if w.on then
         local age = NOW - w.t
-        local f = math.exp(-age / 0.32)
+        local f = math.exp(-age / (0.32 * TR()))
+        if fine then f = f * math.min(1, 0.3 + age / 0.07) end      -- a short rise
         local sx = (w.n - 6 * cnt) * PITCH - math.floor(dist)
         if f < 0.03 or sx < -PITCH or sx > 128 then w.on = false
         else
@@ -216,6 +238,12 @@ return function(K)
           elseif kd == "spark" then
             put(l * 0.6, x + 4 + w.x % 3, WY, 2, WH)
             put(l, x + 3 + w.x % 3, WY + 4 + w.x % 4, 4, 4)
+            if fine then
+              -- the pane flashes, a lit pole runs up to the roof and the cornice answers
+              put(E(l * 0.35), x - 1, WY - 1, 14, WH + 2)
+              line(E(l * 0.45), x + 5 + w.x % 3, 12, x + 5 + w.x % 3, 47)
+              put(E(l * 0.6), x + 2, 48, 8, 1)
+            end
           end
         end
       end

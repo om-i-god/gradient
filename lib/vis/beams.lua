@@ -30,10 +30,37 @@ return function(K)
   end
   local prof = {}
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, arps, percs = {}, {0, 0, 0, 0}, {}
+  local pdz = 0                            -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.pump() mark("pump") end
+  function M.hat() mark("hat"); hit.hn = (hit.hn or 0) + 1 end
+  function M.clap() mark("clap") end
+  function M.bass() mark("bass"); hit.bn = (hit.bn or 0) + 1 end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 4 + 1 end
+  function M.arp(lane)
+    lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
+    arps[lane] = K.NOW
+  end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, v = clamp(math.floor(K.num(voice, 1)), 1, 4),
+      n = math.floor(K.num(note, 60)) % 12}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
     for i = 1, 4 do tx[i], bi[i] = FX[i] + (i - 2.5) * 6, 0.5 end
     sw, glow, vb = 0, 0, 0
     past, pn = {}, 0
+    hit, arps, percs, pdz = {}, {0, 0, 0, 0}, {}, 0
   end
   M.clear = M.init
 
@@ -68,6 +95,9 @@ return function(K)
     local T, DT, env = K.T, K.DT, K.env
     local kl, e = K.kickless, K.energy
     local hi = A[K.HI]
+    pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    local pu, hh, cl, bh, tk = fade("pump", 0.3), fade("hat", 0.25), fade("clap", 0.3), fade("bass", 0.4), fade("tick", 0.4)
+    local pd, mid = pdz, A[K.MID]
     -- the truss and the heads on it
     put(2, 4, 2, 120, 1)
     put(2, 4, 5, 120, 1)
@@ -85,7 +115,7 @@ return function(K)
       tx[i] = follow(tx[i], clamp(target, -10, 138), 1.4 + kl, K.DTS)
       local g = K.gain(S, "lane" .. i)
       local want = 0.7 + 0.8 * e + (g > 0 and (0.5 + K.lane_kick[i] * 0.9) or 0) + sw * 1.4
-      want = want * (1 - 0.12 * K.duck)
+      want = want * (1 - 0.12 * K.duck) * (1 + 0.1 * A[K.AMP])
       bi[i] = follow(bi[i], want, want > bi[i] and 0.15 or 0.5, DT)
     end
     -- ghosts of where the beams were, one per echo, while a throw is on
@@ -115,6 +145,33 @@ return function(K)
       beam(i, tx[i], hw, bi[i] * 1.35, T, false, 0.6 + hi * 2.2)
       put(2, FX[i] - 2, 6, 5, 2)
       put(4 + bi[i] * 2.5, FX[i] - 1, TOP, 3, 1)
+      -- a pump swells each lens housing's halo
+      if pu > 0.03 then put(5 * pu, FX[i] - 4, 5, 9, 5) end
+      -- an arp note flares its own beam down its core
+      local ar = math.exp(-(K.NOW - arps[i]) / 0.3)
+      if ar > 0.03 then
+        line(6 * ar, FX[i], TOP + 1, tx[i], FLOOR - 1)
+        put(5 * ar, tx[i] - 4, FLOOR - 1, 9, 2)
+      end
+    end
+    -- a tick glints one head's lens
+    if tk > 0.03 then put(6 * tk, FX[hit.tk] - 3, 12, 7, 3) end
+    -- a hat glints along the truss
+    if hh > 0.03 then K.dashes(6 * hh, 3, 2, 5, (hit.hn or 0) * 2, 4, 124) end
+    -- a clap swells the mirror ball
+    if cl > 0.03 then
+      for dy = -4, 4 do
+        local hw = math.floor(math.sqrt(math.max(0.5, 21 - dy * dy)) + 0.5)
+        put(6 * cl, BX - hw, BY + dy, 2 * hw, 1)
+      end
+    end
+    -- a perc throws a spot of the ball on the wall: its voice sets the
+    -- row, its note the place along it
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local v = math.exp(-(K.NOW - p.t) / 0.35)
+      if v < 0.03 then table.remove(percs, i)
+      else put(6 * v, 6 + p.n * 10, 14 + p.v * 8, 7, 3) end
     end
     -- the mirror ball and its spots round the room
     line(1, BX, 6, BX, BY - 4)
@@ -162,13 +219,17 @@ return function(K)
       local d = y - FLOOR - 1
       return (1 + glow * 4.5) * math.exp(-d / (3 + glow * 3))
     end, prof)
+    -- a bass note rolls along the front of the floor
+    if bh > 0.03 then
+      for y = FLOOR + 1, FLOOR + 5, 2 do K.dashes(5 * bh, y, 8, 4, (hit.bn or 0) * 3 + y * 3, 0, 128) end
+    end
     for i = 1, 4 do
       local hw = 5 * spread + sw * 2
       put(1.2 + bi[i] * 1.6, tx[i] - hw, FLOOR, 2 * hw, 1)
       put(0.8 + bi[i] * 0.9, tx[i] - hw * 0.7, FLOOR + 1, 1.4 * hw, 1)
     end
     -- haze through it all
-    K.haze(0, 10, 128, FLOOR, 0.05 + 0.13 * K.dub + 0.15 * kl + 0.08 * K.throw, 1, T * (5 + 4 * kl))
+    K.haze(0, 10, 128, FLOOR, 0.05 + 0.13 * K.dub + 0.15 * kl + 0.08 * K.throw + 0.05 * mid + 0.1 * pd, 1, T * (5 + 4 * kl) + 30 * mid)
   end
 
   M.init()

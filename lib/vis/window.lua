@@ -41,7 +41,30 @@ return function(K)
   local ghost = {}                       -- the discs' echoes in the glazing
   local mist = 0
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, percs = {}, {}
+  local pdz = 0                          -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.kick() mark("kick") end
+  function M.hat() mark("hat") end
+  function M.bass() mark("bass") end
+  function M.clap() mark("clap") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 4 end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, v = clamp(math.floor(K.num(voice, 1)), 1, 4),
+      n = math.floor(K.num(note, 60)) % 12}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
+    hit, percs, pdz = {}, {}, 0
     disc = {}
     for i = 1, 4 do disc[i] = {x = 14 + (i - 1) * 32, y = 34 - i * 6, r = 6, k = 0} end
     lamp, mist, lights, drops, ghost = 0, 0, {}, {}, {}
@@ -60,6 +83,7 @@ return function(K)
     local x = math.floor(K.px(note))
     if x >= MX and x < MX + MW then x = MX + MW end
     local y = 50 - lane * 4 + math.floor(K.hash(x, lane) * 3)
+    mark("arp"); hit.ax, hit.ay = x, y
     for i = #lights, 1, -1 do                       -- the same window again: just relight it
       local L = lights[i]
       if L.x == x and L.y == y then L.t0 = K.T; return end
@@ -108,7 +132,11 @@ return function(K)
     local kl = K.kickless
     local c = K.chord
     local mean = (c[1] + c[2] + c[3] + c[4]) / 4
-    mist = K.follow(mist, 0.2 * kl + 0.1 * K.dub * K.throw, 1, DT)
+    pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    local kk, hh, cl, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("tick", 0.4)
+    local bh = fade("bass", 0.4)
+    local pd, mid = pdz, A[K.MID]
+    mist = K.follow(mist, 0.2 * kl + 0.1 * K.dub * K.throw + 0.2 * pd + 0.05 * mid, 1, DT)
     local soft = 1 + kl * 0.25
 
     -- the far skyline, a dim blur; the city's ground glow under it
@@ -120,7 +148,7 @@ return function(K)
       local x = math.floor(K.hash(i, 61) * 124)
       local y = 40 + math.floor(K.hash(i, 62) * 14)
       local w = 3 + math.floor(K.hash(i, 63) * 7)
-      local sh = 0.5 + 0.5 * math.sin(T * (0.4 + K.hash(i, 64)) + i * 2.7)
+      local sh = 0.5 + 0.5 * math.sin(T * (0.4 + K.hash(i, 64)) + i * 2.7 + 2.5 * mid)
       local l = 1 + K.hash(i, 65) * 1.2 + sh * 0.8 + e * 0.5
       row(l, x, y, w)
       if w > 4 then row(l * 0.6, x + 1, y + 1, w - 2) end
@@ -138,6 +166,10 @@ return function(K)
     local bassg = K.gain(S, "bass") > 0 and 1 or 0.4
     lamp = K.follow(lamp, math.max(K.env.bass * bassg * 0.8, A[K.LO] * 0.75, K.env.kick * 0.5), 0.07, DT)
     draw_disc(1 + lamp * 3, 106, 50, math.floor(8 + lamp * 3 + kl * 2), 0.8)
+    -- the kick swells the lamp's blur
+    -- a bass note lights a hot core in it
+    if bh > 0.03 then draw_disc(4 * bh, 106, 50, 6, 0) end
+    if kk > 0.03 then draw_disc(3.5 * kk, 106, 50, math.floor(9 + (hit.kickn or 0) % 3 * 2 + lamp * 3 + kl * 2), 0) end
 
     -- the arp lights: far windows switching on, holding, going out
     for i = #lights, 1, -1 do
@@ -162,7 +194,7 @@ return function(K)
       d.y = K.follow(d.y, ty, 0.4, DT)
       d.k = K.follow(d.k, K.voice_kick[i], 0.06, DT)
       local r = math.floor((5 + (4 - i) * 0.7 + d.k * 2) * soft * breathe + 0.5)
-      local l = (1.6 + 1.2 * e + d.k * 4) * (1 - kl * 0.25)
+      local l = (1.6 + 1.2 * e + d.k * 4) * (1 - kl * 0.25) * (1 + 0.3 * A[K.AMP])
       draw_disc(l, d.x, d.y, r, 1 + A[K.HI] * 0.5)
     end
     -- the discs' ghosts in the double glazing, at the echo time
@@ -183,6 +215,26 @@ return function(K)
     put(1, MX, 0, 1, SILL)
     put(2, MX + MW - 1, 0, 1, SILL)
     put(2, 0, SILL, 128, 1)
+    -- the newest window flares in the wet air round it
+    local af = fade("arp", 0.45)
+    if af > 0.03 then
+      for dy = -3, 3 do row(5 * af, hit.ax - 6, hit.ay + dy, 13) end
+    end
+    -- a clap swells the light along the mullion
+    if cl > 0.03 then put(5 * cl, MX, 0, MW, SILL) end
+    -- a perc: a small far light, its voice the height, its note the place
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local v = math.exp(-(K.NOW - p.t) / 0.35)
+      if v < 0.03 then table.remove(percs, i)
+      else draw_disc(5 * v, 8 + p.n * 9, 12 + p.v * 8, 3, 0) end
+    end
+    -- a tick: a glint on a bead of the glass
+    if tk > 0.03 then
+      local gx, gy = 10 + hit.tk * 24 + (hit.tickn or 0) % 3 * 5, 16 + (hit.tickn or 0) % 4 * 9
+      for dy = -1, 1 do row(6 * tk, gx - 5, gy + dy, 11) end
+      for dy = -3, 3 do if dy < -1 or dy > 1 then row(6 * tk, gx - 1, gy + dy, 3) end end
+    end
     put(1, 0, SILL + 3, 128, 1)
 
     -- a drop on the glass is a lens: over a disc it carries the disc's light
@@ -201,6 +253,14 @@ return function(K)
     -- the glass: mist, beads, sliding drops
     K.haze(0, 14, 128, SILL, mist, 1, T * 1.5)
     local hi = A[K.HI]
+    -- a hat glints a handful of beads, a different handful each time
+    if hh > 0.03 then
+      local hn = hit.hatn or 0
+      for j = 1, 8 do
+        local gx, gy = math.floor(K.hash(hn * 8 + j, 91) * 126), math.floor(K.hash(hn * 8 + j, 92) * (SILL - 3))
+        row(6 * hh, gx, gy, 3); row(6 * hh, gx, gy + 1, 3)
+      end
+    end
     for i = 0, 33 do
       local life = 6 + 6 * K.hash(i, 51)
       local ph = T / life + K.hash(i, 52)

@@ -80,9 +80,8 @@ return function(K)
     local x1, y1 = bush(a + 1, 1)
     arc(x0, y0, x1, y1)
   end
-  function M.perc(voice, note)
+  function M.perc(voice, _)
     voice = clamp(math.floor(K.num(voice, 1)), 1, 4)
-    note = K.num(note, 60)
     local tank = (voice + arc_n) % 3 + 1
     local bx, by = bush(tank, voice % 3 + 1)
     arc(STR[(voice + tank) % 6 + 1], GANT + 5, bx, by)
@@ -139,7 +138,7 @@ return function(K)
   end
 
   function M.draw(S)
-    local T, DT, NOW = K.T, K.DT, K.NOW
+    local T, DT = K.T, K.DT
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, pf, bt = fade(kick_t, 0.25), fade(pump_t, 0.3), fade(bass_t, 0.3)
@@ -194,7 +193,6 @@ return function(K)
     -- the transformers: tank outline, radiator fins, bushings, warm core
     for t = 1, 3 do
       local x0, w = TANK[t][1], TANK[t][2]
-      local hh = GY - TY0
       line(2 + 3 * kk + bt, x0, TY0, x0 + w, TY0)
       line(2 + 3 * kk + bt, x0, TY0, x0, GY)
       line(2 + 3 * kk + bt, x0 + w, TY0, x0 + w, GY)
@@ -285,7 +283,7 @@ return function(K)
       local a = arcs[i]
       local f = fade(a.t, 0.16)
       if f > 0 then
-        bolt(2.5 + 4 * f, a, f)
+        bolt(2.5 + 2.5 * f, a, f)
         local mx, my = (a.x0 + a.x1) / 2, math.min(a.y0, a.y1)
         put(3 * f, mx - 12, my - 2, 25, 1)
         put(2.4 * f, mx - 18, my, 37, 1)

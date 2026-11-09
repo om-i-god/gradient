@@ -15,8 +15,10 @@ return function(K)
   local M = {}
   local put, line, A, clamp = K.put, K.line, K.A, K.clamp
 
+  local RIBS = {-0.62, -0.25, 0.25, 0.62}
+  local SIDES = {-1, 1}
   local GY = 52                          -- the horizon
-  -- cx, top, throat, half width at the throat, at the base, puff drift
+  -- cx, top, throat, half width at the throat, half width at the base
   local TW = {
     {cx = 36, top = 14, thr = 27, wt = 11, wb = 20},
     {cx = 98, top = 27, thr = 36, wt = 7, wb = 13},
@@ -86,9 +88,8 @@ return function(K)
     clap_t = K.NOW
     clap_tw = (math.floor(K.NOW * 4) % 2) + 1
   end
-  function M.perc(voice, note)
+  function M.perc(voice, _)
     voice = clamp(math.floor(K.num(voice, 1)), 1, 4)
-    note = K.num(note, 60)
     lpi = lpi % #lamps + 1
     local l = lamps[lpi]
     l.t, l.tw, l.side = K.NOW, (voice % 2) + 1, (voice > 2) and 1 or -1
@@ -114,8 +115,7 @@ return function(K)
     end
     if #notes == 0 then bands[1].t = K.NOW end
   end
-  function M.arp(lane, note, step)
-    lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
+  function M.arp(_, note, _)
     vni = vni % #vents + 1
     vents[vni].t = K.NOW
     vents[vni].x = K.px(K.num(note, 72))
@@ -199,7 +199,7 @@ return function(K)
       local wr = hw(t, t.top)
       line(3.2, t.cx - wr, t.top, t.cx + wr, t.top)
       line(1.4, t.cx - wr + 1, t.top + 1, t.cx + wr - 1, t.top + 1)
-      for _, f in ipairs({-0.62, -0.25, 0.25, 0.62}) do
+      for _, f in ipairs(RIBS) do
         local px, py = t.cx + f * wr, t.top + 2
         for y = t.top + 6, GY, 6 do
           local nx = t.cx + f * hw(t, y)
@@ -271,7 +271,7 @@ return function(K)
       local f = fade(lights[ti], 0.14)
       local wr = hw(t, t.top)
       local idle = (math.floor(T * 0.7 + ti * 0.5) % 4 == 0) and 3 or 1.3
-      for _, sx in ipairs({-1, 1}) do
+      for _, sx in ipairs(SIDES) do
         local x = t.cx + sx * wr
         put(idle + 8 * f, x - 1, t.top - 2, 2, 2)
         if f > 0 then

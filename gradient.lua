@@ -237,6 +237,7 @@ local REST_BASS = {0, 0, false}
 local function play_step()
   -- bar step: 1..S.bar.n (S.step stays a global 16th counter)
   local s = S.bar_step
+  local n = S.bar.n   -- fills sit relative to the bar's end: n-3 is step 13 of 16
 
   if s == 1 then
     if S.hand_throw > 0 then S.hand_throw = S.hand_throw - 1 end
@@ -273,7 +274,7 @@ local function play_step()
   local beat = clock.get_beat_sec()
   local fill = S.fill
   -- gap fill: drums and bass sit out the end of the bar, the pump goes on
-  local gap  = fill == "gap" and s >= (S.fill_from or 13)
+  local gap  = fill == "gap" and s >= (S.fill_from or 13) + n - 16
 
   -- fills that run under everything else
   if fill == "swell" and s == 5 then
@@ -283,12 +284,12 @@ local function play_step()
     tweak("pump_lpf", 20000 * 0.025 ^ (math.min(s, 12) / 12))
   elseif fill == "stutter" then
     -- the last beat repeats, a 16th, then 32nds, then a 64th roll
-    if s == 13 then glitch(1, 1, 2)
-    elseif s == 15 then glitch(1, 0.5, 1)
-    elseif s == 16 then glitch(1, 0.25, 1) end
-  elseif fill == "tapestop" and s == 13 then
+    if s == n - 3 then glitch(1, 1, 2)
+    elseif s == n - 1 then glitch(1, 0.5, 1)
+    elseif s == n then glitch(1, 0.25, 1) end
+  elseif fill == "tapestop" and s == n - 3 then
     glitch(2, 1, 4)
-  elseif fill == "reverse" and s == 13 then
+  elseif fill == "reverse" and s == n - 3 then
     glitch(3, 1, 4)
   end
   local gl = S.glitches and S.glitches[s]
@@ -299,6 +300,12 @@ local function play_step()
   local ghost = S.pat.kick.ghost and S.pat.kick.ghost[s]
   if ghost and S.on_ghost and not gap then
     engine.kick(0.9 * ghost, params:get("kick_tune"), params:get("kick_decay") / 200, 0.1)
+  end
+  -- A/B feel: the beats that don't start a group tick as quiet kicks. they
+  -- follow the kick (so mute, solo and kickless too) but not the ghost param
+  if S.on_kick and not S.kickless and not gap and S.bar.feel ~= "even"
+     and (s - 1) % 4 == 0 and not S.bar.starts[(s - 1) // 4 + 1] then
+    engine.kick(0.9 * 0.35, params:get("kick_tune"), params:get("kick_decay") / 200, 0.1)
   end
   if (S.pat.kick[s] or 0) > 0 then
     if S.on_pump then
@@ -328,7 +335,7 @@ local function play_step()
   local hg, hv = S.gain.hats or 0, hp[s] or 0
   if hg > 0 and hv > 0 and not gap then
     local spine = (s - 1) % 4 == 2
-    local open = fill == "open" and (s == 11 or s == 15)
+    local open = fill == "open" and (s == n - 5 or s == n - 1)
     if spine and not open and ((S.trend or 0) > 0.002 or S.nudge > 0.05 or e > 0.75) then
       for _, o in ipairs(hp.open or {}) do open = open or o == s end
     end
@@ -357,13 +364,13 @@ local function play_step()
     end
   end
   -- tom fill: a run down the chord on the last beat
-  if fill == "toms" and s >= 13 and s <= 16 then
-    engine.tom(0.3 + (s - 13) * 0.05, mtof(S.chord[17 - s] - 24), 0.3, (14.5 - s) * 0.25)
+  if fill == "toms" and s >= n - 3 and s <= n then
+    engine.tom(0.3 + (s - (n - 3)) * 0.05, mtof(S.chord[n + 1 - s] - 24), 0.3, (n - 1.5 - s) * 0.25)
   end
 
   -- rim
   local rg, rv = S.gain.rim or 0, S.pat.rim[s] or 0
-  if fill == "open" and (s == 14 or s == 16) and rv == 0 then rv = 0.4 end
+  if fill == "open" and (s == n - 2 or s == n) and rv == 0 then rv = 0.4 end
   if rg > 0 and rv > 0 then
     engine.rim(rv * rg * 0.25, 1500 + math.random(0, 500), (math.random() - 0.5) * 0.8)
   end
@@ -430,7 +437,7 @@ local function play_step()
 
   -- chord stabs
   local cg, cv = S.gain.chords or 0, S.pat.stabs[s] or 0
-  if fill == "throw" and s == 15 and cv == 0 then cv = 0.8 end
+  if fill == "throw" and s == n - 1 and cv == 0 then cv = 0.8 end
   if cg > 0 and cv > 0 then
     local amp = cv * cg * 0.32
     local dur = 0.1 + (1 - e) * 0.25
@@ -458,13 +465,13 @@ local function play_step()
     local note = base + S.bass_pc + iv
     if S.bass_turn then
       if S.bass_next and S.bass_next ~= S.bass_pc then
-        if s == 16 then
-          local n = S.bass_next + (S.bass_appr or -1)
-          note, vel, slide = base + (n < 0 and n + 12 or n), 0.75, false
+        if s == n then
+          local nx = S.bass_next + (S.bass_appr or -1)
+          note, vel, slide = base + (nx < 0 and nx + 12 or nx), 0.75, false
         end
-      elseif s == 15 then
+      elseif s == n - 1 then
         note, vel, slide = base + S.bass_pc + 12, 0.7, false
-      elseif s == 16 then
+      elseif s == n then
         note, vel, slide = base + S.bass_pc + (S.bass_free and 7 or 0), 0.6, true
       end
     end
@@ -488,7 +495,7 @@ local function play_step()
 
   -- phasing arp lanes: always tick so phase relationships persist in silence
   local tone = params:get("tone") / 100
-  local bar_f = S.track_bar + (s - 1) / 16
+  local bar_f = S.track_bar + (s - 1) / n
   local arp_int, arp_ext = routes("arp")
   local arp_sel = params:get("arp_lanes")   -- 1 all, 2-5 one lane, 6 own ch each
   for i = 1, 4 do
@@ -847,6 +854,9 @@ local function draw_hud()
       sec = sec .. " " .. math.floor(S.progress * 100) .. "%"
     end
     if S.kickless and S.playing then sec = sec .. " ~" end
+    if S.bar.beats ~= 4 or S.bar.feel ~= "even" then
+      sec = MT.label(S.bar.beats, S.bar.feel) .. "  " .. sec
+    end
     text_box(127, 7, sec, S.playing and 8 or 3, true)
 
     -- listening: what the input sounds like, and where we're headed

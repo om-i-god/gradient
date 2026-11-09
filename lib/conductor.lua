@@ -222,6 +222,7 @@ local function roll_glitch(S)
     n = n + 1
     S.glitches = S.glitches or {}
     local step = G.pick({4, 6, 8, 10, 12, 14, 15, 16, 7, 11})
+    if step >= 13 then step = step + ((S.bar and S.bar.n or 16) - 16) end   -- the last beat, whatever the bar
     local r = math.random()
     local g
     if r < 0.45 then g = {step, 1, G.pick({0.5, 0.5, 1}), G.pick({1, 2, 2})}   -- stutter

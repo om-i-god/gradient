@@ -625,6 +625,65 @@ table.sort(ls)
 print(string.format("harmony: %d bars changed, avg %.1f semitones moved, max %d;  %s",
   changes, changes > 0 and moves / changes or 0, max_leap, table.concat(ls, " ")))
 
+-- 5/4 A: beat ghosts and bar-relative glitch fills
+do
+  local S = getS()
+  S.mute, S.solo = {}, {}
+  params:set("fills", 2)
+  params:set("glitch_amt", 3)
+  params:set("meter", 3); params:set("feel", 2)
+  for i = 1, 20 * 64 * 2 do
+    if S.bar.beats == 5 and S.bar_step == 1 then break end
+    tick_all()
+  end
+  assert(S.bar.beats == 5 and S.bar.feel == "short-long", "5/4 A never took effect")
+  local n = S.bar.n
+  local kicks, gls = {}, {}
+  local ek, eg = engine.kick, engine.glitch
+  engine.kick = function(...)
+    kicks[#kicks + 1] = {S.bar_step, (...), S.on_kick, S.kickless}
+    return ek(...)
+  end
+  engine.glitch = function(...)
+    gls[#gls + 1] = {S.bar_step, S.fill}
+    return eg(...)
+  end
+  local kl_bars = 0
+  key(2, 1); key(2, 0)   -- K2 tap: drop the kick for a stretch
+  for i = 1, 20 * 128 do
+    S.roll_ghost = false; S.on_ghost = false   -- isolate the beat ghosts
+    tick_all()
+    if S.bar_step == 2 and S.kickless then kl_bars = kl_bars + 1 end
+  end
+  engine.kick, engine.glitch = ek, eg
+  local full, soft = 0, 0
+  for _, k in ipairs(kicks) do
+    assert(k[3] and not k[4], "kick or ghost in a kickless/off bar")
+    if S.bar.starts[(k[1] - 1) // 4 + 1] then
+      assert(math.abs(k[2] - 0.9) < 1e-9, "group start not full velocity: " .. k[2])
+      full = full + 1
+    else
+      assert(math.abs(k[2] - 0.9 * 0.35) < 1e-9, "beat ghost velocity: " .. k[2] .. " at step " .. k[1] .. " n=" .. n)
+      assert((k[1] - 1) % 4 == 0, "beat ghost off the beat at step " .. k[1])
+      soft = soft + 1
+    end
+  end
+  assert(kl_bars > 0, "no kickless bars to check")
+  assert(full > 0 and soft > 0, "no kicks / beat ghosts in 5/4 A")
+  local fillg = 0
+  for _, g in ipairs(gls) do
+    if g[2] == "stutter" or g[2] == "tapestop" or g[2] == "reverse" then
+      assert(g[1] >= n - 3, "glitch fill early at step " .. g[1])
+      fillg = fillg + 1
+    end
+  end
+  assert(fillg > 0, "no glitch fills in 128 bars of 5/4")
+  print(string.format("5/4 A: %d full kicks, %d beat ghosts, %d glitch-fill hits, %d kickless bars",
+    full, soft, fillg, kl_bars))
+  params:set("fills", 1)
+  params:set("meter", 1); params:set("feel", 1)
+end
+
 assert((calls.wash_chord or 0) > 0, "no wash chords")
 assert((evcalls.pad or 0) == calls.wash_chord,
   string.format("pad events (%d) must match engine.wash_chord calls (%d)", evcalls.pad or 0, calls.wash_chord))

@@ -28,6 +28,8 @@ return function(K)
   local kg = 0                            -- the kick's afterglow, which rises over a few frames
   local arp_row, arp_t = 40, nil          -- the last arp note, held as a pip at the playhead
 
+  -- the fade scale: eased at fine, where the long tails of a busy bar stack up
+  local function TR() return K.detail ~= "classic" and K.trail ^ 0.4 or K.trail end
   local function vrow(n) return clamp(50 - (K.num(n, 60) - 46) * 1.5, 4, 49) end
   local function brow(n)
     n = K.num(n, 36)
@@ -44,7 +46,7 @@ return function(K)
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -128,6 +130,10 @@ return function(K)
 
   function M.draw(S)
     local T, DT = K.T, K.DT
+    local fine, dense, R = K.detail ~= "classic", K.detail == "dense", K.react
+    if R > 1 then R = 1 + (R - 1) * 0.5 end         -- the top of the range is eased: peak is already near the frame-change bound
+    local function ev(l) return math.min(l * R, 13) end
+    local gap = 6
     local c = K.chord
     local playing = K.playing
     for i = 1, 4 do
@@ -155,18 +161,20 @@ return function(K)
 
     -- the staff: dotted lines drifting with the scroll
     for _, n2 in ipairs(STAFF) do
-      K.dashes(1 + A[K.HI] * 1.6 + pd * 1.5, math.floor(vrow(n2)), 1, 6, -T * RATE, 0, HEAD)
+      K.dashes(1 + A[K.HI] * 1.6 + pd * 1.5, math.floor(vrow(n2)), 1, gap, -T * RATE, 0, HEAD)
       -- the hats catch on the staff near the playhead
-      if hh > 0.02 then K.dashes(5.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
+      if hh > 0.02 then K.dashes(fine and ev(7 * hh) or 5.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
     end
     -- the kick throws a short glow back from the playhead
     if kk > 0.05 then
-      for y = 4, BASS_TOP - 2, 2 do put(20 * math.max(kk * 0.3, kg), HEAD - 2, y, 1, 1) end
+      for y = 4, BASS_TOP - 2, 2 do put(math.min(20 * math.max(kk * 0.3, kg), fine and 13 or 20), HEAD - 2, y, 1, 1) end
     end
     -- the arp's last note stays as a pip beside the playhead
     if arp_t then
-      local ag = math.exp(-(K.NOW - arp_t) / 0.5)
-      if ag < 0.03 then arp_t = nil else put(6 * ag, HEAD + 3, arp_row - 2, 1, 5) end
+      local ag = math.exp(-(K.NOW - arp_t) / (0.5 * TR()))
+      if ag < 0.03 then arp_t = nil
+      elseif fine then put(ev(8 * ag), HEAD + 3, arp_row - 2, 1, 5); put(ev(4 * ag), HEAD + 4, arp_row - 1, 1, 3)
+      else put(6 * ag, HEAD + 3, arp_row - 2, 1, 5) end
     end
     -- the clap lights a line beside the playhead
     if cl > 0.05 then put(6 * cl, HEAD + 3, 20, 1, 14) end
@@ -211,9 +219,9 @@ return function(K)
         local hit = math.max(col.s[i], (col.echo or 0) * 0.7)
         if k <= 16 then
           local w = 1 - k / 16
-          hit = math.max(hit, kk * 0.5 * w, ((i == 2 or i == 3) and cl * 0.9 * w or 0))
+          hit = math.max(hit, kk * (fine and 0.5 + 0.25 * R or 0.5) * w, ((i == 2 or i == 3) and cl * (fine and 1.15 or 0.9) * w or 0))
         end
-        local lv = (base + hit * (7 + i * 0.6)) * fade * breathe
+        local lv = (base + hit * ((fine and K.playing) and 4.7 + i * 0.4 or 7 + i * 0.6)) * fade * breathe
         if k > 6 and lv > 3 then lv = math.floor(lv / 2 + 0.5) * 2 end   -- older: coarser, longer runs
         local y = col.y[i]
         run(1, lv, x, y)
@@ -257,7 +265,7 @@ return function(K)
     for j = #marks, 1, -1 do
       local m = marks[j]
       local age = T - m.t
-      local f = 1 - age / 1.0
+      local f = 1 - age / math.min(1.6, TR())
       local x = math.floor(HEAD - 4 - age * RATE + 0.5)
       if f <= 0 or x < 2 then table.remove(marks, j)
       else
@@ -265,16 +273,24 @@ return function(K)
         put(l, x, m.y - 2, 1, 1); put(l, x - 2, m.y, 1, 1); put(l, x + 2, m.y, 1, 1); put(l, x, m.y + 2, 1, 1)
         put(l * 0.6, x - 1, m.y - 1, 1, 1); put(l * 0.6, x + 1, m.y - 1, 1, 1)
         put(l * 0.6, x - 1, m.y + 1, 1, 1); put(l * 0.6, x + 1, m.y + 1, 1, 1)
+        if fine then
+          local o = ev(4 * f)
+          put(o, x, m.y - 4, 1, 1); put(o, x, m.y + 4, 1, 1); put(o, x - 4, m.y, 1, 1); put(o, x + 4, m.y, 1, 1)
+        end
       end
     end
 
     -- the heads at the playhead: bright points where each voice is written
     for i = 1, 4 do
+      if fine and K.playing then
+        K.put_sub(4 + vk[i] * 6 + K.env.kick * 2 + kk * 1.5 + kg * 4, HEAD, ys[i] + 0.5, 2, 1)
+      else
       put(4 + vk[i] * 6 + K.env.kick * 2 + kk * 1.5 + kg * 4, HEAD, math.floor(ys[i] + 0.5), 2, 1)
+      end
     end
 
     -- haze: kickless and dub loosen the picture
-    K.haze(0, 4, 128, BASS_TOP, 0.05 + 0.25 * K.kickless + 0.15 * K.dub * K.throw + 0.3 * pd, 1, T * 5)
+    K.haze(0, 4, 128, BASS_TOP, (0.05 + 0.25 * K.kickless + 0.15 * K.dub * K.throw + 0.3 * pd) * ((fine and K.playing) and 0.7 or 1), 1, T * 5)
     -- the highs: sparkle just behind the playhead, along the ribbons
     K.grain(function(u, v)
       local i = 1 + math.floor(u * 4) % 4

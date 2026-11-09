@@ -21,7 +21,7 @@ return function(K)
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * K.trail))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -31,7 +31,7 @@ return function(K)
   end
   local function live(list, tau)
     for i = #list, 1, -1 do
-      local f = math.exp(-(K.NOW - list[i].t) / tau)
+      local f = math.exp(-(K.NOW - list[i].t) / (tau * K.trail))
       if f < 0.02 then table.remove(list, i) else list[i].f = f end
     end
   end
@@ -56,6 +56,10 @@ return function(K)
 
   function M.draw(S)
     local T, e, c = K.T, K.energy, K.chord
+    local fine, dense, R = K.detail ~= "classic", K.detail == "dense", K.react
+    -- an event's level: scaled by the reactivity, never a white point
+    local hz = (fine and K.playing) and 0.65 or 1     -- the events carry the light now
+    local function ev(l) return math.min(l * R, 13) end
     local breathe = 1 - K.duck * (0.18 + 0.1 * (1 - K.kickless))
     local kk, cl, pd = fade("kick", 0.25), fade("clap", 0.3), K.env.pad
     local width = (1.2 + (1 - e) * 1.6 + K.kickless * 0.4)
@@ -102,6 +106,18 @@ return function(K)
         end
       end
     end
+    -- fine: a hairline at each band's centre, riding the eased row to the
+    -- sub-pixel so the bands glide instead of stepping two pixels at a time
+    if fine and K.playing then
+      for i = 1, 4 do
+        local l = math.min(4.5, gains[i] * 0.55) * breathe
+        local sg = i % 2 == 0 and 1 or -1
+        local step = dense and 4 or 8
+        for col = 0, 31, step // 4 do
+          K.put_sub(l, col * 4, ys[i] + wobs[col] * sg + 0.5, step, 1)
+        end
+      end
+    end
     -- the floor: a horizon line, the bass glowing along it and reflected
     bs = K.follow(bs, math.max(K.env.bass, A[K.LO] * 0.8) * (K.gain(S, "bass") > 0 and 1 or 0.4), 0.06, K.DT)
     local bass = bs
@@ -117,35 +133,68 @@ return function(K)
       K.dashes(l * breathe, FLOOR + 2 + i, 3 + i, 10 + i * 2, off)
     end
     -- haze: a light bank low down, heavier with dub and kickless
-    K.haze(0, 36, 128, FLOOR, 0.12 + 0.2 * K.dub * K.throw + 0.18 * K.kickless + 0.25 * pd, 1, T * 4)
+    K.haze(0, 36, 128, FLOOR, (0.12 + 0.2 * K.dub * K.throw + 0.18 * K.kickless + 0.25 * pd) * hz, 1, T * 4)
     -- the pad: a slow fog that climbs the whole sky and thins again
     if pd > 0.05 then K.haze(0, 4, 128, 36, 0.12 * pd, 1, -T * 3) end
     -- the hats: a few fine sparks that catch in the light
     local hh = fade("hat", 0.25)
     if hh > 0 then
+      if fine then
+        for k = 1, 22 do
+          local x, y = K.hash(k, hn) * 126, ys[1 + k % 4] + (K.hash(k, hn + 7) - 0.5) * 5
+          K.put_sub(ev(7 * hh), x, y, 1, 1)
+          if k % 2 == 0 then put(ev(3 * hh), math.floor(x) - 1, math.floor(y), 3, 1) end
+        end
+      else
       for k = 1, 18 do
         put(5 * hh, K.hash(k, hn) * 126, ys[1 + k % 4] + (K.hash(k, hn + 7) - 0.5) * 5, 1, 1)
+      end
       end
     end
     -- a tick: a hairline of dew that catches in the haze
     local tf = fade("tick", 0.3)
     if tf > 0 then
+      if fine then
+        for y = 4, FLOOR - 2, 2 do
+          put(ev(6.5 * tf), hit.tickx, y, 1, 1)
+          put(ev(3 * tf), hit.tickx + (y % 4 == 0 and 1 or -1), y, 1, 1)
+        end
+      else
       for y = 4, FLOOR - 2, 2 do put(5 * tf, hit.tickx, y, 1, 1) end
+      end
     end
     -- a perc: a small bead with a drip under it, placed by voice and note
     live(percs, 0.5)
     for _, p in ipairs(percs) do
       local x, y, f = math.floor(p.x), math.floor(p.y), p.f
+      if fine then
+        -- a bead with a halo, and a drip that falls as it fades
+        put(ev(11 * f), x, y + 1, 3, 1)
+        put(ev(8 * f), x + 1, y - 1, 1, 1); put(ev(8 * f), x - 1, y + 1, 1, 1); put(ev(8 * f), x + 3, y + 1, 1, 1)
+        put(ev(7 * f), x, y, 1, 1); put(ev(7 * f), x + 2, y, 1, 1)
+        put(ev(7 * f), x, y + 2, 1, 1); put(ev(7 * f), x + 2, y + 2, 1, 1)
+        local fall = (1 - f) * 4
+        for d = 3, 11, 2 do
+          K.put_sub(ev(8 * f * (1 - (d - 3) / 12)), x + 1, y + d + fall, 1, 1)
+        end
+      else
       put(7 * f, x, y + 1, 3, 1)
       put(5 * f, x, y, 1, 1); put(5 * f, x + 2, y, 1, 1)
       for d = 3, 11, 2 do put(4.5 * f, x + 1, y + d, 1, 1) end
+      end
     end
     -- an arp note: a streak across its voice's band
     live(arps, 0.4)
     for _, a in ipairs(arps) do
+      if fine then
+        local y = ys[a.i] + 0.5
+        K.put_sub(ev(11 * a.f), a.x - 6, y, 13, 1)
+        put(ev(5 * a.f), a.x - 3, math.floor(y) - 1, 7, 1); put(ev(5 * a.f), a.x - 3, math.floor(y) + 1, 7, 1)
+      else
       local y = math.floor(ys[a.i] + 0.5)
       put(8 * a.f, a.x - 5, y, 11, 1)
       put(3.5 * a.f, a.x - 3, y - 1, 7, 1); put(3.5 * a.f, a.x - 3, y + 1, 7, 1)
+      end
     end
     -- grain in the light, as much as the highs ask for
     K.grain(function(u, v)

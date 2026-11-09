@@ -345,14 +345,35 @@ do
   local stubbed = drums()
   TB.roll = roll
   assert(real == stubbed, "timbre changed the drum patterns of seed 4218")
-  print("seed 4218: drums identical with timbre rolled or stubbed")
+  -- and timbre itself draws nothing from math.random / math.randomseed
+  do
+    local r, rs, n = math.random, math.randomseed, 0
+    math.random = function(...) n = n + 1; return r(...) end
+    math.randomseed = function(...) n = n + 1; return rs(...) end
+    S.seed = 4218
+    TB.roll(S)
+    for _ = 1, 50 do TB.phrase(S) end
+    math.random, math.randomseed = r, rs
+    assert(n == 0, "timbre called math.random " .. n .. " times")
+  end
+  print("seed 4218: drums identical, timbre drew 0 from math.random")
 
   -- 256 bars, everything on auto
   CC.new_track(S, 4218)
   for id in pairs(want) do params:set(id, 1) end   -- clears the send caches: first value is logged
   TLOG = {}
   LOGKEY = function() return tostring(S.seed) .. ":" .. ((S.track_bar - 1) // S.phrase_len) end
-  for i = 1, 16 * 256 do tick_all() end
+  local lanes_seen, lanevar = {}, 0
+  for i = 1, 16 * 256 do
+    tick_all()
+    local t = S.timbre
+    if t then
+      for l = 1, 4 do
+        local v = t.lane[l] or 0
+        if not lanes_seen[v] then lanes_seen[v] = true; lanevar = lanevar + 1 end
+      end
+    end
+  end
   local log = TLOG; TLOG = nil
   local vals, last, perphrase = {}, {}, {}
   for _, e in ipairs(log) do
@@ -371,10 +392,13 @@ do
     end
   end
   local function nd(p) local n = 0; for _ in pairs(vals[p] or {}) do n = n + 1 end; return n end
+  local padchg = 0
+  for k, n in pairs(perphrase) do if k:find("^pad_type") then padchg = padchg + n end end
   local nchg = 0; for _ in pairs(perphrase) do nchg = nchg + 1 end
-  print(string.format("auto picks over 256 bars: distinct bass %d chord %d hat %d pad %d; changes %d; max arp voice %d",
-    nd("bass"), nd("chord"), nd("hat"), nd("pad"), nchg, log.arp_max or 0))
-  assert(nd("bass") >= 2, "bass auto never varied")
+  print(string.format("auto picks over 256 bars: distinct bass %d chord %d hat %d pad %d; changes %d; distinct lane voices %d; pad changes %d; max arp voice %d",
+    nd("bass"), nd("chord"), nd("hat"), nd("pad"), nchg, lanevar, padchg, log.arp_max or 0))
+  assert(nd("bass") >= 2 and nd("chord") >= 2 and nd("hat") >= 2, "auto never varied")
+  assert(lanevar >= 2, "lane voices never varied")
   assert((log.arp_max or 0) >= 5, "no arp voice >= 5 in 256 bars")
 
   -- a fixed type wins

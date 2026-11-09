@@ -28,8 +28,8 @@ return function(K)
   add(6, 30, 3, 0); add(26, 30, 3, 0); add(104, 30, 3, 0); add(124, 30, 3, 0)
   for i = 1, 14 do add(2 + math.floor(i * 9 + K.hash(i, 3) * 6), 33, 4, 0) end
 
-  local blink = {0, 0}                   -- crane groups' blink, per group
-  local hats_n, tick_n, perc_n, arp_n, bass_n = 0, 0, 0, 0, 0
+  local blink = {-99, -99}                   -- crane groups' blink, per group
+  local hats_n, tick_n, perc_n, bass_n = 0, 0, 0, 0
   local kick_t, pump_t, clap_t = -99, -99, -99
   local clap_x = 64
   local port = {}                        -- lit portholes: index -> start
@@ -53,8 +53,8 @@ return function(K)
   end
 
   function M.init()
-    blink = {0, 0}
-    hats_n, tick_n, perc_n, arp_n, bass_n = 0, 0, 0, 0, 0
+    blink = {-99, -99}
+    hats_n, tick_n, perc_n, bass_n = 0, 0, 0, 0
     kick_t, pump_t, clap_t = -99, -99, -99
     port = {}
     bridge = {0, 0, 0, 0}; bridge_t = -99
@@ -192,7 +192,6 @@ return function(K)
         local b = fade(blink[s.g], 0.28)
         l = 2.5 + 4.5 * b; len = 3 + math.floor(b * 3)
       elseif s.k == 2 then
-        local on = i - 6      -- porthole index 1..8 for the hull lights
         local p = port[i]
         local pv = p and fade(p, 0.4) or 0
         if i > 6 + 8 then
@@ -232,7 +231,8 @@ return function(K)
       local a = NOW - sp.t
       if a < 0.4 then
         local l = 7 * (1 - a / 0.4)
-        put(l * 0.6, sp.x - 7, 34 - a * 4, 14, 2); put(l * 0.5, sp.x - 2, 20, 4, 14); put(l * 0.4, sp.x - 6, 26, 12, 6)
+        put(l * 0.6, sp.x - 7, 34 - a * 4, 14, 1)
+        for q = -3, 3 do line(l * 0.7, sp.x, 33, sp.x + q * 3, 33 - 9 * (1 - math.abs(q) / 5)) end
         put(l, sp.x, 32 - a * 10, 2, 2); put(l * 0.7, sp.x - 3 - a * 14, 30 + a * 8, 1, 1)
         put(l * 0.7, sp.x + 3 + a * 14, 31 + a * 8, 1, 1)
         refl(l * 0.5, sp.x, 32, sway, 2)
@@ -288,7 +288,7 @@ return function(K)
       local f = fade(b.t, 0.5)
       local by = 46 + b.lane * 3 + math.floor(b.n * 3)
       if f > 0 then put(1.2 + 6 * f, b.x, by, 2, 2) end
-      if f > 0.05 then put(5 * f, b.x - 3, by + 2, 8, 1); put(4 * f, b.x - 2, by - 10, 6, 10); put(3.2 * f, b.x - 12, by + 4, 24, 1); refl(4 * f, b.x, by - 6, sway, 1) end
+      if f > 0.05 then put(2.5 * f, b.x - 3, by + 2, 8, 1); line(4 * f, b.x, by - 10, b.x, by); put(1.8 * f, b.x - 12, by + 4, 24, 1); refl(4 * f, b.x, by - 6, sway, 1) end
     end
 
     -- the highs glint on the water

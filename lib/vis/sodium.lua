@@ -122,7 +122,7 @@ return function(K)
   end
 
   -- one lamp at depth z on side sd (-1 left, 1 right); lm = brightness
-  local function lamp(z, sd, lm, m)
+  local function lamp(z, sd, lm)
     local s = scale(z)
     local g = VY + GH * s
     local bx = VX + sd * 54 * s
@@ -250,7 +250,6 @@ return function(K)
       if f > 0 then
         local s = scale(w.z)
         local wx = VX + w.side * 40 * s + w.side * 12
-        local roof = 8 + (math.abs(wx - 64) < 60 and (1 - (math.abs(wx - 64) - 6) / 58) * 0 or 0)
         local wy = VY - 9 * s - 3
         put(6.5 * f, wx - 1, wy - 1, 4, 4)
         put(4 * f, wx - 4, wy - 3, 10, 8)
@@ -270,7 +269,7 @@ return function(K)
         if dip > 0 then lm = lm * (1 - 0.95 * dip) + 5 * (1 - dip) * dip end
         local rel = m - flare.m
         if fl > 0 and rel >= 0 and rel < 4 then lm = lm + 4.5 * fl * (1 - rel * 0.12) end
-        lamp(z, sd, lm, m)
+        lamp(z, sd, lm)
         if dip > 0.05 then
           local hx = VX + sd * 36 * s
           local top = VY + GH * s - 50 * s

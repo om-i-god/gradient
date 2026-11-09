@@ -128,7 +128,11 @@ return function(K)
         put(E(5 * hh), math.floor(K.hash(i, 21) * 126), 1 + (i * 5) % 9, 1, 1)
       end
       if fine then      -- and catch on the water
-        K.dashes(E(4 * hh), QUAY + 5, 1, 8, T * 25, 0, 128)
+        for r = 0, 0 do K.dashes(E(10 * hh), QUAY + 3 + r * 5, 1, 5, T * (25 + r * 9) * (r % 2 == 0 and 1 or -1), 0, 128) end
+        for k = 0, NA - 1 do      -- a glint on each arch's crown and lamp
+          local c = ax(k) + OW / 2
+          put(E(12 * hh), c - 1, SPRING - R - 1, 3, 1)
+        end
       end
       K.dashes(E(5 * hh), 3, 3, 9, T * 40, 0, 128)
     end
@@ -159,8 +163,8 @@ return function(K)
     end
     -- dense: the brick joints in the piers, staggered course to course
     if dense and K.playing then
-      for y = DECK + 4, QUAY - 5, 8 do
-        for k = 0, NA - 2 do put(1, ax(k) + OW + 2 + ((y // 8) % 2) * 2, y + 1, 1, 3) end
+      for y = DECK + 4, QUAY - 5, 12 do
+        for k = 0, NA - 2 do put(1, ax(k) + OW + 2 + ((y // 12) % 2) * 2, y + 1, 1, 3) end
       end
     end
     -- the arch rings and their lamps
@@ -193,7 +197,7 @@ return function(K)
     end
 
     -- haze in the arches, thick when the kick is away
-    K.haze(0, SPRING - 6, 128, QUAY, fp and ((0.04 + 0.22 * kl + 0.08 * K.throw) * 0.2 + 0.15 * mid + 0.2 * pd)
+    K.haze(0, SPRING - 6, 128, QUAY, fp and ((0.04 + 0.22 * kl + 0.08 * K.throw) * (dense and 0.05 or 0.2) + 0.15 * mid + 0.2 * pd)
       or (0.04 + 0.22 * kl + 0.08 * K.throw + 0.15 * mid + 0.2 * pd), 1, T * 2)
 
     -- the mids thicken the air over the deck

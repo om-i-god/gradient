@@ -223,7 +223,7 @@ return function(K)
     lk2 = K.follow(lk2, K.lane_kick[2], 0.05, DT)
     local c = K.chord
     for i = 1, 4 do
-      vk[i] = K.follow(vk[i], K.voice_kick[i] * (K.gain(S, "chords") > 0 and 1 or 0.6), 0.12, DT)
+      vk[i] = K.follow(vk[i], K.voice_kick[i] * (K.gain(S, "chords") > 0 and 1 or 0.6) * ((fine and K.playing) and 0.3 or 1), 0.12, DT)
       vy[i] = K.follow(vy[i], clamp(Y1 - (K.num(c[i], 60) - 44) * 1.25, Y0 + 3, Y1 - 3), 0.3, DT)
     end
     local e = K.energy
@@ -254,7 +254,7 @@ return function(K)
     K.haze(0, Y0, 128, GROUND, (0.02 + 0.14 * kl + 0.08 * K.throw) * ((fine and K.playing) and 0.6 or 1), 1, T * 3)
 
     -- the far fence then the near one
-    bands((2.3 + 0.3 * e) * (1 + 0.1 * mid) + kk * (fine and 0.3 + 0.5 * R or 0.3))
+    bands((2.3 + 0.3 * e) * (1 + 0.1 * mid) + kk * (fine and 0.3 + 0.35 * R or 0.3))
     grating(2, 3 + lk2 * 4 + A[K.HI] * 2 + pd * 1.5, 0)
     grating(1, 4 + lk1 * 4 + A[K.HI] * 2, 1)
 
@@ -327,7 +327,7 @@ return function(K)
     K.gradient(GROUND + 1, 63, function(y)
       return (0.3 + bs * 1.8 + (fine and bh * R * 1.5 or 0)) * math.exp(-(y - GROUND) / (1 + bs * 1.6))
     end)
-    if fine and bh > 0.03 then K.dashes(ev(6 * bh), GROUND + 1, 2, 2, -T * 12, 0, 128) end   -- the bass rakes the first row of the pool
+    if fine and bh > 0.03 then K.dashes(ev(6 * bh), GROUND + 1, 2, 2, 0, 0, 128) end   -- the bass rakes the first row of the pool
     for r = 0, 3 do
       local y = GROUND + 3 + r * 3
       K.dashes(1.2 + lamp * 1.2 + bs + bh * (fine and 2 + 1.5 * R or 3) + (fine and kk * R * 1.0 or 0), y, 2, 7 + r, T * 2 + r * 5 - (G[1].ph % 1) * 7, 0, 128)

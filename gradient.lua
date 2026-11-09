@@ -39,7 +39,7 @@ local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
 local LEAD_DIVS      = {0.25, 1/3, 0.5, 0.75, 2/3, 1, 1.5, 2}
 local LEAD_DIV_NAMES = {"1/16", "1/8T", "1/8", "3/16", "1/4T", "1/4", "3/8", "1/2"}
 local OUT_NAMES      = {"internal", "midi", "both"}
-local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft", "glass", "reed", "kalimba", "marimba"}
+local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft", "glass", "reed", "kalimba", "marimba", "steel", "bowed"}
 
 ------------------------------------------------------------------------
 -- state
@@ -1153,7 +1153,7 @@ local function setup_params()
     return string.format("%s%d  %.1f Hz", T.NOTE_NAMES[n % 12 + 1], n // 12 - 1,
       440 * 2 ^ ((n - 69) / 12))
   end)
-  params:add_option("kick_type", "kick type", {"sub", "dusty", "boom", "knock"}, 1)
+  params:add_option("kick_type", "kick type", {"sub", "dusty", "boom", "knock", "deep", "tight"}, 1)
   params:set_action("kick_type", function(v) engine.tweak("kick_type", v) end)
   params:add_number("kick_decay", "kick decay", 15, 120, 45)
   params:add_number("chord_cutoff", "stab cutoff", 300, 5000, 1400)
@@ -1163,16 +1163,20 @@ local function setup_params()
   params:set_action("chord_detune", function(v) engine.tweak("chord_detune", v) end)
   params:add_number("bass_cutoff", "bass cutoff", 80, 1200, 260)
   for _, o in ipairs({
-    {"bass_type", "bass type", {"auto", "sub", "reese", "rubber"}},
-    {"chord_type", "stab type", {"auto", "dub", "felt", "organ", "glass", "rhodes"}},
-    {"hat_type", "hat type", {"auto", "noise", "metal", "dust"}},
-    {"pad_type", "pad type", {"auto", "wash", "choir", "strings", "drone"}},
+    {"bass_type", "bass type", {"auto", "sub", "reese", "rubber", "fm sub", "tape"}},
+    {"chord_type", "stab type", {"auto", "dub", "felt", "organ", "glass", "rhodes", "choir", "strings"}},
+    {"hat_type", "hat type", {"auto", "noise", "metal", "dust", "tape"}},
+    {"pad_type", "pad type", {"auto", "wash", "choir", "strings", "drone", "glass", "tape loop"}},
   }) do
     params:add_option(o[1], o[2], o[3], 1)
     params:set_action(o[1], function()
       if o[1] == "pad_type" then pad_sent = nil else tweak_cache[o[1]] = nil end
     end)
   end
+  params:add_option("echo_type", "echo type", {"dub", "tape", "ping-pong", "space"}, 1)
+  params:set_action("echo_type", function(v) engine.echo_type(v) end)
+  params:add_option("character", "character", {"clean", "warm", "dusty"}, 1)
+  params:set_action("character", function(v) engine.tweak("character", v) end)
   params:add_option("clap_kind", "clap voice", {"auto", "clap", "snare", "snap"}, 1)
   params:add_option("perc_kit", "perc kit", {"auto", "hand", "wood", "metal"}, 1)
   for i = 1, 4 do

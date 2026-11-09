@@ -313,10 +313,10 @@ do
   local TB = include("lib/timbre")
   local CC = include("lib/conductor")
   local want = {
-    bass_type  = {"auto", "sub", "reese", "rubber"},
-    chord_type = {"auto", "dub", "felt", "organ", "glass", "rhodes"},
-    hat_type   = {"auto", "noise", "metal", "dust"},
-    pad_type   = {"auto", "wash", "choir", "strings", "drone"},
+    bass_type  = {"auto", "sub", "reese", "rubber", "fm sub", "tape"},
+    chord_type = {"auto", "dub", "felt", "organ", "glass", "rhodes", "choir", "strings"},
+    hat_type   = {"auto", "noise", "metal", "dust", "tape"},
+    pad_type   = {"auto", "wash", "choir", "strings", "drone", "glass", "tape loop"},
   }
   for id, opts in pairs(want) do
     local d = P.defs[id]
@@ -325,7 +325,37 @@ do
   end
   -- VOICE_NAMES: old psets map (soft stays 5), four new voices appended
   local lo = P.defs.lane1_voice.opts
-  assert(#lo == 9 and lo[5] == "soft" and lo[9] == "marimba", "VOICE_NAMES")
+  assert(#lo == 11 and lo[5] == "soft" and lo[9] == "marimba"
+    and lo[10] == "steel" and lo[11] == "bowed", "VOICE_NAMES")
+  -- round 3: new types appended, old indices unchanged
+  local r3 = {
+    kick_type  = {"sub", "dusty", "boom", "knock", "deep", "tight"},
+    bass_type  = {"auto", "sub", "reese", "rubber", "fm sub", "tape"},
+    chord_type = {"auto", "dub", "felt", "organ", "glass", "rhodes", "choir", "strings"},
+    hat_type   = {"auto", "noise", "metal", "dust", "tape"},
+    pad_type   = {"auto", "wash", "choir", "strings", "drone", "glass", "tape loop"},
+    echo_type  = {"dub", "tape", "ping-pong", "space"},
+    character  = {"clean", "warm", "dusty"},
+  }
+  for id, opts in pairs(r3) do
+    local d = P.defs[id]
+    assert(d, id .. " missing")
+    assert(table.concat(d.opts, ",") == table.concat(opts, ","), id .. " options: " .. table.concat(d.opts, ","))
+  end
+  assert(P.defs.echo_type.v == 1 and P.defs.character.v == 1, "echo_type / character default")
+  do
+    params:set("echo_type", 3); assert(calls.echo_type and calls.echo_type >= 1, "echo_type sends")
+    local n = calls.echo_type
+    params:set("echo_type", 1); assert(calls.echo_type == n + 1, "echo_type sends on change")
+    params:set("character", 3); assert(TWV.character == 3, "character sends")
+    params:set("character", 1); assert(TWV.character == 1, "character sends on change")
+    -- a PSET from before round 3 has neither param: a bang sends the defaults
+    P.defs.echo_type.v = 1; P.defs.character.v = 1; TWV.character = nil
+    local ne = calls.echo_type
+    params:bang()
+    assert(calls.echo_type == ne + 1 and TWV.character == 1, "defaults not sent on load")
+    params:set("kick_type", 6); assert(TWV.kick_type == 6, "kick tight sends"); params:set("kick_type", 1)
+  end
 
   local dump
   dump = function(t)
@@ -341,6 +371,16 @@ do
     return dump(S.pat.kick) .. dump(S.pat.clap)
   end
   local real = drums()
+  -- the first roll's old-type draws, snapshotted before round 3
+  do
+    S.seed = 4218; TB.roll(S)
+    local o = S.timbre.old
+    assert(o and o.bass == 1 and o.chord == 4 and o.hat == 1 and o.pad == 1
+      and o.lane[3] == 5 and not o.lane[1] and not o.lane[2] and not o.lane[4]
+      and S.timbre.st.x == 1560200712, "old-type draw sequence for seed 4218 changed")
+    S.seed = 1; TB.roll(S); o = S.timbre.old
+    assert(o.bass == 3 and o.chord == 5 and o.hat == 3 and o.pad == 3 and S.timbre.st.x == 1150234608, "seed 1 old draws")
+  end
   local roll = TB.roll
   TB.roll = function() end
   local stubbed = drums()
@@ -359,13 +399,13 @@ do
   end
   print("seed 4218: drums identical, timbre drew 0 from math.random")
 
-  -- 256 bars, everything on auto
+  -- 512 bars, everything on auto
   CC.new_track(S, 4218)
   for id in pairs(want) do params:set(id, 1) end   -- clears the send caches: first value is logged
   TLOG = {}
   LOGKEY = function() return tostring(S.seed) .. ":" .. ((S.track_bar - 1) // S.phrase_len) end
   local lanes_seen, lanevar = {}, 0
-  for i = 1, 16 * 256 do
+  for i = 1, 16 * 512 do
     tick_all()
     local t = S.timbre
     if t then
@@ -383,7 +423,7 @@ do
     if part then
       vals[part] = vals[part] or {}
       vals[part][v] = (vals[part][v] or 0) + 1
-      assert(v >= 1 and v <= (k == "chord_type" and 5 or k == "pad_type" and 4 or 3), k .. " out of range")
+      assert(v >= 1 and v <= (k == "chord_type" and 7 or k == "pad_type" and 6 or k == "bass_type" and 5 or k == "hat_type" and 4 or 3), k .. " out of range")
       assert(k ~= "pad_type" or v ~= last[k], "pad_type resent unchanged")
       if last[k] ~= nil and last[k] ~= v then
         perphrase[k .. key] = (perphrase[k .. key] or 0) + 1
@@ -396,11 +436,24 @@ do
   local padchg = 0
   for k, n in pairs(perphrase) do if k:find("^pad_type") then padchg = padchg + n end end
   local nchg = 0; for _ in pairs(perphrase) do nchg = nchg + 1 end
-  print(string.format("auto picks over 256 bars: distinct bass %d chord %d hat %d pad %d; changes %d; distinct lane voices %d; pad changes %d; max arp voice %d",
+  print(string.format("auto picks over 512 bars: distinct bass %d chord %d hat %d pad %d; changes %d; distinct lane voices %d; pad changes %d; max arp voice %d",
     nd("bass"), nd("chord"), nd("hat"), nd("pad"), nchg, lanevar, padchg, log.arp_max or 0))
   assert(nd("bass") >= 2 and nd("chord") >= 2 and nd("hat") >= 2, "auto never varied")
+  do
+    local lim = {bass = 5, chord = 7, hat = 4, pad = 6}
+    local old = {bass = 3, chord = 5, hat = 3, pad = 4}
+    local hit = {}
+    for part, vs in pairs(vals) do
+      for v in pairs(vs) do
+        assert(v <= lim[part], part .. " auto picked " .. v)
+        if v > old[part] then hit[#hit + 1] = part .. v end
+      end
+    end
+    assert(#hit >= 1, "auto never picked a round 3 type in 512 bars")
+    print("round 3 auto picks seen: " .. table.concat(hit, " "))
+  end
   assert(lanevar >= 2, "lane voices never varied")
-  assert((log.arp_max or 0) >= 5, "no arp voice >= 5 in 256 bars")
+  assert((log.arp_max or 0) >= 5, "no arp voice >= 5 in 512 bars")
 
   -- a fixed type wins
   TLOG = {}

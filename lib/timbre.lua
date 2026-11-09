@@ -5,7 +5,10 @@
 
 local TB = {}
 
-local COUNT = {bass = 3, chord = 5, hat = 3, pad = 4}
+-- COUNT: every type the engine has. OLD: the types before round 3; a fresh
+-- roll still draws over these, so a seed's first picks never moved
+local COUNT = {bass = 5, chord = 7, hat = 4, pad = 6}
+local OLD   = {bass = 3, chord = 5, hat = 3, pad = 4}
 
 -- a small LCG (glibc constants); state lives in S.timbre so each track
 -- carries its own stream
@@ -36,7 +39,7 @@ end
 -- section); otherwise the section / energy shape an even spread
 local function weights(S, part, neutral)
   local n = COUNT[part]
-  if neutral then return base(n) end
+  if neutral then return base(OLD[part]) end
   local w = {}
   for i = 1, n do w[i] = 1 end
   local loud = S.section == "peak" or (S.energy or 0) > 0.7
@@ -49,6 +52,7 @@ local function weights(S, part, neutral)
     elseif part == "hat" then w[3] = 3
     elseif part == "pad" then w[2] = 2; w[4] = 2 end
   end
+  for i = #w + 1, n do w[i] = 1 end   -- the round 3 types: an even share
   return w
 end
 
@@ -69,6 +73,19 @@ function TB.roll(S)
   end
   for i = 1, 4 do
     if next_u(st) < 0.35 then t.lane[i] = 5 + math.floor(next_u(st) * 4) end
+  end
+  -- the old picks, kept as the record of what the draws above gave
+  t.old = {lane = {}}
+  for _, part in ipairs({"bass", "chord", "hat", "pad"}) do t.old[part] = t[part] end
+  for i = 1, 4 do t.old.lane[i] = t.lane[i] end
+  -- appended draw, on a stream of its own so `st` (and every later draw)
+  -- is exactly where it was: each part, p = 0.3, swaps to a round 3 type
+  local s2 = {x = (seed_of(S) ~ 0x2c9d3a7) & 0x7fffffff}
+  for _ = 1, 4 do next_u(s2) end
+  for _, part in ipairs({"bass", "chord", "hat", "pad"}) do
+    local swap = next_u(s2) < 0.3
+    local pick = OLD[part] + 1 + math.floor(next_u(s2) * (COUNT[part] - OLD[part]))
+    if swap then t[part] = pick end
   end
 end
 
@@ -100,9 +117,9 @@ function TB.phrase(S)
   end
   if next_u(st) < 0.15 then
     local i = 1 + math.floor(next_u(st) * 4)
-    local opts = {false, 5, 6, 7, 8}   -- false = the material's own voice
+    local opts = {false, 5, 6, 7, 8, 9, 10}   -- false = the material's own voice
     local cur = t.lane[i] or false
-    local w = {1, 1, 1, 1, 1}
+    local w = {1, 1, 1, 1, 1, 1, 1}
     for k, o in ipairs(opts) do if o == cur then w[k] = 0 end end
     local o = opts[pick_w(st, w)]
     t.lane[i] = o or nil

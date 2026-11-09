@@ -21,9 +21,32 @@ return function(K)
   local copies, emits, wins
   local lamp, bs, kl
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, percs = {}, {}
+  local pdz = 0                           -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.kick() mark("kick") end
+  function M.hat() mark("hat") end
+  function M.clap() mark("clap") end
+  function M.bass() mark("bass") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % NA end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, a = clamp(math.floor(K.num(voice, 1)), 1, 4) - 1,
+      b = (math.floor(K.num(note, 60)) % 12) / 12}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
     copies, emits, wins = {}, {}, {}
     lamp, bs, kl = 0.6, 0, 0
+    hit, percs, pdz = {}, {}, 0
   end
   M.clear = M.init
 
@@ -79,8 +102,11 @@ return function(K)
       end
       if em.lv < 0.8 or em.n >= NA then table.remove(emits, i) end
     end
-    lamp = K.follow(lamp, (1 - K.duck * 0.7) * (0.7 + 0.3 * A[K.AMP]) + K.env.kick * 0.3, 0.05, DT)
-    bs = K.follow(bs, math.max(K.env.bass * 0.8, A[K.LO]) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.07, DT)
+    pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    local kk, cl, hh, bh, tk = fade("kick", 0.3), fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
+    local pd, mid = pdz, A[K.MID]
+    lamp = K.follow(lamp, (1 - K.duck * 0.7) * (0.7 + 0.3 * A[K.AMP]) + K.env.kick * 0.3 + pd * 0.15, 0.05, DT)
+    bs = K.follow(bs, math.max(K.env.bass * 0.8, A[K.LO], bh * 0.9) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.07, DT)
     local duckv = 1 - 0.55 * K.duck * K.duck
 
     -- the sky: a few stars, a low glow of the city behind the deck
@@ -89,6 +115,13 @@ return function(K)
       put(1 + 1.2 * K.hash(i, 22) * (0.6 + 0.4 * math.sin(T * 0.5 + i * 1.7)), x, 1 + (i * 5) % 9, 1, 1)
     end
 
+    -- hats glint the stars and run a spark along the overhead wire
+    if hh > 0.03 then
+      for i = 0, 8 do
+        put(5 * hh, math.floor(K.hash(i, 21) * 126), 1 + (i * 5) % 9, 1, 1)
+      end
+      K.dashes(5 * hh, 3, 3, 9, T * 40, 0, 128)
+    end
     -- the overhead wire on its masts over the deck
     line(1.5, 0, 3, 127, 3)
     for k = 0, NA do put(1.5, X0 + k * PITCH - 1, 3, 1, DECK - 3) end
@@ -118,6 +151,7 @@ return function(K)
         local a = math.pi - s / 6 * math.pi
         local nx, ny = c + math.cos(a) * R, SPRING - math.sin(a) * R
         line(2.5, px, py, nx, ny)
+        if cl > 0.03 then line(7 * cl, px, py, nx, ny) end
         px, py = nx, ny
       end
       line(2, x0, SPRING, x0, QUAY)
@@ -127,10 +161,21 @@ return function(K)
       put(1.5, c, SPRING - R + 1, 1, 2)
       put(3 + 6 * ll, c - 1, SPRING - R + 3, 3, 1)
       put(1 + 2.5 * ll, c - 4, QUAY - 1, 9, 1)
+      -- a tick flickers one arch's lamp
+      if tk > 0.03 and hit.tk == k then
+        put(7 * tk, c - 1, SPRING - R + 3, 3, 1)
+        line(6 * tk, x0, SPRING, x0, QUAY)
+        line(6 * tk, x0 + OW, SPRING, x0 + OW, QUAY)
+        put(4 * tk, c - 4, QUAY - 1, 9, 1)
+        for r = 0, 3 do put(3 * tk, c - 1 - r, QUAY + 3 + r * 3, 3 + r * 2, 1) end
+      end
     end
 
     -- haze in the arches, thick when the kick is away
-    K.haze(0, SPRING - 6, 128, QUAY, 0.04 + 0.22 * kl + 0.08 * K.throw, 1, T * 2)
+    K.haze(0, SPRING - 6, 128, QUAY, 0.04 + 0.22 * kl + 0.08 * K.throw + 0.15 * mid + 0.2 * pd, 1, T * 2)
+
+    -- the mids thicken the air over the deck
+    if mid > 0.05 then K.haze(0, 6, 128, SPRING - 6, 0.25 * mid, 1, -T * 2) end
 
     -- the quay and the water: the bass glowing on it, the lamps' streaks
     put(2 + bs * 2, 0, QUAY, 128, 1)
@@ -144,6 +189,38 @@ return function(K)
         local w = 3 + r * 2
         local wob = math.sin(T * 1.3 + r * 1.9 + k) * (1 + r * 0.5)
         put((1 + 2.5 * lamp) * (1 - r * 0.18), c - w / 2 + wob, y, w, 1)
+      end
+    end
+
+    -- the bass thumps the piers' feet into the water
+    if bh > 0.03 then
+      for k = 0, NA - 1 do
+        put(4.5 * bh, ax(k) - 1, QUAY + 1, 2, 11)
+        put(4.5 * bh, ax(k) + OW, QUAY + 1, 2, 11)
+      end
+      put(4 * bh, 0, QUAY, 128, 1)
+    end
+    -- the kick sends a ring across the canal
+    if kk > 0.03 then
+      local rx, ry = 4 + (1 - kk) * 56, 1 + (1 - kk) * 6
+      local px, py = 64 + rx, QUAY + 7
+      for s = 1, 20 do
+        local a = s / 20 * K.TAU
+        local nx, ny = 64 + math.cos(a) * rx, QUAY + 7 + math.sin(a) * ry
+        line(5 * kk, px, py, nx, ny)
+        px, py = nx, ny
+      end
+    end
+    -- a perc strikes a spark on the wire at its voice's mast; it falls to the deck
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.55)
+      if f < 0.03 then table.remove(percs, i)
+      else
+        local x = X0 + p.a * PITCH + p.b * PITCH
+        put(6 * f, x - 1, 2, 3, 3)
+        put(3 * f, x - 3, 3, 7, 1)
+        put(5 * f, x, 4, 2, 4 + (1 - f) * 8)
       end
     end
 

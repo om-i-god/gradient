@@ -56,9 +56,31 @@ return function(K)
   local glow, lamp, mist_t = 0, 0.6, 0
   local drip_acc = 0
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, percs = {}, {}
+  local pdz = 0                           -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.hat() mark("hat") end
+  function M.clap() mark("clap") end
+  function M.bass() mark("bass") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 2 end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, z = 0.1 + (clamp(math.floor(K.num(voice, 1)), 1, 4) - 1) * 0.2,
+      X = ((math.floor(K.num(note, 60)) % 12) / 12 - 0.5) * 1.6}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
     drops, splashes, ripples = {}, {}, {}
     glow, lamp, drip_acc = 0, 0.6, 0
+    hit, percs, pdz = {}, {}, 0
   end
 
   local function drop(X, z, heavy, lv)
@@ -119,8 +141,11 @@ return function(K)
     local T, DT, e = K.T, K.DT, K.energy
     local kl = K.kickless
     -- the street lamp beyond breathes with the pump; the bass fills the puddle
-    lamp = K.follow(lamp, (0.55 + 0.45 * e) * (1 - K.duck * 0.55) * (1 - kl * 0.3), 0.06, DT)
-    glow = K.follow(glow, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.4), A[K.LO] * 0.85), 0.08, DT)
+    pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    local cl, hh, bh, tk = fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
+    local pd, mid = pdz, A[K.MID]
+    lamp = K.follow(lamp, (0.55 + 0.45 * e) * (1 - K.duck * 0.55) * (1 - kl * 0.3) * (1 + 0.3 * A[K.AMP]) + pd * 0.2, 0.06, DT)
+    glow = K.follow(glow, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.4), A[K.LO] * 0.85, bh * 1.3), 0.08, DT)
 
     -- the brick face of the near arch: courses, joints, the voussoirs
     for y = 1, 63, 4 do K.row_above(1, y, face) end
@@ -142,6 +167,16 @@ return function(K)
       end
       px0, py0 = x, y
     end
+    -- a clap swells the arch's rim
+    if cl > 0.03 then
+      local qx, qy
+      for k = 0, 16 do
+        local X = -1 + k / 8
+        local x, y = VX + X * S0, VY + arch(X) * S0
+        if qx then line(7 * cl, qx, qy, x, y) end
+        qx, qy = x, y
+      end
+    end
 
     -- the far opening: the street's glow over a dark skyline, a lamp
     local fl = lamp
@@ -155,7 +190,7 @@ return function(K)
     end
     for i, w in ipairs(WIN) do                        -- lit windows across the street
       local v = math.sin(T * 0.07 + w[3])
-      if v > -0.3 then put(1.2 + fl * 1.2 + v * 0.8 + A[K.HI] * 1.2, w[1], w[2], 1, 1) end
+      if v > -0.3 then put(1.2 + fl * 1.2 + v * 0.8 + A[K.HI] * 1.2 + hh * 4, w[1], w[2], 1, 1) end
     end
     K.mass(1, city, math.floor(FAR_FLOOR) - 1, math.floor(VX - SF + 2), math.floor(VX + SF - 1))
     put(2 + fl * 2.5, VX - SF + 1, math.floor(FAR_FLOOR) - 1, 2 * SF - 2, 1)  -- the street's own light
@@ -164,13 +199,13 @@ return function(K)
     put(1.5 + fl * 1.5, 57, 33, 3, 1)
 
     -- the tunnel: ribs, the crown and springing lines, the floor's joints
-    for _, z in ipairs({0.22, 0.5}) do
+    for zi, z in ipairs({0.22, 0.5}) do
       local s = scale(z)
       local px0, py0
       for k = 0, 10 do
         local X = -1 + k / 5
         local x, y = VX + X * s, VY + arch(X) * s
-        if px0 then line(1, px0, py0, x, y) end
+        if px0 then line(1 + (hit.tk == zi - 1 and 5 * tk or 0), px0, py0, x, y) end
         px0, py0 = x, y
       end
       line(1, VX - s, VY, VX - s, VY + FLOORY * s)
@@ -180,11 +215,18 @@ return function(K)
     line(1, VX + S0, VY, VX + SF, VY)
     for k = -4, 4 do
       local X = k / 4
-      line(1, VX + X * SF, FAR_FLOOR + 1, VX + X * S0 * 1.25, 63)
+      line(1 + 10 * bh, VX + X * SF, FAR_FLOOR + 1, VX + X * S0 * 1.25, 63)
+    end
+
+    -- hats throw a mist of spray across the far light
+    if hh > 0.03 then
+      for y = VY - 16, math.floor(FAR_FLOOR) - 2, 3 do
+        K.dashes(5 * hh, y, 1, 3, T * 25 + y * 5, VX - SF + 2, VX + SF - 2)
+      end
     end
 
     -- the wet floor: the far light streaked down it, shivering
-    local shiver = 0.6 + 1.5 * kl + 0.8 * A[K.LO]
+    local shiver = (0.6 + 1.5 * kl + 0.8 * A[K.LO]) * (1 + 0.8 * mid)
     for y = math.floor(FAR_FLOOR) + 2, 63, 2 do
       local d = (y - FAR_FLOOR) / (63 - FAR_FLOOR)
       local hw = SF * (1 + d * 1.4) + math.sin(T * 1.7 + y * 0.9) * shiver
@@ -209,6 +251,19 @@ return function(K)
         local l = (2 + 6 * r.a) * (1 - u) ^ 1.5 * (0.7 + 0.5 * A[K.LO])
         ring(l, PX, PY, 3 + u * PRX * 1.2, 0.8 + u * PRY * 1.2)
         if u > 0.15 and r.a > 0.9 then ring(l * 0.6, PX, PY, 3 + (u - 0.15) * PRX * 1.2, 0.8 + (u - 0.15) * PRY * 1.2) end
+      end
+    end
+
+    -- a perc strikes a ring on the floor, placed by its voice and note
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      if f < 0.03 then table.remove(percs, i)
+      else
+        local s = scale(p.z)
+        local u = 1 - f
+        ring(6 * f, VX + p.X * s, VY + FLOORY * s, (2 + u * 9) * s / S0 * 1.6, (2 + u * 9) * s / S0 * 0.45)
+        put(7 * f, VX + p.X * s, VY + FLOORY * s - 1 - u * 5 * s / S0, 1, 2)
       end
     end
 
@@ -268,7 +323,7 @@ return function(K)
     end
 
     -- haze in the arch, heavier with the dub's throws and kickless stretches
-    K.haze(20, 14, 108, 48, 0.08 + 0.12 * K.dub * K.throw + 0.15 * kl, 1, T * 3)
+    K.haze(20, 14, 108, 48, 0.08 + 0.12 * K.dub * K.throw + 0.15 * kl + 0.3 * mid + 0.2 * pd, 1, T * 3)
     -- the highs: a mist of fine spray caught in the far light
     K.grain(function(u, v)
       return VX - SF + u * 2 * SF, VY - 6 + v * 26

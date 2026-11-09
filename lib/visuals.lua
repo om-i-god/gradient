@@ -1,5 +1,5 @@
 -- gradient / visuals
--- sixteen places on the 128x64 OLED at night, drawn from what the music is
+-- twenty-four places on the 128x64 OLED at night, drawn from what the music is
 -- doing and from what the engine hears of itself. greys on black; the dim
 -- levels carry the atmosphere (haze, far structure, texture) and the bright
 -- ones are kept for the music. the pulse shows in every theme, the dub
@@ -25,8 +25,10 @@
 -- refreshed every frame) and returns {draw = fn(S), stab = fn(notes),
 -- bass = fn(note), arp = fn(lane, note, step), kick = fn(), pump = fn(),
 -- hat = fn(), clap = fn(), perc = fn(voice, note), tick = fn(kind),
--- bar = fn(S), init = fn(), clear = fn()}; all but draw are optional (a
--- theme without clap / perc / tick hears them as hats). events reach only
+-- pad = fn(notes), bar = fn(S), init = fn(), clear = fn()}; all but draw
+-- are optional (a theme without clap / perc / tick hears them as hats,
+-- unless VIS.strict is set, which the tests use to find themes that never
+-- answer them; pad has no fallback: K.env.pad rises for every theme). events reach only
 -- the theme on screen; the kit keeps shared history (K.hist, the
 -- envelopes) for every theme.
 --
@@ -44,7 +46,8 @@ local VIS = {}
 
 VIS.audio_level = 0
 VIS.names = {"gradient", "voices", "lanes", "phase", "echo", "fall", "pump", "arc",
-  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate"}
+  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate",
+  "radar", "subway", "harbour", "sodium", "lighthouse", "tramlines", "substation", "cooling"}
 
 local FPS = 20
 local TAU = 2 * math.pi
@@ -70,9 +73,9 @@ local heard = -1                                -- NOW when a poll last arrived
 
 -- envelopes: events set them to 1, they decay on time
 local env = {kick = 0, pump = 0, stab = 0, bass = 0, arp = 0, hat = 0,
-  clap = 0, perc = 0, tick = 0}
+  clap = 0, perc = 0, tick = 0, pad = 0}
 local ENV_TAU = {kick = 0.12, pump = 0.2, stab = 0.18, bass = 0.2, arp = 0.12, hat = 0.06,
-  clap = 0.1, perc = 0.1, tick = 0.05}
+  clap = 0.1, perc = 0.1, tick = 0.05, pad = 0.6}
 
 -- the glitch tear (see the header): time left, length, mode, band, shift
 local gl_t, gl_dur, gl_mode = 0, 0, 0
@@ -101,6 +104,7 @@ local energy, trend, dub, throw = 0, 0, 0.5, 0
 local kickless = 0
 local duck, duck_age = 0, 99            -- the ghost sidechain, its age (s)
 local beat_ph, bar_ph = 0, 0
+local bar_beats = 4
 local beat_sec = 0.5
 local step_seen, step_t = -1, 0
 local bar_kick, bar_pulse = 0, 0
@@ -110,7 +114,7 @@ local rseed = 1                         -- the visuals' own dice
 local energy_seen = false
 
 -- the kit every theme draws with (filled in below, refreshed every frame)
-local K = {A = A, AMP = AMP, LO = LO, MID = MID, HI = HI, TAU = TAU,
+local K = {beats = 4, A = A, AMP = AMP, LO = LO, MID = MID, HI = HI, TAU = TAU,
   env = env, voice_kick = voice_kick, lane_kick = lane_kick,
   lane_note = lane_note, lane_step = lane_step, chord = chord,
   hist = hist, HIST_N = HIST_N}
@@ -474,9 +478,21 @@ local function physics(S)
   local step = num(S.step, 0)
   if step ~= step_seen then step_seen, step_t = step, NOW end
   local sub = clamp((NOW - step_t) / (beat_sec / 4), 0, 0.999)
-  local s16 = (step % 16) + sub
+  -- the bar: S.bar.n 16ths (5/4 = 20), the position S.bar_step (1..n, the step
+  -- about to play, as S.step is). no bar in S: the 4/4 of 16
+  local bn, bpos = 16, step % 16
+  if type(S.bar) == "table" then
+    local n, b = num(S.bar.n, 16), num(S.bar.beats, 4)
+    if n >= 4 and n <= 64 and n % 1 == 0 then
+      bn, bar_beats = n, clamp(math.floor(b), 1, 16)
+      bpos = clamp(num(S.bar_step, 1) - 1, 0, n - 1)
+    end
+  else
+    bar_beats = 4
+  end
+  local s16 = bpos + sub
   beat_ph = (s16 % 4) / 4
-  bar_ph = s16 / 16
+  bar_ph = s16 / bn
   -- the pump: a quick duck, a recovery over most of a beat
   duck_age = duck_age + DT
   local rec = beat_sec * 0.6
@@ -527,6 +543,7 @@ local function sync(S)
   K.energy, K.trend, K.dub, K.throw, K.kickless = energy, trend, dub, throw, kickless
   K.duck, K.beat_ph, K.bar_ph, K.beat_sec, K.bar_pulse = duck, beat_ph, bar_ph, beat_sec, bar_pulse
   K.bass_note = bass_note
+  K.beats = bar_beats
   K.echo_t, K.echo_fb = echo_params(S)
   K.glitch = gl_t > 0 and gl_t / math.max(gl_dur, 0.01) or 0
   K.glitch_mode = gl_t > 0 and gl_mode or 0
@@ -602,7 +619,11 @@ end
 -- dispatch
 ------------------------------------------------------------------------
 
+VIS.strict = false
+VIS.kit = K
+
 function VIS.init()
+  VIS.strict = false
   for i = #grains, 1, -1 do grains[i] = nil end
   for i = #hist, 1, -1 do hist[i] = nil end
   for k in pairs(lane_note) do lane_note[k] = nil end
@@ -616,6 +637,7 @@ function VIS.init()
   heard = -1
   energy, trend, dub, throw, kickless, energy_seen = 0, 0, 0.5, 0, 0, false
   duck, duck_age, beat_ph, bar_ph, beat_sec = 0, 99, 0, 0, 0.5
+  bar_beats = 4
   step_seen, step_t, bar_kick, bar_pulse = -1, 0, 0, 0
   T, NOW, last_clock = 0, 0, nil
   cur, xf = nil, 0
@@ -643,7 +665,7 @@ function VIS.audio(name, v)
 end
 
 -- kind: "kick", "pump", "hat", "stab" (notes), "bass" (note),
--- "arp" (lane, note, step), "bar" (S)
+-- "arp" (lane, note, step), "pad" (notes), "bar" (S)
 function VIS.event(kind, a, b, c)
   if type(kind) ~= "string" then return end
   if env[kind] then env[kind] = 1 end
@@ -661,6 +683,16 @@ function VIS.event(kind, a, b, c)
     lane_note[lane] = num(b, lane_note[lane] or 72)
     lane_step[lane] = num(c, lane_step[lane] or 1)
     if i then call(i, "arp", lane, lane_note[lane], lane_step[lane]) end
+  elseif kind == "pad" then
+    -- up to four finite numbers, copied; anything else is an empty list
+    local notes = {}
+    if type(a) == "table" then
+      for k = 1, 4 do
+        local m = num(a[k], nil)
+        if m then notes[#notes + 1] = m end
+      end
+    end
+    if i then call(i, "pad", notes) end
   elseif kind == "pump" then
     duck_age = 0
     if i then call(i, "pump") end
@@ -674,6 +706,8 @@ function VIS.event(kind, a, b, c)
         if kind == "perc" then call(i, "perc", clamp(math.floor(num(a, 1)), 1, 3), num(b, 60))
         elseif kind == "tick" then call(i, "tick", clamp(math.floor(num(a, 1)), 1, 4))
         else call(i, "clap") end
+      elseif VIS.strict then
+        -- no fallback
       elseif kind ~= "tick" or rnd() < 0.5 then
         call(i, "hat")
       end

@@ -2,10 +2,46 @@
 -- pattern generators: drums, stab rhythms, bass lines, phasing arp lanes.
 -- 16-step tables are indexed 1..16; drum/stab entries are velocities (0 = rest).
 
+local MT = include("lib/meter")
+
 local G = {}
 
 local function pick(t) return t[math.random(#t)] end
 G.pick = pick
+
+-- every bar-length generator takes a bar descriptor (lib/meter) and
+-- defaults to 4/4 even. each makes exactly the draws it always did, in the
+-- same order, and only then shapes the result for the bar, so 4/4 even
+-- gives the same patterns per seed as before the meters existed.
+local BAR44 = MT.bar(4, "even")
+
+-- a 16-entry template (with any extra named fields) -> bar.n entries
+local function lay(tpl, bar)
+  local out = MT.map16(tpl, bar)
+  for i = 1, #out do
+    if type(out[i]) == "table" then
+      local c = {}
+      for k, v in pairs(out[i]) do c[k] = v end
+      out[i] = c
+    end
+  end
+  for k, v in pairs(tpl) do
+    if type(k) ~= "number" then out[k] = v end
+  end
+  return out
+end
+
+-- a list of 16-step positions -> the same hits laid into the bar
+local function lay_steps(list, bar)
+  local flags = {}
+  for i = 1, 16 do flags[i] = 0 end
+  for _, s in ipairs(list) do flags[s] = 1 end
+  local out = {}
+  for i, v in ipairs(MT.map16(flags, bar)) do
+    if v == 1 then out[#out + 1] = i end
+  end
+  return out
+end
 
 function G.euclid(k, n, rot)
   local out = {}
@@ -19,22 +55,51 @@ end
 -- four on the floor; `ghost` = quiet extra kicks a track may add near the
 -- top of the energy (the pump stays on the quarters)
 local GHOSTS = {{}, {}, {}, {16}, {16}, {11}, {8, 16}, {15}}
-function G.kick()
+function G.kick(bar)
+  bar = bar or BAR44
   local p = {ghost = {}}
-  for i = 1, 16 do p[i] = ((i - 1) % 4 == 0) and 1 or 0 end
-  for _, s in ipairs(pick(GHOSTS)) do p.ghost[s] = 0.35 + math.random() * 0.2 end
+  -- on every beat in even feel, on the group starts otherwise
+  for i = 1, bar.n do p[i] = ((i - 1) % 4 == 0 and bar.starts[(i - 1) // 4 + 1]) and 1 or 0 end
+  local g16 = {}
+  for _, s in ipairs(pick(GHOSTS)) do g16[s] = 0.35 + math.random() * 0.2 end
+  local flat = {}
+  for i = 1, 16 do flat[i] = g16[i] or 0 end
+  for i, v in ipairs(MT.map16(flat, bar)) do
+    if v > 0 then p.ghost[i] = v end
+  end
   return p
 end
 
 -- clap / snare / snap: a backbeat, a lone 4, or a backbeat with a ghost.
 -- `kind` 1 clap 2 snare 3 snap; `late` nudges the hits behind the grid
 local CLAPS = {{5, 13}, {5, 13}, {13}, {5, 13, 16}, {5, 13, 15}, {13, 14}, {5, 12}}
-function G.clap()
-  local p = {kind = pick({1, 1, 1, 2, 3, 3}), late = pick({0, 0, 0.08, 0.15})}
-  for i = 1, 16 do p[i] = 0 end
+function G.clap(bar)
+  bar = bar or BAR44
+  local t = {kind = pick({1, 1, 1, 2, 3, 3}), late = pick({0, 0, 0.08, 0.15})}
+  for i = 1, 16 do t[i] = 0 end
   for j, s in ipairs(pick(CLAPS)) do
     local main = s == 5 or s == 13
-    p[s] = main and (0.85 + math.random() * 0.15) or (0.35 + math.random() * 0.2)
+    t[s] = main and (0.85 + math.random() * 0.15) or (0.35 + math.random() * 0.2)
+  end
+  local p = lay(t, bar)
+  -- 4/4 even: today's patterns. other even bars clap on the even beats
+  -- (3/4: 2; 5/4: 2, 4; 7/4: 2, 4, 6). a grouped
+  -- feel claps on the last beat of each group longer than one beat.
+  local beats
+  if bar.feel ~= "even" then
+    beats = {}
+    local b = 1
+    for _, len in ipairs(bar.groups) do
+      if len > 1 then beats[#beats + 1] = b + len - 1 end
+      b = b + len
+    end
+  elseif bar.beats ~= 4 then
+    beats = {}                                   -- even feel: the even-numbered beats
+    for b = 2, bar.beats, 2 do beats[#beats + 1] = b end
+  end
+  if beats then
+    for i = 1, bar.n do if p[i] >= 0.85 then p[i] = 0 end end   -- keep the soft ghosts
+    for _, b in ipairs(beats) do p[(b - 1) * 4 + 1] = 0.85 + math.random() * 0.15 end
   end
   return p
 end
@@ -65,20 +130,22 @@ local RIDES = {
   {0.6, 0, 1, 0, 0.6, 0, 1, 0, 0.6, 0, 1, 0, 0.6, 0, 1, 0},
   {1, 0, 0.5, 0.4, 1, 0, 0.5, 0, 1, 0, 0.5, 0.4, 1, 0, 0.5, 0},
 }
-function G.ride()
-  local r = pick(RIDES)
+function G.ride(bar)
+  bar = bar or BAR44
+  local r = MT.map16(pick(RIDES), bar)
   local p = {}
-  for i = 1, 16 do p[i] = r[i] * (0.8 + math.random() * 0.2) end
+  for i = 1, bar.n do p[i] = r[i] * (0.8 + math.random() * 0.2) end
   return p
 end
 
 -- glitch ticks: tiny digital hits on a euclidean scatter. entries are
 -- {vel, kind (1 click 2 blip 3 crush 4 zap), ratchet (1-3 hits inside the 16th)}
-function G.ticks()
-  local hits = G.euclid(pick({3, 4, 5, 5, 7}), 16, math.random(0, 15))
+function G.ticks(bar)
+  bar = bar or BAR44
+  local hits = G.euclid(pick({3, 4, 5, 5, 7}), bar.n, math.random(0, bar.n - 1))
   local kinds = pick({{1, 1, 2}, {1, 2, 2}, {1, 3}, {2, 4}, {1, 2, 3, 4}})
   local p = {}
-  for i = 1, 16 do
+  for i = 1, bar.n do
     if hits[i] then
       p[i] = {0.4 + math.random() * 0.5, pick(kinds), pick({1, 1, 1, 2, 3})}
     else
@@ -93,12 +160,13 @@ end
 -- `shuffle` = how late the off-16ths sit (fraction of a 16th)
 G.HAT_KINDS = {"straight", "rolling", "skip", "sparse"}
 local ROLL = {0.35, 0.2, 0.9, 0.28}   -- 16th contour inside a beat
-function G.hats()
+function G.hats(bar)
+  bar = bar or BAR44
   local kind = pick({1, 1, 2, 2, 3, 4})
-  local p = {kind = kind, shuffle = pick({0, 0, 0.12, 0.2, 0.3}),
-             open = pick({{}, {15}, {15}, {7, 15}, {3, 11}})}
-  local ghosts = kind == 3 and G.euclid(pick({3, 5}), 16, math.random(0, 15))
-  for i = 1, 16 do
+  local p = {kind = kind, shuffle = pick({0, 0, 0.12, 0.2, 0.3})}
+  p.open = lay_steps(pick({{}, {15}, {15}, {7, 15}, {3, 11}}), bar)
+  local ghosts = kind == 3 and G.euclid(pick({3, 5}), bar.n, math.random(0, bar.n - 1))
+  for i = 1, bar.n do
     local b = (i - 1) % 4 + 1
     if b == 3 then
       p[i] = 0.9
@@ -109,7 +177,7 @@ function G.hats()
     elseif kind == 3 then
       p[i] = ghosts[i] and (0.3 + math.random() * 0.25) or 0
     else
-      p[i] = (i == 16 and math.random() < 0.5) and 0.3 or 0
+      p[i] = (i == bar.n and math.random() < 0.5) and 0.3 or 0
     end
   end
   return p
@@ -118,25 +186,28 @@ end
 -- shaker: soft 16ths leaning on the offbeats; toms: one or two dub tom
 -- ghosts a bar, left for the echo to answer. tom entries are {vel, voice}
 -- (which chord voice it's tuned to, 1 low .. 4 high)
-function G.shaker()
+function G.shaker(bar)
+  bar = bar or BAR44
   local p = {}
   local acc = pick({{0.25, 0.5, 0.8, 0.45}, {0.3, 0.3, 0.75, 0.3}, {0.5, 0.25, 0.7, 0.25}})
-  for i = 1, 16 do p[i] = acc[(i - 1) % 4 + 1] * (0.8 + math.random() * 0.4) end
+  for i = 1, bar.n do p[i] = acc[(i - 1) % 4 + 1] * (0.8 + math.random() * 0.4) end
   return p
 end
 
 local TOMS = {{8}, {14}, {7, 15}, {6, 14}, {11}, {4, 12}, {16}}
-function G.toms()
-  local p = {}
-  for i = 1, 16 do p[i] = {0, 1} end
-  for _, s in ipairs(pick(TOMS)) do p[s] = {0.5 + math.random() * 0.4, math.random(1, 3)} end
-  return p
+function G.toms(bar)
+  bar = bar or BAR44
+  local t = {}
+  for i = 1, 16 do t[i] = {0, 1} end
+  for _, s in ipairs(pick(TOMS)) do t[s] = {0.5 + math.random() * 0.4, math.random(1, 3)} end
+  return lay(t, bar)
 end
 
-function G.rim()
-  local hits = G.euclid(pick({3, 3, 5, 7}), 16, math.random(0, 15))
+function G.rim(bar)
+  bar = bar or BAR44
+  local hits = G.euclid(pick({3, 3, 5, 7}), bar.n, math.random(0, bar.n - 1))
   local p = {}
-  for i = 1, 16 do p[i] = hits[i] and (0.5 + math.random() * 0.4) or 0 end
+  for i = 1, bar.n do p[i] = hits[i] and (0.5 + math.random() * 0.4) or 0 end
   return p
 end
 
@@ -151,11 +222,12 @@ local STABS = {
   {7},
   {3, 10},
 }
-function G.stabs()
+function G.stabs(bar)
+  bar = bar or BAR44
   local p = {}
   for i = 1, 16 do p[i] = 0 end
   for _, s in ipairs(pick(STABS)) do p[s] = 0.7 + math.random() * 0.3 end
-  return p
+  return lay(p, bar)
 end
 
 -- bass lines: 16 steps of {vel, semitone offset from the chord's bass,
@@ -181,7 +253,8 @@ local ROLL_RHY = {
 }
 local SLIDE_RHY = {{1, 7, 11}, {3, 11}, {1, 6, 11, 15}, {3, 9, 14}}
 local function vel() return 0.7 + math.random() * 0.3 end
-function G.bass(kind)
+function G.bass(kind, bar)
+  bar = bar or BAR44
   kind = kind or pick(G.BASS_KINDS)
   local p = {kind = kind}
   for i = 1, 16 do p[i] = {0, 0} end
@@ -211,14 +284,14 @@ function G.bass(kind)
       p[s] = {vel(), iv}
     end
   end
-  return p
+  return lay(p, bar)
 end
 
 -- calm / mid / high lines for a track
-function G.bass_lines()
-  return {G.bass(pick({"root", "root", "slide"})),
-          G.bass(pick({"octave", "slide", "root"})),
-          G.bass(pick({"rolling", "octave", "rolling"}))}
+function G.bass_lines(bar)
+  return {G.bass(pick({"root", "root", "slide"}), bar),
+          G.bass(pick({"octave", "slide", "root"}), bar),
+          G.bass(pick({"rolling", "octave", "rolling"}), bar)}
 end
 
 ------------------------------------------------------------------------

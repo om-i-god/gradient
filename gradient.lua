@@ -31,13 +31,15 @@ local VIS = include("lib/visuals")
 local L   = include("lib/listen")
 local GU  = include("lib/gridui")
 local O   = include("lib/outs")
+local TB  = include("lib/timbre")
+local MT  = include("lib/meter")
 
 local ECHO_DIVS      = {0.5, 0.75, 1, 1.5}          -- in beats
 local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
 local LEAD_DIVS      = {0.25, 1/3, 0.5, 0.75, 2/3, 1, 1.5, 2}
 local LEAD_DIV_NAMES = {"1/16", "1/8T", "1/8", "3/16", "1/4T", "1/4", "3/8", "1/2"}
 local OUT_NAMES      = {"internal", "midi", "both"}
-local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft"}
+local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft", "glass", "reed", "kalimba", "marimba"}
 
 ------------------------------------------------------------------------
 -- state
@@ -56,6 +58,7 @@ local S = {
   on_kick = false, on_pump = false, kickless = false,
   drop_bars = 0, phrase_len = 32, force_mutate = false, freeze = false, throw = false,
   cycle_bars = 96,
+  bar = MT.bar(4, "even"), bar_step = 1, meter_pending = nil,
   follow = false, pending_root = nil,
   mute = {}, solo = {}, hand_throw = 0, lead_throw = 0,
 }
@@ -94,6 +97,7 @@ end
 ------------------------------------------------------------------------
 
 local tweak_cache = {}
+local pad_sent   -- last pad type sent; nil = the next bar sends it
 local function tweak(k, v)
   if tweak_cache[k] ~= v then
     tweak_cache[k] = v
@@ -179,6 +183,12 @@ local function apply_bar()
   tweak("perc_echo",  0.15 + dub * 0.45)
   tweak("tick_echo",  0.15 + dub * 0.4)
 
+  tweak("bass_type",  TB.resolve(S, "bass",  params:get("bass_type")))
+  tweak("chord_type", TB.resolve(S, "chord", params:get("chord_type")))
+  tweak("hat_type",   TB.resolve(S, "hat",   params:get("hat_type")))
+  local pad = TB.resolve(S, "pad", params:get("pad_type"))
+  if pad ~= pad_sent then pad_sent = pad; engine.pad_type(pad) end
+
   tweak("chord_cutoff", params:get("chord_cutoff") * (0.5 + tone) * (0.55 + e * 0.6))
   tweak("bass_cutoff",  params:get("bass_cutoff") * (0.8 + e * 0.4))
   tweak("pump_depth", params:get("pump_depth") / 100 * (0.5 + e * 0.5))
@@ -196,6 +206,7 @@ local function apply_bar()
     S.chord_changed = false
     local c = S.chord
     engine.wash_chord(mtof(c[1] - 12), mtof(c[2] - 12), mtof(c[3]), mtof(c[4]))
+    VIS.event("pad", {c[1] - 12, c[2] - 12, c[3], c[4]})
   end
 end
 
@@ -218,8 +229,15 @@ local function glitch(mode, slice16, len16)
   VIS.event("glitch", mode, dur)
 end
 
+-- a pattern shorter than the bar (until the generators build full-length
+-- ones) reads as rests past its end
+local REST1     = {0}
+local REST_BASS = {0, 0, false}
+
 local function play_step()
-  local s = (S.step % 16) + 1
+  -- bar step: 1..S.bar.n (S.step stays a global 16th counter)
+  local s = S.bar_step
+  local n = S.bar.n   -- fills sit relative to the bar's end: n-3 is step 13 of 16
 
   if s == 1 then
     if S.hand_throw > 0 then S.hand_throw = S.hand_throw - 1 end
@@ -256,22 +274,22 @@ local function play_step()
   local beat = clock.get_beat_sec()
   local fill = S.fill
   -- gap fill: drums and bass sit out the end of the bar, the pump goes on
-  local gap  = fill == "gap" and s >= (S.fill_from or 13)
+  local gap  = fill == "gap" and s >= (S.fill_from or 13) + n - 16
 
   -- fills that run under everything else
-  if fill == "swell" and s == 5 then
+  if fill == "swell" and s == n - 11 then
     engine.swell(0.14 + e * 0.1, beat * 3)
   elseif fill == "dip" then
     S.dipped = true
-    tweak("pump_lpf", 20000 * 0.025 ^ (math.min(s, 12) / 12))
+    tweak("pump_lpf", 20000 * 0.025 ^ (math.min(s, n - 4) / (n - 4)))
   elseif fill == "stutter" then
     -- the last beat repeats, a 16th, then 32nds, then a 64th roll
-    if s == 13 then glitch(1, 1, 2)
-    elseif s == 15 then glitch(1, 0.5, 1)
-    elseif s == 16 then glitch(1, 0.25, 1) end
-  elseif fill == "tapestop" and s == 13 then
+    if s == n - 3 then glitch(1, 1, 2)
+    elseif s == n - 1 then glitch(1, 0.5, 1)
+    elseif s == n then glitch(1, 0.25, 1) end
+  elseif fill == "tapestop" and s == n - 3 then
     glitch(2, 1, 4)
-  elseif fill == "reverse" and s == 13 then
+  elseif fill == "reverse" and s == n - 3 then
     glitch(3, 1, 4)
   end
   local gl = S.glitches and S.glitches[s]
@@ -283,7 +301,13 @@ local function play_step()
   if ghost and S.on_ghost and not gap then
     engine.kick(0.9 * ghost, params:get("kick_tune"), params:get("kick_decay") / 200, 0.1)
   end
-  if S.pat.kick[s] > 0 then
+  -- A/B feel: the beats that don't start a group tick as quiet kicks. they
+  -- follow the kick (so mute, solo and kickless too) but not the ghost param
+  if S.on_kick and not S.kickless and not gap and S.bar.feel ~= "even"
+     and (s - 1) % 4 == 0 and not S.bar.starts[(s - 1) // 4 + 1] then
+    engine.kick(0.9 * 0.35, params:get("kick_tune"), params:get("kick_decay") / 200, 0.1)
+  end
+  if (S.pat.kick[s] or 0) > 0 then
     if S.on_pump then
       engine.pump(1)
       O.pump(beat)
@@ -308,10 +332,10 @@ local function play_step()
 
   -- hats: the groove's offbeat spine always (when on); ghosts thin with
   -- energy; marked offbeats open up while the energy builds
-  local hg, hv = S.gain.hats or 0, hp[s]
+  local hg, hv = S.gain.hats or 0, hp[s] or 0
   if hg > 0 and hv > 0 and not gap then
     local spine = (s - 1) % 4 == 2
-    local open = fill == "open" and (s == 11 or s == 15)
+    local open = fill == "open" and (s == n - 5 or s == n - 1)
     if spine and not open and ((S.trend or 0) > 0.002 or S.nudge > 0.05 or e > 0.75) then
       for _, o in ipairs(hp.open or {}) do open = open or o == s end
     end
@@ -330,30 +354,30 @@ local function play_step()
   -- shaker and tom ghosts ride with the hats, on some phrases, when it's up
   if hg > 0 and not gap then
     if S.roll_shaker and e > 0.55 and math.random() < 0.5 + e * 0.5 then
-      local v = S.pat.shaker[s] * hg * 0.16
+      local v = (S.pat.shaker[s] or 0) * hg * 0.16
       late(function() engine.shaker(v, 0.05 + (1 - e) * 0.04, (math.random() - 0.5) * 0.6) end)
     end
-    local t = S.pat.toms[s]
+    local t = S.pat.toms[s] or REST1
     if S.roll_toms and e > 0.35 and t[1] > 0 and fill ~= "toms" then
       engine.tom(t[1] * hg * 0.3, mtof(S.chord[t[2]] - 24), 0.25 + (1 - e) * 0.2,
         (t[2] - 2) * 0.3)
     end
   end
   -- tom fill: a run down the chord on the last beat
-  if fill == "toms" and s >= 13 then
-    engine.tom(0.3 + (s - 13) * 0.05, mtof(S.chord[17 - s] - 24), 0.3, (14.5 - s) * 0.25)
+  if fill == "toms" and s >= n - 3 and s <= n then
+    engine.tom(0.3 + (s - (n - 3)) * 0.05, mtof(S.chord[n + 1 - s] - 24), 0.3, (n - 1.5 - s) * 0.25)
   end
 
   -- rim
-  local rg, rv = S.gain.rim or 0, S.pat.rim[s]
-  if fill == "open" and (s == 14 or s == 16) and rv == 0 then rv = 0.4 end
+  local rg, rv = S.gain.rim or 0, S.pat.rim[s] or 0
+  if fill == "open" and (s == n - 2 or s == n) and rv == 0 then rv = 0.4 end
   if rg > 0 and rv > 0 then
     engine.rim(rv * rg * 0.25, 1500 + math.random(0, 500), (math.random() - 0.5) * 0.8)
   end
 
   -- clap / snare / snap: the backbeat, a little behind the grid on some
   -- tracks; thrown into the echo with the stabs
-  local clg, clv = S.gain.clap or 0, S.pat.clap[s]
+  local clg, clv = S.gain.clap or 0, S.pat.clap[s] or 0
   if clg > 0 and clv > 0 and not gap then
     local cp = S.pat.clap
     local kind = params:get("clap_kind")
@@ -387,14 +411,14 @@ local function play_step()
   end
 
   -- ride near the top, riding with the hats
-  local rdv = S.pat.ride[s]
+  local rdv = S.pat.ride[s] or 0
   if S.on_ride and hg > 0 and rdv > 0 and not gap then
     engine.ride(rdv * hg * 0.12, 0.4 + e * 0.5, 6500 + e * 2000, 0.35)
   end
 
   -- glitch ticks: clicks, blips, crushed noise and zaps, some ratcheted
   -- inside the 16th
-  local tg, tk = S.gain.ticks or 0, S.pat.ticks[s]
+  local tg, tk = S.gain.ticks or 0, S.pat.ticks[s] or REST1
   if tg > 0 and tk[1] > 0 and not gap and math.random() < 0.55 + e * 0.4 then
     local n = tk[3]
     local hz = mtof(S.chord[math.random(4)] + 36)
@@ -412,8 +436,8 @@ local function play_step()
   end
 
   -- chord stabs
-  local cg, cv = S.gain.chords or 0, S.pat.stabs[s]
-  if fill == "throw" and s == 15 and cv == 0 then cv = 0.8 end
+  local cg, cv = S.gain.chords or 0, S.pat.stabs[s] or 0
+  if fill == "throw" and s == n - 1 and cv == 0 then cv = 0.8 end
   if cg > 0 and cv > 0 then
     local amp = cv * cg * 0.32
     local dur = 0.1 + (1 - e) * 0.25
@@ -432,7 +456,7 @@ local function play_step()
   -- bass: chord root, its 3rd / 5th, or a tonic pedal (lib/harmony), on
   -- the line for this energy (lib/gen). every 4th bar the last beat can
   -- walk into the next chord, or turn around if the chord holds
-  local bg, bv = S.gain.bass or 0, S.pat.bass[s]
+  local bg, bv = S.gain.bass or 0, S.pat.bass[s] or REST_BASS
   if bg > 0 and not gap then
     local base = 12 * (params:get("bass_oct") + 1) + S.root_pc
     local vel, iv, slide = bv[1], bv[2], bv[3]
@@ -441,13 +465,13 @@ local function play_step()
     local note = base + S.bass_pc + iv
     if S.bass_turn then
       if S.bass_next and S.bass_next ~= S.bass_pc then
-        if s == 16 then
-          local n = S.bass_next + (S.bass_appr or -1)
-          note, vel, slide = base + (n < 0 and n + 12 or n), 0.75, false
+        if s == n then
+          local nx = S.bass_next + (S.bass_appr or -1)
+          note, vel, slide = base + (nx < 0 and nx + 12 or nx), 0.75, false
         end
-      elseif s == 15 then
+      elseif s == n - 1 then
         note, vel, slide = base + S.bass_pc + 12, 0.7, false
-      elseif s == 16 then
+      elseif s == n then
         note, vel, slide = base + S.bass_pc + (S.bass_free and 7 or 0), 0.6, true
       end
     end
@@ -471,7 +495,7 @@ local function play_step()
 
   -- phasing arp lanes: always tick so phase relationships persist in silence
   local tone = params:get("tone") / 100
-  local bar_f = S.track_bar + (s - 1) / 16
+  local bar_f = S.track_bar + (s - 1) / n
   local arp_int, arp_ext = routes("arp")
   local arp_sel = params:get("arp_lanes")   -- 1 all, 2-5 one lane, 6 own ch each
   for i = 1, 4 do
@@ -498,13 +522,14 @@ local function play_step()
         if arp_int or not ext then
           local v = params:get("lane" .. i .. "_voice")
           engine.arp(mtof(note), 0.13 * vel, dur, clamp(cut, 150, 12000), l.pan, l.shapeX,
-            v == 1 and (l.voice or 1) or v - 1)
+            v == 1 and ((S.timbre and S.timbre.lane[i]) or l.voice or 1) or v - 1)
         end
       end
     end
   end
 
   S.step = S.step + 1
+  S.bar_step = S.bar_step % S.bar.n + 1
 end
 
 ------------------------------------------------------------------------
@@ -544,6 +569,7 @@ local function loop(my)
   clock.sync(4)
   if S.playing and my == loop_gen then O.start() end
   S.step = 0
+  S.bar_step = 1
   while true do
     clock.sync(1 / 4)
     local swing = params:get("swing") / 100
@@ -559,6 +585,8 @@ start = function()
   if S.playing then return end
   S.playing = true
   loop_gen = loop_gen + 1
+  if MT.apply_pending(S) then C.remeter(S) end
+  S.bar_step = 1
   local my = loop_gen
   main_clock = clock.run(function() loop(my) end)
   flash("play")
@@ -826,6 +854,9 @@ local function draw_hud()
       sec = sec .. " " .. math.floor(S.progress * 100) .. "%"
     end
     if S.kickless and S.playing then sec = sec .. " ~" end
+    if S.bar.beats ~= 4 or S.bar.feel ~= "even" then
+      sec = MT.label(S.bar.beats, S.bar.feel) .. "  " .. sec
+    end
     text_box(127, 7, sec, S.playing and 8 or 3, true)
 
     -- listening: what the input sounds like, and where we're headed
@@ -958,6 +989,35 @@ local function setup_params()
     S.phrase_len = ({8, 16, 32, 64})[v]
     S.cycle_bars = math.floor(S.cycle_bars * S.phrase_len / old)
   end)
+  -- a meter or feel change lands on the next phrase boundary while playing
+  -- (the conductor applies it), at once when stopped
+  local function meter_changed()
+    local beats = MT.METERS[params:get("meter")]
+    local feel  = MT.FEELS[params:get("feel")]
+    if S.playing then
+      if beats == S.bar.beats and feel == S.bar.feel then S.meter_pending = nil
+      else S.meter_pending = {beats = beats, feel = feel} end
+    else
+      S.meter_pending = {beats = beats, feel = feel}
+      if MT.apply_pending(S) then C.remeter(S) end
+      S.bar_step = 1
+    end
+  end
+  params:add_option("meter", "time signature", {"4/4", "3/4", "5/4", "7/4"}, 1)
+  params:set_action("meter", meter_changed)
+  params:add_option("feel", "feel", MT.FEELS, 1)
+  params:set_action("feel", meter_changed)
+  -- option params can't relabel per meter: show the actual grouping instead
+  do
+    local fp = params:lookup_param("feel")
+    local function show()
+      local beats = MT.METERS[params:get("meter")]
+      local g = MT.groups(beats, MT.FEELS[params:get("feel")])
+      return #g == beats and "even" or table.concat(g, "+")
+    end
+    fp.formatter = show
+    fp.string = show
+  end
   params:add_number("track_minutes", "track length (min)", 4, 32, 8)
   params:set_action("track_minutes", function(v) S.track_minutes = v end)
   params:add_option("end_action", "track end", {"stop", "next track"}, 2)
@@ -1102,6 +1162,17 @@ local function setup_params()
   params:add_control("chord_detune", "stab detune", controlspec.new(0, 1, "lin", 0.01, 0.18))
   params:set_action("chord_detune", function(v) engine.tweak("chord_detune", v) end)
   params:add_number("bass_cutoff", "bass cutoff", 80, 1200, 260)
+  for _, o in ipairs({
+    {"bass_type", "bass type", {"auto", "sub", "reese", "rubber"}},
+    {"chord_type", "stab type", {"auto", "dub", "felt", "organ", "glass", "rhodes"}},
+    {"hat_type", "hat type", {"auto", "noise", "metal", "dust"}},
+    {"pad_type", "pad type", {"auto", "wash", "choir", "strings", "drone"}},
+  }) do
+    params:add_option(o[1], o[2], o[3], 1)
+    params:set_action(o[1], function()
+      if o[1] == "pad_type" then pad_sent = nil else tweak_cache[o[1]] = nil end
+    end)
+  end
   params:add_option("clap_kind", "clap voice", {"auto", "clap", "snare", "snap"}, 1)
   params:add_option("perc_kit", "perc kit", {"auto", "hand", "wood", "metal"}, 1)
   for i = 1, 4 do
@@ -1142,6 +1213,7 @@ end
 function init()
   setup_params()
   params:bang()
+  tweak_cache, pad_sent = {}, nil
 
   math.randomseed(os.time())
   new_track(math.random(1, 9999), false)

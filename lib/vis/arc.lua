@@ -30,9 +30,32 @@ return function(K)
   local STARS = {}
   for s = 1, 22 do STARS[s] = {x = math.floor(K.hash(s, 41) * 126) + 1, y = 1 + math.floor(K.hash(s, 42) ^ 1.4 * 30), ph = K.hash(s, 43) * 6.3} end
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, percs = {}, {}
+  local pdz = 0                           -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.kick() mark("kick") end
+  function M.pump() mark("pump") end
+  function M.hat() mark("hat") end
+  function M.clap() mark("clap") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 4 end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, v = clamp(math.floor(K.num(voice, 1)), 1, 4) - 1,
+      c = 4 + (math.floor(K.num(note, 60)) % 12) * 4}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
     bars, lights = 0, {}
     glow, vb, lamp = 0, 0, 0
+    hit, percs, pdz = {}, {}, 0
   end
   M.clear = function() lights = {} end
 
@@ -51,6 +74,9 @@ return function(K)
     local hist, n = K.hist, #K.hist
     local ph = K.playing and K.bar_ph or 0
     local hi = A[K.HI]
+    pdz = follow(pdz, env.pad, 0.25, DT)
+    local kk, pf, hh, cl, tk = fade("kick", 0.25), fade("pump", 0.3), fade("hat", 0.25), fade("clap", 0.3), fade("tick", 0.4)
+    local pd, mid, amp = pdz, A[K.MID], A[K.AMP]
     -- the land, per column: age in bars back from the live edge
     for c = 0, 63 do
       local x = c * 2 + 1
@@ -81,7 +107,7 @@ return function(K)
     local st = env.stab * (K.gain(S, "chords") > 0 and 1 or 0.6)
     glow = follow(glow, st, st > glow and 0.15 or 1, DT)
     -- per column: a glow band over the far range, hidden behind the ridge
-    local gl = 1.4 + glow * 2.2 + K.energy * 0.8
+    local gl = (1.4 + glow * 2.2 + K.energy * 0.8) * (1 + 0.3 * amp) * (1 - 0.4 * pf) + 1.2 * pd
     for k = 1, 5 do
       local l = gl * math.exp(-(k - 1) / (1.6 + glow * 1.5))
       if l >= 0.75 then
@@ -97,13 +123,13 @@ return function(K)
       end
     end
     -- thin cloud drifting across
-    K.dashes(1, 9, 9, 23, T * 3.1, 0, 128)
-    K.dashes(1, 11, 14, 31, T * 2.2 + 11, 0, 128)
+    K.dashes(1 + 4 * pf, 9, 9, 23, T * 3.1, 0, 128)
+    K.dashes(1 + 4 * pf, 11, 14, 31, T * 2.2 + 11, 0, 128)
     -- stars, brighter and quicker with out_hi
     for i, s in ipairs(STARS) do
       if s.y < math.min(far[s.x // 2], top[math.min(63, s.x // 2)]) - 3 then
         local tw = 0.5 + 0.5 * math.sin(T * (1.4 + K.hash(i, 44) * 1.4 + hi * 3) + s.ph)
-        put(0.8 + tw * (1.6 + hi * 6), s.x, s.y, 1, 1)
+        put(0.8 + tw * (1.6 + hi * 6) + hh * 5, s.x, s.y, 1, 1)
       end
     end
     -- the moon on its way across with the track
@@ -112,6 +138,19 @@ return function(K)
     for dy = -3, 3 do
       local hw = math.floor(math.sqrt(11 - dy * dy) + 0.5)
       put(4.5, mx - hw, my + dy, 2 * hw, 1)
+    end
+    -- a clap swells a halo round the moon
+    if cl > 0.03 then
+      for dy = -8, 8 do
+        local hw = math.floor(math.sqrt(64 - dy * dy) + 0.5)
+        put(5 * cl, mx - hw, my + dy, 2, 1); put(5 * cl, mx + hw - 2, my + dy, 2, 1)
+      end
+    end
+    -- a tick draws a short streak across the sky
+    if tk > 0.03 then
+      local sx, sy = 14 + hit.tk * 26 + (1 - tk) * 22, 4 + (1 - tk) * 14
+      line(6 * tk, sx, sy, sx - 14, sy - 6 * 0.6)
+      line(3 * tk, sx - 14, sy - 3.6, sx - 24, sy - 6)
     end
     for dy = -5, 5, 2 do
       local hw = math.floor(math.sqrt(30 - dy * dy) + 0.5)
@@ -196,6 +235,26 @@ return function(K)
         end
       end
     end
+    -- hats glint along the rim
+    if hh > 0.03 then
+      for c = 1, 62, 2 do
+        if top[c] < GROUND and not hollow[c] then put(6 * hh, c * 2, top[c] - 1, 2, 1) end
+      end
+      K.dashes(4 * hh, 9, 3, 7, -T * 30, 0, 128)
+    end
+    -- a perc lights a window on a slope, placed by its note and voice
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.55)
+      if f < 0.03 then table.remove(percs, i)
+      else
+        local cc = clamp(p.c + p.v, 0, 63)
+        local x, y = cc * 2, math.min(top[cc], GROUND - 8) + 3 + p.v
+        put(7 * f, x - 1, y - 1, 3, 3)
+        put(4 * f, x - 4, y, 9, 1)
+        put(4 * f, x, y - 4, 1, 9)
+      end
+    end
     -- the ground, warmed by the bass
     vb = follow(vb, math.max(env.bass, A[K.LO] * 0.7) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.06, DT)
     put(2 + vb * 3 + K.bar_pulse * 2, 0, GROUND, X_NOW + 2, 1)
@@ -203,9 +262,18 @@ return function(K)
     -- the live edge: a now-line and the lamp on the newest land
     local lt = top[X_NOW // 2 - 1] or GROUND - 2
     if lt > GROUND then lt = GROUND - 2 end
-    for y = 2, math.floor(lt) - 3, 3 do put(1, X_NOW, y, 1, 1) end
+    for y = 2, math.floor(lt) - 3, 3 do put(1 + 5 * kk, X_NOW, y, 1, 1)
+      if kk > 0.03 then put(3 * kk, X_NOW, y + 1, 1, 1) end end
     lamp = follow(lamp, math.max(kick * (1 - K.kickless), K.duck * 0.4), 0.03, DT)
     put(5 + lamp * 7, X_NOW - 1, lt - 2, 2, 2)
+    -- the kick sends a ring out from the lamp
+    if kk > 0.03 then
+      local r = 2 + (1 - kk) * 18
+      for k = 0, 23 do
+        local a = k / 24 * K.TAU
+        put(5 * kk, X_NOW + math.cos(a) * r, lt - 2 + math.sin(a) * r, 1, 1)
+      end
+    end
     -- a throw: the lamp's echoes left behind on the land
     if K.throw > 0.05 then
       for k = 1, 4 do
@@ -227,7 +295,8 @@ return function(K)
       return cc * 2 + 1, top[cc] - 1
     end, hi * 45, 7)
     -- haze in the valleys, heavier in kickless stretches and with dub
-    K.haze(0, 40, 128, GROUND, 0.06 + 0.12 * K.dub * K.throw + 0.2 * K.kickless, 1, T * 3)
+    K.haze(0, 40, 128, GROUND, 0.06 + 0.12 * K.dub * K.throw + 0.2 * K.kickless + 0.2 * mid + 0.15 * pd, 1, T * 3)
+    if mid > 0.05 then K.haze(0, 14, 128, 38, 0.2 * mid, 1, -T * 2) end
   end
 
   M.init()

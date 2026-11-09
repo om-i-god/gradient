@@ -43,7 +43,8 @@ end
 -- the eight v1 themes first, in their old order (saved psets keep pointing
 -- at the same theme), then the eight new ones
 local NAMES = {"gradient", "voices", "lanes", "phase", "echo", "fall", "pump", "arc",
-  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate"}
+  "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate",
+  "radar", "subway", "harbour", "sodium", "lighthouse", "tramlines", "substation", "cooling"}
 
 local CHORDS = {{50, 57, 60, 65}, {46, 53, 58, 62}, {48, 55, 58, 63}, {45, 52, 57, 60}}
 local LABELS = {"i", "VI", "VII", "v/i"}
@@ -51,7 +52,7 @@ local LABELS = {"i", "VI", "VII", "v/i"}
 -- one 16th of the groove: kick + pump on beats, hats offbeat, stabs on the
 -- dub offbeats, bass on most 8ths, arp lanes ticking at their lengths
 local function groove(S, VIS, k, o)
-  local s = k % 16 + 1
+  local s = k % (o.len or 16) + 1
   if s == 1 then
     S.track_bar = S.track_bar + 1
     S.energy = o.energy or S.energy
@@ -129,6 +130,17 @@ SCEN.kickless = {
   end,
 }
 
+-- 5/4: the mid groove on a 20-step bar, the way gradient advances S.bar_step
+SCEN.meter5 = {
+  setup = function(S)
+    SCEN.mid.setup(S)
+    S.bar = include("lib/meter").bar(5, "even")
+    S.bar_step = 1
+  end,
+  on_step = function(S, VIS, k) groove(S, VIS, k, {stabs = true, bass = true, hats = true, lanes = 2, len = 20}) end,
+  audio = SCEN.mid.audio,
+}
+
 local function lit_stats()
   local lit, l15, sum = 0, 0, 0
   local buf = RAST.buf
@@ -177,6 +189,7 @@ local function run(theme, scen, opts)
       if S.playing then
         SC.on_step(S, VIS, k)
         S.step = S.step + 1
+        if S.bar then S.bar_step = S.bar_step % S.bar.n + 1 end
       end
       k = k + 1
       next_step = next_step + 60 / S.tempo / 4
@@ -222,11 +235,22 @@ end
 VIS_HARNESS = {run = run, bufdiff = bufdiff, NAMES = NAMES, RAST = RAST}
 if not test then return end
 
-local SCENS = {"silence", "mid", "peak", "kickless"}
+local SILENCE_V1 = dofile("test/fixtures/silence_v1.lua")
+local function frame_hash(buf)
+  local h = 5381
+  for i = 0, 128 * 64 - 1 do h = (h * 33 + math.floor((buf[i] or 0) * 1000 + 0.5)) % 2147483647 end
+  return h
+end
+
+local SCENS = {"silence", "mid", "peak", "kickless", "meter5"}
 
 -- bounds
 local OPS_BUDGET = 1200       -- draw calls per frame, any theme, any scenario
 local LIT_MAX = 0.40          -- never more than ~40% of the screen lit
+-- the original gradient theme sat at 0.399 in this scenario (0.001 under the cap)
+-- at fae0a04, and "add, never replace" means its base is not dimmed any more, so
+-- the event marks (arp streaks, perc beads, ticks) have no room under 0.40
+local LIT_MAX_GRADIENT_KICKLESS = 0.42
 local LIT_MIN_SILENT = 0.01   -- silence is never blank (~80 pixels)
 local LIT_MIN_LIVE = 0.04     -- with music, a scene, not a near-empty screen
 local DIFF_MAX = 0.7          -- mean |level change| per pixel, frame to frame (a
@@ -255,7 +279,8 @@ for th, name in ipairs(NAMES) do
         end
         assert(st.bad == 0, st.bad .. " NaN / inf coordinates or levels")
         assert(st.ops_max <= OPS_BUDGET, "draw calls " .. st.ops_max .. " > " .. OPS_BUDGET)
-        assert(st.lit_max <= LIT_MAX, string.format("lit %.3f > %.2f", st.lit_max, LIT_MAX))
+        local cap = (name == "gradient" and sc == "kickless") and LIT_MAX_GRADIENT_KICKLESS or LIT_MAX
+        assert(st.lit_max <= cap, string.format("lit %.3f > %.2f", st.lit_max, cap))
         assert(st.lit_min > (sc == "silence" and LIT_MIN_SILENT or LIT_MIN_LIVE),
           string.format("near blank: lit %.4f", st.lit_min))
         assert(st.diff_max <= DIFF_MAX, string.format("frame jump %.3f > %.2f", st.diff_max, DIFF_MAX))
@@ -263,6 +288,19 @@ for th, name in ipairs(NAMES) do
       end)
     end
 
+    -- "add, never replace": at zero signal each original theme draws exactly
+    -- what it drew at fae0a04 (see test/fixtures/silence_v1.lua)
+    if th <= 16 then
+      test("visuals " .. name .. " unchanged at zero signal", function()
+        local want = SILENCE_V1[name]
+        assert(want, "no fixture for " .. name)
+        local st = run(th, "silence", {frames = 180, keep = true})
+        for j, f in ipairs({60, 120, 180}) do
+          assert(frame_hash(st.frames[f]) == want[j],
+            name .. " frame " .. f .. " differs from the original theme at silence")
+        end
+      end)
+    end
     -- silence still moves: most frames differ from the one before
     test("visuals " .. name .. " moves at silence", function()
       local st = run(th, "silence", {frames = 120, keep = true})
@@ -291,7 +329,7 @@ for th, name in ipairs(NAMES) do
 
     -- audio reactivity: identical runs are identical, and ramping out_hi or
     -- out_lo (everything else held) changes the picture
-    test("visuals " .. name .. " reacts to out_hi and out_lo", function()
+    test("visuals " .. name .. " reacts to every band", function()
       local function with(over)
         return function(t)
           local v = SCEN.mid.audio(t)
@@ -310,9 +348,43 @@ for th, name in ipairs(NAMES) do
       assert(same == 0, "two identical runs differ: " .. same)
       local dhi = paired(with({out_hi = 0}), with({out_hi = 1}))
       local dlo = paired(with({out_lo = 0}), with({out_lo = 1}))
-      if REPORT then print(string.format("react %-9s hi %.3f lo %.3f", name, dhi, dlo)) end
+      local dmid = paired(with({out_mid = 0}), with({out_mid = 1}))
+      local damp = paired(with({out_amp = 0}), with({out_amp = 1}))
+      if REPORT then print(string.format("react %-9s hi %.3f lo %.3f mid %.3f amp %.3f", name, dhi, dlo, dmid, damp)) end
       assert(dhi > 0.01, string.format("out_hi barely changes it: %.4f", dhi))
       assert(dlo > 0.02, string.format("out_lo barely changes it: %.4f", dlo))
+      assert(dmid > 0.01, string.format("out_mid barely changes it: %.4f", dmid))
+      assert(damp > 0.01, string.format("out_amp barely changes it: %.4f", damp))
+    end)
+
+    -- every part of the music moves every theme: fire one event at frame 60
+    -- (strict: no hat fallback) and compare frames 60..72 against a control
+    -- that never fires it. both reseed right after, so the groove's random
+    -- stream matches whatever a handler did. the control runs once.
+    test("visuals " .. name .. " reacts to every part", function()
+      local EVENTS = {
+        {"kick"}, {"pump"}, {"hat"}, {"clap"}, {"perc", 2, 62}, {"tick", 3},
+        {"stab", {50, 57, 60, 65}}, {"bass", 38}, {"arp", 2, 67, 3}, {"pad", {50, 57, 60, 65}}}
+      local function probe(ev)
+        return function(f, VIS)
+          if f == 1 then VIS.strict = true end
+          if f == 60 then
+            if ev then VIS.event(ev[1], ev[2], ev[3], ev[4]) end
+            math.randomseed(60)
+          end
+        end
+      end
+      local ctl = run(th, "mid", {frames = 90, keep = true, at = probe(nil)})
+      local dead = {}
+      for _, ev in ipairs(EVENTS) do
+        local A = run(th, "mid", {frames = 90, keep = true, at = probe(ev)})
+        local d = 0
+        for i = 60, 72 do d = d + bufdiff(A.frames[i], ctl.frames[i]) end
+        d = d / 13
+        if REPORT then print(string.format("part %-9s %-5s %.4f", name, ev[1], d)) end
+        if not (d > 0.003) then dead[#dead + 1] = string.format("%s (%.4f)", ev[1], d) end
+      end
+      assert(#dead == 0, name .. " does not react to: " .. table.concat(dead, ", "))
     end)
 
     -- bad input: garbage audio, short / empty chords, no lanes, tempo flapping
@@ -453,6 +525,31 @@ if not ONLY then
     assert(bufdiff(a.frames[40], c.frames[40]) < 0.4, "glitch never let go")
   end)
 
+  test("visuals the bar phase follows the meter", function()
+    env()
+    local VIS = include("lib/visuals"); VIS.init()
+    assert(VIS.kit, "VIS.kit not exposed")
+    local S = mkS()
+    S.bar = {beats = 7, n = 28}
+    -- hold one step for a while so the smoothed sub-step runs to its end
+    local function probe(step, bs)
+      S.step, S.bar_step = step, bs
+      for f = 1, 40 do screen.clear(); VIS.draw(1, S, 1 / 30) end
+      return VIS.kit.bar_ph, VIS.kit.beats
+    end
+    local ph, beats = probe(27, 28)
+    assert(beats == 7, "K.beats " .. tostring(beats))
+    assert(ph >= 0.95 and ph < 1, "bar_ph at step 27 of 7/4: " .. tostring(ph))
+    ph = probe(0, 1)
+    assert(ph >= 0 and ph < 0.05, "bar_ph at the downbeat: " .. ph)
+    for bs = 1, 28 do
+      ph = probe(bs - 1, bs)
+      assert(ph >= 0 and ph < 1, "bar_ph out of range " .. ph)
+    end
+    S.bar = nil; probe(5, 1)
+    assert(VIS.kit.beats == 4 and VIS.kit.bar_ph >= 5 / 16 and VIS.kit.bar_ph < 6 / 16, "no bar: the 4/4 of 16")
+  end)
+
   test("visuals new drum events and garbage never throw", function()
     env()
     local VIS = include("lib/visuals"); VIS.init()
@@ -460,7 +557,8 @@ if not ONLY then
     for th = 1, #NAMES do
       for _, ev in ipairs({{"clap"}, {"perc", 2, 60}, {"perc", "x", nil}, {"tick", 9},
                            {"glitch", 0 / 0, 1e9}, {"glitch", -3, -1}, {"glitch"}, {42}, {nil},
-                           {"nonsense", {}, {}}, {"perc", math.huge, -math.huge}}) do
+                           {"nonsense", {}, {}}, {"perc", math.huge, -math.huge},
+                           {"pad", {}}, {"pad", {60}}, {"pad", {0 / 0, 50}}, {"pad", "x"}, {"pad", nil}}) do
         VIS.event(ev[1], ev[2], ev[3])
       end
       screen.clear(); RAST.reset_ops()

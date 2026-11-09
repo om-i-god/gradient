@@ -45,14 +45,40 @@ return function(K)
   local sparks = {}
   local pump_t = -99
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, arps, percs = {}, {-99, -99, -99, -99}, {}
+  local acnt = {0, 0, 0, 0}             -- arp notes so far, per lane
+  local pdz, mz = 0, 0  -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.kick() mark("kick") end
+  function M.stab() mark("stab") end
+  function M.hat() mark("hat") end
+  function M.clap() mark("clap") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 2 + 2 end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, v = clamp(math.floor(K.num(voice, 1)), 1, 4),
+      n = math.floor(K.num(note, 60)) % 12}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
     ring, sag, sway, sparks, pump_t = {0, 0, 0, 0}, 0, 0, {}, -99
+    hit, arps, percs, pdz, mz = {}, {-99, -99, -99, -99}, {}, 0, 0
+    acnt = {0, 0, 0, 0}
   end
 
   function M.pump() pump_t = K.NOW end
 
   function M.arp(lane, note)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
+    arps[lane] = K.NOW; acnt[lane] = acnt[lane] + 1
     local fb, et = K.echo_fb, K.echo_t * K.SP
     local a = 1
     for k = 0, 3 do
@@ -100,6 +126,10 @@ return function(K)
     local T, DT, e = K.T, K.DT, K.energy
     local kl = K.kickless
     local hi, lo = A[K.HI], A[K.LO]
+    pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    mz = K.follow(mz, A[K.MID], 1.0, DT)
+    local kk, hh, cl, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("tick", 0.4)
+    local pd, mid = pdz, A[K.MID]
     for i = 1, 4 do ring[i] = K.follow(ring[i], K.voice_kick[i], 0.05, DT) end
     local bassg = K.gain(S, "bass") > 0 and 1 or 0.4
     sag = K.follow(sag, math.max(K.env.bass * bassg, lo * 0.8), 0.12, DT)
@@ -112,10 +142,10 @@ return function(K)
     -- the sky: a town's glow low on the right behind the treeline, a moon
     K.gradient(HY - 16, HY - 1, function(y)
       local u = (HY - y) / 16
-      return (0.9 + 0.5 * e) * (1 - u) ^ 1.6
+      return (0.9 + 0.5 * e) * (1 - u) ^ 1.6 * (1 + 0.8 * pd)
     end, trees, 40, 128)
     K.gradient(HY - 8, HY - 1, function(y)
-      return 0.55 * (1 - (HY - y) / 8)
+      return 0.55 * (1 - (HY - y) / 8) * (1 + 0.8 * pd)
     end, trees, 0, 40)
     -- a thin moon: its disc less a second one offset into it
     for dy = -4, 4 do
@@ -137,15 +167,39 @@ return function(K)
     for k = 0, 6 do
       local y = HY + 2 + math.floor(k * k * 0.42)
       if y < 64 then K.dashes(1, y, 2 + k, 5 + k * 3, k * 13 + T * 0.4, 0, 128) end
+      -- a kick thumps the furrows
+      if y < 64 and kk > 0.03 then K.dashes(4 * kk, y, 2 + k, 5 + k * 3, k * 13 + T * 0.4, 0, 128) end
     end
     local fog_top = HY - 2 - kl * 8
-    K.haze(0, math.floor(fog_top), 128, 64, 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw, 1, T * 2.5)
+    K.haze(0, math.floor(fog_top), 128, 64, 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw + 0.3 * mz + 0.15 * pd, 1, T * 2.5)
 
     -- the towers, far to near; the near one's warning light marks the bar
     tower(TW[3], 1.2, 0)
     tower(TW[2], 1.8, 0)
     tower(TW[1], 2.6, 0)
     put(2 + 7 * K.bar_pulse, TW[1].x, TW[1].y - 56, 1, 1)
+    -- a clap swells the moon's halo
+    if cl > 0.03 then
+      for dy = -6, 6 do
+        local hw = math.floor(math.sqrt(math.max(0.5, 42 - dy * dy)) + 0.5)
+        put(4 * cl, 54 + 1 - hw, 9 + dy, 2 * hw, 1)
+      end
+    end
+    -- a tick blinks a far tower's warning light
+    if tk > 0.03 then
+      local t = TW[hit.tk]
+      put(6 * tk, t.x - 2, t.y - 56 * t.s - 1, 5, 3)
+    end
+    -- a perc: a farm light in the dark, its voice the depth, its note the place
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local v = math.exp(-(K.NOW - p.t) / 0.35)
+      if v < 0.03 then table.remove(percs, i)
+      else
+        local x, y = 6 + p.n * 10, HY + 1 + p.v * 3
+        put(6 * v, x - 2, y, 5, 3); put(6 * v, x, y - 1, 1, 5)
+      end
+    end
 
     -- the wires: four spans' worth each, hung by the sag, humming
     local hum = (0.3 + 1.2 * lo) * math.sin(T * 31)
@@ -154,7 +208,7 @@ return function(K)
       return (2 + 4 * sag + 2.2 * dip) * near + sw * near + (i % 2 == 0 and 0.3 or 0)
     end
     for i = 1, 4 do
-      local wl = 1.6 + K.lane_kick[i] * 1.5 + e * 0.5 + hi * 1.3
+      local wl = (1.6 + K.lane_kick[i] * 1.5 + e * 0.5 + hi * 1.3) * (1 + 0.15 * A[K.AMP])
       -- in from the left, toward us (only its last stretch is on screen)
       local spans = SPANS[i]
       for si, sp in ipairs(spans) do
@@ -183,6 +237,27 @@ return function(K)
         if r > 0.25 and s > 0.3 then
           put(r * 3 * s, p[1] - 1, p[2] + 1, 3, 1)
         end
+      end
+    end
+    -- a hat snaps the insulators of one tower, a different tower each time
+    if hh > 0.03 then
+      local ti = (hit.hatn or 0) % 3 + 1
+      for i = 1, 4 do
+        local p = TIP[ti][i]
+        put(6 * hh, p[1] - 1, p[2], 3, 3)
+      end
+    end
+    -- a stab lights the near tower's insulators in a halo
+    local sb = fade("stab", 0.4)
+    if sb > 0.03 then
+      for i = 1, 4 do put(5 * sb, TIP[1][i][1] - 2, TIP[1][i][2] - 1, 5, 4) end
+    end
+    -- an arp note flares its wire's insulator, each on the next tower along
+    for i = 1, 4 do
+      local ar = math.exp(-(K.NOW - arps[i]) / 0.35)
+      if ar > 0.03 then
+        local q = TIP[acnt[i] % 3 + 1][i]            -- each note on the next tower along
+        put(6 * ar, q[1] - 3, q[2] - 2, 7, 7)
       end
     end
     -- the highs crackle round the near insulators

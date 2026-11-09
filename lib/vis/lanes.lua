@@ -20,7 +20,30 @@ return function(K)
   local hub, bs, lo = 0, 0, 0
   local seen = {false, false, false, false}
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, hn, percs = {}, 0, {}
+  local pdz = 0                           -- the pad, eased in
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.kick() mark("kick") end
+  function M.hat() mark("hat"); hn = hn + 1 end
+  function M.clap() mark("clap") end
+  function M.bass() mark("bass") end
+  function M.tick(kind) mark("tick"); hit.tk = (math.floor(K.num(kind, 1)) % 8) / 8 + 1 / 16 end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, ring = clamp(math.floor(K.num(voice, 1)), 1, 4),
+      a = (math.floor(K.num(note, 60)) % 12) / 12}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
+    hit, hn, percs, pdz = {}, 0, {}, 0
     ang = {0, 0, 0, 0}
     flash = {{}, {}, {}, {}}
     vk = {0, 0, 0, 0}
@@ -61,6 +84,10 @@ return function(K)
     lo = follow(lo, A[K.LO], 0.1, DT)
     local trail = 0.6 + K.throw * 2 + K.dub * 0.6       -- in steps
     local hi = A[K.HI]
+    pdz = follow(pdz, K.env.pad, 0.25, DT)
+    local kk, cl, hh, pd = fade("kick", 0.25), fade("clap", 0.3), fade("hat", 0.25), pdz
+    local bh = fade("bass", 0.35)
+    local mid = A[K.MID]
 
     -- the housing: corner brackets and a faint bench of haze under it
     local fr = 1.5 + K.bar_pulse * 1.5
@@ -68,7 +95,9 @@ return function(K)
       put(fr, math.min(c[1], c[1] + c[3] * 5), c[2], 6, 1)
       put(fr, c[1], math.min(c[2], c[2] + c[4] * 4), 1, 5)
     end
-    K.haze(0, 44, 128, 64, 0.1 + 0.25 * K.kickless + 0.12 * K.dub * K.throw, 1, T * 3)
+    K.haze(0, 44, 128, 64, 0.1 + 0.25 * K.kickless + 0.12 * K.dub * K.throw + 0.12 * mid, 1, T * 3)
+    -- the pad and the mids fill the air above the machine
+    if mid + pd + A[K.AMP] > 0.05 then K.haze(0, 4, 128, 44, 0.1 * mid + 0.15 * pd + 0.15 * A[K.AMP], 1, -T * 2) end
 
     local heads = {}
     for i = 1, 4 do
@@ -108,6 +137,12 @@ return function(K)
           local lv = (live and 2 + g * 2 or 1) + f * 8
           lv = lv + hi * (1 + i * 0.5) * math.max(0, math.sin(T * 4 + s * 1.7 + i))
           line(lv, x0, y0, x1, y1)
+          -- a landed note blooms round its tick
+          if f > 0.1 then
+            local bx, by = math.floor(x1 + 0.5), math.floor(y1 + 0.5)
+            put(4.5 * f, bx - 1, by - 1, 3, 3)
+            put(2.5 * f, bx - 2, by, 5, 1); put(2.5 * f, bx, by - 2, 1, 5)
+          end
         end
         -- the playhead, eased round the ring the short way
         local target = ((math.max(pos, 1) - 1) / len) % 1
@@ -130,7 +165,7 @@ return function(K)
     end
 
     -- the arms from the hub, and the line joining the heads
-    local rh = 3 + hub * 2.5 + lo * 2
+    local rh = 3 + hub * 2.5 + lo * 2 
     for k = 1, #heads do
       local h = heads[k]
       local dx, dy = h[1] - cx, h[2] - cy
@@ -164,11 +199,59 @@ return function(K)
     K.grain(function(u)
       return pt(grx, gry, u + grot, cx, cy)
     end, hi * 90, 9)
-    local rb = rh + 3 + bs * 3
+    -- a clap swells a halo round the hub
+    if cl > 0.03 then
+      local rr = rh + 2 + cl * 5
+      for k = 0, 23 do
+        local th = k / 24 * TAU
+        put(6 * cl, cx + math.cos(th) * rr * 1.5, cy + math.sin(th) * rr * 0.8, 1, 1)
+      end
+    end
+    -- the kick sends a ring of dots out from the hub
+    if kk > 0.03 then
+      local r = 1 + (1 - kk) * 26
+      for k = 0, 27 do
+        local th = k / 28 * TAU
+        put(4.5 * kk, cx + math.cos(th) * r * 1.5, cy + math.sin(th) * r * 0.75, 1, 1)
+      end
+    end
+    -- hats glint round the outer ring
+    if hh > 0.02 then
+      for k = 1, 14 do
+        local x, y = pt(grx, gry, K.hash(k, hn) + grot, cx, cy)
+        put(5 * hh, x, y, 1, 1)
+      end
+    end
+    -- a tick: a dim spoke from the hub out to the outer ring
+    local tf = fade("tick", 0.35)
+    if tf > 0 then
+      local x1, y1 = pt(grx + 3, gry + 2, hit.tk + grot, cx, cy)
+      line(3.5 * tf, cx, cy, x1, y1)
+    end
+    -- a perc: a small bead set on its voice's ring, turned by its note
+    for j = #percs, 1, -1 do
+      local p = percs[j]
+      local f = math.exp(-(NOW - p.t) / 0.6)
+      if f < 0.03 then table.remove(percs, j)
+      else
+        local rx, ry, rot = ring(p.ring)
+        local x, y = pt(rx, ry, p.a + rot, cx, cy)
+        x, y = math.floor(x + 0.5), math.floor(y + 0.5)
+        put(8 * f, x - 1, y - 1, 3, 3)
+        put(4 * f, x - 3, y, 7, 1); put(4 * f, x, y - 3, 1, 7)
+      end
+    end
+    local rb = rh + 3 + bs * 3 + bh * 3
+    if bh > 0.05 then
+      for k = 0, 23 do
+        local th = k / 24 * TAU - T * 0.3
+        put(4 * bh, cx + math.cos(th) * (rb + 4) * 1.4, cy + math.sin(th) * (rb + 4) * 0.8, 1, 1)
+      end
+    end
     local nb = 16
     for k = 0, nb - 1 do
       local th = k / nb * TAU + T * 0.4
-      put(1 + bs * 6, cx + math.cos(th) * rb * 1.4, cy + math.sin(th) * rb * 0.8, 1, 1)
+      put(1 + bs * 6 + bh * 3, cx + math.cos(th) * rb * 1.4, cy + math.sin(th) * rb * 0.8, 1, 1)
     end
   end
 

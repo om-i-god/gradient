@@ -35,12 +35,32 @@ engine = setmetatable({}, {__index = function(_, k)
     end
     if k == "tweak" and not TWEAKS[(...)] then error("engine.tweak: unknown key '" .. (...) .. "'", 2) end
     calls[k] = (calls[k] or 0) + 1
-    if k == "tweak" then TWV[(...)] = select(2, ...) end
+    if k == "tweak" then
+      TWV[(...)] = select(2, ...)
+      if TLOG then TLOG[#TLOG + 1] = {(...), select(2, ...), LOGKEY()} end
+    elseif k == "pad_type" and TLOG then TLOG[#TLOG + 1] = {"pad_type", (...), LOGKEY()}
+    elseif k == "arp" and TLOG then
+      local v = select(7, ...)
+      TLOG.arp_max = math.max(TLOG.arp_max or 0, v)
+    end
   end
 end})
+LOGKEY = function() return "?" end
 TWV = {}   -- last value sent per tweak key
 
-function include(p) return dofile(p .. ".lua") end
+-- VIS.event calls are counted by kind (evcalls) so the sim can pair them with engine calls
+evcalls = {}
+function include(p)
+  local m = dofile(p .. ".lua")
+  if p == "lib/visuals" and m.event then
+    local ev = m.event
+    m.event = function(kind, ...)
+      evcalls[kind] = (evcalls[kind] or 0) + 1
+      return ev(kind, ...)
+    end
+  end
+  return m
+end
 
 -- params ---------------------------------------------------------------
 local P = {order = {}, defs = {}}
@@ -69,7 +89,8 @@ function params:delta(id, n)
   if d.trig then return end
   params:set(id, math.max(d.lo, math.min(d.hi, d.v + n * (d.f and 0.01 or 1))))
 end
-function params:lookup_param(id) return {name = id} end
+local LP = {}
+function params:lookup_param(id) LP[id] = LP[id] or {name = id}; return LP[id] end
 function params:bang()
   for _, id in ipairs(P.order) do
     local d = P.defs[id]
@@ -285,6 +306,191 @@ do
   print("fills off/busy ok, busy fills in 64 bars:", n)
 end
 
+
+-- timbre: SOUND params, auto picks, fixed wins, seeds keep their drums
+do
+  local S = getS()
+  local TB = include("lib/timbre")
+  local CC = include("lib/conductor")
+  local want = {
+    bass_type  = {"auto", "sub", "reese", "rubber"},
+    chord_type = {"auto", "dub", "felt", "organ", "glass", "rhodes"},
+    hat_type   = {"auto", "noise", "metal", "dust"},
+    pad_type   = {"auto", "wash", "choir", "strings", "drone"},
+  }
+  for id, opts in pairs(want) do
+    local d = P.defs[id]
+    assert(d and d.v == 1, id .. " missing or not default auto")
+    assert(table.concat(d.opts, ",") == table.concat(opts, ","), id .. " options")
+  end
+  -- VOICE_NAMES: old psets map (soft stays 5), four new voices appended
+  local lo = P.defs.lane1_voice.opts
+  assert(#lo == 9 and lo[5] == "soft" and lo[9] == "marimba", "VOICE_NAMES")
+
+  local dump
+  dump = function(t)
+    if type(t) ~= "table" then return tostring(t) end
+    local ks, out = {}, {}
+    for k in pairs(t) do ks[#ks + 1] = k end
+    table.sort(ks, function(a, b) return tostring(a) < tostring(b) end)
+    for _, k in ipairs(ks) do out[#out + 1] = tostring(k) .. "=" .. dump(t[k]) end
+    return "{" .. table.concat(out, ";") .. "}"
+  end
+  local function drums()
+    CC.new_track(S, 4218)
+    return dump(S.pat.kick) .. dump(S.pat.clap)
+  end
+  local real = drums()
+  local roll = TB.roll
+  TB.roll = function() end
+  local stubbed = drums()
+  TB.roll = roll
+  assert(real == stubbed, "timbre changed the drum patterns of seed 4218")
+  -- and timbre itself draws nothing from math.random / math.randomseed
+  do
+    local r, rs, n = math.random, math.randomseed, 0
+    math.random = function(...) n = n + 1; return r(...) end
+    math.randomseed = function(...) n = n + 1; return rs(...) end
+    S.seed = 4218
+    TB.roll(S)
+    for _ = 1, 50 do TB.phrase(S) end
+    math.random, math.randomseed = r, rs
+    assert(n == 0, "timbre called math.random " .. n .. " times")
+  end
+  print("seed 4218: drums identical, timbre drew 0 from math.random")
+
+  -- 256 bars, everything on auto
+  CC.new_track(S, 4218)
+  for id in pairs(want) do params:set(id, 1) end   -- clears the send caches: first value is logged
+  TLOG = {}
+  LOGKEY = function() return tostring(S.seed) .. ":" .. ((S.track_bar - 1) // S.phrase_len) end
+  local lanes_seen, lanevar = {}, 0
+  for i = 1, 16 * 256 do
+    tick_all()
+    local t = S.timbre
+    if t then
+      for l = 1, 4 do
+        local v = t.lane[l] or 0
+        if not lanes_seen[v] then lanes_seen[v] = true; lanevar = lanevar + 1 end
+      end
+    end
+  end
+  local log = TLOG; TLOG = nil
+  local vals, last, perphrase = {}, {}, {}
+  for _, e in ipairs(log) do
+    local k, v, key = e[1], e[2], e[3]
+    local part = k:match("^(%w+)_type$")
+    if part then
+      vals[part] = vals[part] or {}
+      vals[part][v] = (vals[part][v] or 0) + 1
+      assert(v >= 1 and v <= (k == "chord_type" and 5 or k == "pad_type" and 4 or 3), k .. " out of range")
+      assert(k ~= "pad_type" or v ~= last[k], "pad_type resent unchanged")
+      if last[k] ~= nil and last[k] ~= v then
+        perphrase[k .. key] = (perphrase[k .. key] or 0) + 1
+        assert(perphrase[k .. key] <= 1, k .. " changed twice in a phrase (" .. key .. ")")
+      end
+      last[k] = v
+    end
+  end
+  local function nd(p) local n = 0; for _ in pairs(vals[p] or {}) do n = n + 1 end; return n end
+  local padchg = 0
+  for k, n in pairs(perphrase) do if k:find("^pad_type") then padchg = padchg + n end end
+  local nchg = 0; for _ in pairs(perphrase) do nchg = nchg + 1 end
+  print(string.format("auto picks over 256 bars: distinct bass %d chord %d hat %d pad %d; changes %d; distinct lane voices %d; pad changes %d; max arp voice %d",
+    nd("bass"), nd("chord"), nd("hat"), nd("pad"), nchg, lanevar, padchg, log.arp_max or 0))
+  assert(nd("bass") >= 2 and nd("chord") >= 2 and nd("hat") >= 2, "auto never varied")
+  assert(lanevar >= 2, "lane voices never varied")
+  assert((log.arp_max or 0) >= 5, "no arp voice >= 5 in 256 bars")
+
+  -- a fixed type wins
+  TLOG = {}
+  LOGKEY = function() return "fixed" end
+  params:set("bass_type", 3)
+  for i = 1, 16 * 40 do tick_all() end
+  local nb = 0
+  for _, e in ipairs(TLOG) do
+    if e[1] == "bass_type" then nb = nb + 1; assert(e[2] == 2, "fixed bass_type 3 sent " .. e[2]) end
+  end
+  assert(nb >= 1 and TWV.bass_type == 2, "fixed bass type never sent")
+  params:set("bass_type", 1)
+  TLOG = nil
+  print("timbre ok")
+end
+
+-- meter: every meter x feel runs 64 bars; a bar is beats*4 steps; a change
+-- lands once, on the phrase boundary; stopped changes land at once
+do
+  local S = getS()
+  local MTm = include("lib/meter")
+  local function playing() return S.playing end
+  local function stop_play() if S.playing then key(2, 1); key(3, 1); key(3, 0); key(2, 0) end end
+  local function start_play() if not S.playing then key(2, 1); key(3, 1); key(3, 0); key(2, 0) end end
+  -- run until n bars have started; returns the list of {track_bar, beats, steps in the previous bar}
+  local function run_bars(n)
+    local out, lastb, lasts = {}, S.track_bar, S.step
+    local guard = 0
+    while #out < n do
+      tick_all(); guard = guard + 1
+      assert(guard < n * 28 * 4 + 400, "meter sim stalled")
+      if S.track_bar ~= lastb then
+        out[#out + 1] = {bar = S.track_bar, beats = S.bar.beats, prev = S.step - lasts, sstep = S.bar_step}
+        for _, k in ipairs({"kick", "clap", "hats", "shaker", "rim", "toms", "ride", "ticks", "stabs"}) do
+          assert(#S.pat[k] == S.bar.n, string.format("bar %d: %s has %d steps in %d/4", S.track_bar, k, #S.pat[k], S.bar.beats))
+        end
+        for _, l in ipairs(S.pat.bass_lines) do assert(#l == S.bar.n, "bass line not bar-length") end
+        lastb, lasts = S.track_bar, S.step
+      end
+    end
+    return out
+  end
+  params:set("play_mode", 1)
+  params:set("phrase_len", 1)               -- 8 bars
+  stop_play()
+  assert(not S.playing)
+  for mi = 1, #MTm.METERS do
+    for fi = 1, #MTm.FEELS do
+      params:set("meter", mi); params:set("feel", fi)
+      local beats = MTm.METERS[mi]
+      assert(S.bar.beats == beats and S.bar.n == beats * 4, "stopped meter change not immediate")
+      start_play()
+      local bars = run_bars(64)
+      for i = 2, #bars do
+        assert(bars[i].prev == beats * 4,
+          string.format("%d/4 %s: bar %d was %d steps", beats, MTm.FEELS[fi], bars[i].bar, bars[i].prev))
+        assert(bars[i].beats == beats, "bar descriptor drifted")
+      end
+      stop_play()
+    end
+  end
+  print("meters x feels: 64 bars each, bar = beats*4 steps")
+
+  -- three sets mid-phrase: one change, at the next boundary, to the last value
+  params:set("meter", 1); params:set("feel", 1)
+  start_play()
+  run_bars(3)
+  while (S.track_bar % 8) ~= 3 do run_bars(1) end
+  params:set("meter", 2); params:set("meter", 4); params:set("meter", 3)
+  assert(S.bar.beats == 4 and S.meter_pending and S.meter_pending.beats == 5, "pending not held")
+  local bars = run_bars(14)
+  local changes, prev = 0, 4
+  for i, b in ipairs(bars) do
+    if b.beats ~= prev then
+      changes = changes + 1
+      assert(b.beats == 5, "went to " .. b.beats)
+      assert(b.bar % 8 == 1, "meter changed mid-phrase at bar " .. b.bar)
+      prev = b.beats
+    end
+    if i > 1 then assert(bars[i].prev == bars[i - 1].beats * 4, "bar cut or doubled at " .. b.bar) end
+  end
+  assert(changes == 1, "meter changed " .. changes .. " times")
+  stop_play()
+  params:set("meter", 1); params:set("feel", 1)
+  params:set("phrase_len", 3)
+  params:set("play_mode", PMODE)
+  start_play()
+  print("meter change: pending until the phrase boundary, one change")
+end
+
 -- poke the performance controls mid-run
 enc(1, 10); enc(2, 5); enc(3, -5)
 key(2, 1); key(2, 0)  -- drop
@@ -419,6 +625,102 @@ table.sort(ls)
 print(string.format("harmony: %d bars changed, avg %.1f semitones moved, max %d;  %s",
   changes, changes > 0 and moves / changes or 0, max_leap, table.concat(ls, " ")))
 
+-- 5/4 A: beat ghosts and bar-relative glitch fills
+do
+  local S = getS()
+  S.mute, S.solo = {}, {}
+  params:set("fills", 2)
+  params:set("glitch_amt", 3)
+  params:set("meter", 3); params:set("feel", 2)
+  for i = 1, 20 * 64 * 2 do
+    if S.bar.beats == 5 and S.bar_step == 1 then break end
+    tick_all()
+  end
+  assert(S.bar.beats == 5 and S.bar.feel == "short-long", "5/4 A never took effect")
+  local n = S.bar.n
+  local kicks, gls = {}, {}
+  local ek, eg = engine.kick, engine.glitch
+  engine.kick = function(...)
+    kicks[#kicks + 1] = {S.bar_step, (...), S.on_kick, S.kickless}
+    return ek(...)
+  end
+  engine.glitch = function(...)
+    gls[#gls + 1] = {S.bar_step, S.fill}
+    return eg(...)
+  end
+  local kl_bars = 0
+  key(2, 1); key(2, 0)   -- K2 tap: drop the kick for a stretch
+  for i = 1, 20 * 128 do
+    S.roll_ghost = false; S.on_ghost = false   -- isolate the beat ghosts
+    tick_all()
+    if S.bar_step == 2 and S.kickless then kl_bars = kl_bars + 1 end
+  end
+  engine.kick, engine.glitch = ek, eg
+  local full, soft = 0, 0
+  for _, k in ipairs(kicks) do
+    assert(k[3] and not k[4], "kick or ghost in a kickless/off bar")
+    if S.bar.starts[(k[1] - 1) // 4 + 1] then
+      assert(math.abs(k[2] - 0.9) < 1e-9, "group start not full velocity: " .. k[2])
+      full = full + 1
+    else
+      assert(math.abs(k[2] - 0.9 * 0.35) < 1e-9, "beat ghost velocity: " .. k[2] .. " at step " .. k[1] .. " n=" .. n)
+      assert((k[1] - 1) % 4 == 0, "beat ghost off the beat at step " .. k[1])
+      soft = soft + 1
+    end
+  end
+  assert(kl_bars > 0, "no kickless bars to check")
+  assert(full > 0 and soft > 0, "no kicks / beat ghosts in 5/4 A")
+  local fillg = 0
+  for _, g in ipairs(gls) do
+    if g[2] == "stutter" or g[2] == "tapestop" or g[2] == "reverse" then
+      assert(g[1] >= n - 3, "glitch fill early at step " .. g[1])
+      fillg = fillg + 1
+    end
+  end
+  assert(fillg > 0, "no glitch fills in 128 bars of 5/4")
+  print(string.format("5/4 A: %d full kicks, %d beat ghosts, %d glitch-fill hits, %d kickless bars",
+    full, soft, fillg, kl_bars))
+  params:set("fills", 1)
+  params:set("meter", 1); params:set("feel", 1)
+end
+
+-- 7/4: the swell fires at step n-11 and the dip reaches full at step n-4
+do
+  local S = getS()
+  S.mute, S.solo = {}, {}
+  params:set("fills", 2)
+  params:set("meter", 4); params:set("feel", 1)
+  for i = 1, 28 * 64 * 2 do
+    if S.bar.beats == 7 and S.bar_step == 1 then break end
+    tick_all()
+  end
+  assert(S.bar.beats == 7, "7/4 never took effect")
+  local n = S.bar.n
+  local swells, dips = {}, {}
+  local es, et = engine.swell, engine.tweak
+  engine.swell = function(...) swells[#swells + 1] = S.bar_step; return es(...) end
+  engine.tweak = function(k, v)
+    if k == "pump_lpf" and S.fill == "dip" then dips[S.bar_step] = v end
+    return et(k, v)
+  end
+  for i = 1, 28 * 2048 do
+    tick_all()
+    if #swells > 0 and dips[n - 4] and dips[n - 5] then break end
+  end
+  engine.swell, engine.tweak = es, et
+  assert(#swells > 0, "no swell fills in 2048 bars of 7/4")
+  for _, st in ipairs(swells) do assert(st == n - 11, "swell at step " .. st .. ", want " .. (n - 11)) end
+  assert(dips[n - 4] and math.abs(dips[n - 4] - 20000 * 0.025) < 1e-6, "dip not full at step n-4")
+  assert(dips[n - 5] and dips[n - 5] > dips[n - 4], "dip already full before step n-4")
+  print(string.format("7/4: %d swells all at step %d; dip full at step %d", #swells, n - 11, n - 4))
+  params:set("fills", 1)
+  params:set("meter", 1); params:set("feel", 1)
+end
+
+assert((calls.wash_chord or 0) > 0, "no wash chords")
+assert((evcalls.pad or 0) == calls.wash_chord,
+  string.format("pad events (%d) must match engine.wash_chord calls (%d)", evcalls.pad or 0, calls.wash_chord))
+print(string.format("pad events %d == wash_chord calls %d", evcalls.pad, calls.wash_chord))
 assert((calls.bass_glide or 0) > 0, "no bass glides")
 assert((calls.tom or 0) > 0, "no toms")
 local keys = {}

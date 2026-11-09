@@ -78,7 +78,7 @@ return function(K)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
     bi = bi % #buoys + 1
     local b = buoys[bi]
-    b.t, b.lane, b.x = K.NOW, lane, clamp(K.px(note) * 0.6 + 4, 4, 74)
+    b.t, b.lane, b.x = K.NOW, lane, clamp(K.px(K.num(note, 72)) * 0.6 + 4, 4, 74)
     b.n = clamp((K.num(note, 72) - 48) / 48, 0, 1)
   end
   function M.pad(notes)

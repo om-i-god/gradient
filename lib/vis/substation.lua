@@ -22,8 +22,10 @@ return function(K)
   local STR = {14, 30, 46, 62, 78, 94}   -- insulator string x on the gantry
   local FY0, FY1 = 53, 61                -- fence top / bottom rail
 
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function fade(t, tau)
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
   end
 
@@ -44,6 +46,25 @@ return function(K)
   -- hits pile up and drain: each one adds, so it shows whenever it lands
   local acc = {tick = 0, bass = 0, arp = 0, hat = 0, perc = 0}
   local function add(k) acc[k] = math.min(2, acc[k] + 0.3) end
+
+  -- a bar w wide whose left edge sits at a fractional x: the end pixels share the level
+  local function sbar(l, x, y, w)
+    local ix = math.floor(x)
+    local fx = x - ix
+    if fx == 0 then put(l, ix, y, w, 1); return end
+    if w > 1 then put(l, ix + 1, y, w - 1, 1) end
+    put(l * (1 - fx), ix, y, 1, 1)
+    put(l * fx, ix + w, y, 1, 1)
+  end
+  -- K.dashes with each whole dash placed on the sub-pixel (the clipped ones at the ends stay whole)
+  local function sdash(l, y, w, gap, off, x0, x1)
+    for x = x0 + (off % gap) - gap, x1 - 1, gap do
+      local a, b = math.max(x0, x), math.min(x1, x + w)
+      if b > a then
+        if a == x and b == x + w then sbar(l, x, y, w) else put(l, a, y, b - a, 1) end
+      end
+    end
+  end
 
   function M.init()
     kick_t, pump_t, bass_t, hat_t = -99, -99, -99, -99
@@ -148,6 +169,11 @@ return function(K)
   function M.draw(S)
     local T, DT = K.T, K.DT
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.4 end      -- eased above 1: the lit bound is tight here
+    local fp = fine and K.playing                   -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, pf, bt = fade(kick_t, 0.25), fade(pump_t, 0.3), fade(bass_t, 0.3)
     local hf = fade(hat_t, 0.12)
@@ -156,14 +182,14 @@ return function(K)
 
     -- the sky: faint sodium haze low over the yard, thicker with the pad
     for y = 6, GY - 6, 6 do
-      local v = 0.3 + (y / GY) * (0.6 + 1.2 * amp)
-      if v > 0.9 then K.dashes(math.min(2, v), y, 3, 10, y * 3 + T * 5, 0, 128) end
+      local v = 0.3 + (y / GY) * (0.6 + (fine and 1.5 or 1.2) * amp)
+      if v > 0.9 then K.dashes(math.min(fine and 2.4 or 2, v), y, 3, 10, y * 3 + T * 5, 0, 128) end
     end
     K.haze(0, 26, 128, GY, 0.12 + pdz * 0.4, 1.2 + 1.2 * pdz, T * 3)
     for i = 1, #pad_notes do
       local x = K.px(pad_notes[i])
-      put(3 + 3 * pdz, x - 1, 40, 3, 1)
-      put(2.5 * pdz, x - 5, 41, 11, 1)
+      put(3 + (fine and 3.6 or 3) * pdz, x - 1, 40, 3, 1)
+      put(2.5 * pdz * (fine and 1.15 or 1), x - 5, 41, 11, 1)
     end
 
     -- ground and the gravel line
@@ -172,7 +198,7 @@ return function(K)
     -- the gantry bar, wires swaying with the pump, strings hanging off it
     local sag = 1 + 5 * pf
     line(math.min(11, 2 + mid * 1.5 + 4 * pf + 4 * acc.arp), 2, GANT, 108, GANT)
-    if pf > 0.05 then line(3 * pf, 2, GANT - 2, 108, GANT - 2); line(2.5 * pf, 2, GANT + 1, 108, GANT + 1) end
+    if pf > 0.05 then line(E(3 * pf), 2, GANT - 2, 108, GANT - 2); line(E(2.5 * pf), 2, GANT + 1, 108, GANT + 1) end
     line(1.4, 4, GANT, 4, GY); line(1.4, 106, GANT, 106, GY)
     for i = 1, #STR do
       local x = STR[i]
@@ -180,13 +206,14 @@ return function(K)
       local f = fade(s.t, 0.4)
       for d = 1, 5 do
         local lit = f > 0 and d <= s.n
-        put(lit and (3.5 + 3.5 * f) or 2.5, x - 1, GANT + 1 + d * 2, 3, 1)
+        put(lit and (3.5 + (fine and 4.5 or 3.5) * f) or (fine and 1.6 + (d % 2) * 0.9 or 2.5), x - 1, GANT + 1 + d * 2, 3, 1)
       end
       line(1.5, x, GANT, x, GANT + 1)
       if f > 0 then
-        put(4 * f, x - 3, GANT + 3 + s.n * 2, 7, 1)
-        put(2.5 * f, x - 6, GANT + 4 + s.n * 2, 13, 1)
-        put(2.5 * f, x, GANT + 1, 1, 11)
+        put(E(4 * f), x - 3, GANT + 3 + s.n * 2, 7, 1)
+        put(E(2.5 * f), x - 6, GANT + 4 + s.n * 2, 13, 1)
+        put(E(2.5 * f), x, GANT + 1, 1, 11)
+        if fine then put(E(3 * f), x - 2, GANT + 1 + s.n * 2, 5, 1) end
       end
     end
     -- conductors from the string feet down to the bushing tops (sagging)
@@ -203,11 +230,12 @@ return function(K)
     -- the transformers: tank outline, radiator fins, bushings, warm core
     for t = 1, 3 do
       local x0, w = TANK[t][1], TANK[t][2]
-      line(2 + 3 * kk + bt, x0, TY0, x0 + w, TY0)
-      line(2 + 3 * kk + bt, x0, TY0, x0, GY)
-      line(2 + 3 * kk + bt, x0 + w, TY0, x0 + w, GY)
+      local tk = 2 + (fine and 4.2 or 3) * kk + bt
+      line(tk, x0, TY0, x0 + w, TY0)
+      line(fine and tk + 0.6 or tk, x0, TY0, x0, GY)             -- fine: lit from the left
+      line(fine and tk - 0.5 or tk, x0 + w, TY0, x0 + w, GY)
       line(1.5, x0 - 2, TY0 + 4, x0 + w + 2, TY0 + 4)
-      for fx = x0 + 3, x0 + w - 2, 5 do line(1 + 3 * acc.tick, fx, TY0 + 5, fx, GY - 1) end
+      for fx = x0 + 3, x0 + w - 2, 5 do line(1 + (fine and 4 or 3) * acc.tick + (fine and (fx - x0) % 10 == 3 and 0.5 or 0), fx, TY0 + 5, fx, GY - 1) end
       if bt > 0.04 then
         for y = TY0 + 6, GY - 2, 3 do put(6 * bt, x0 + 1, y, w - 1, 1) end
         put(4 * bt, x0 - 3, GY - 1, w + 7, 1); put(3 * bt, x0 - 5, GY, w + 11, 1)
@@ -216,7 +244,7 @@ return function(K)
         local bx, by = bush(t, k)
         line(2.2, bx, by, bx, TY0)
         for y = by + 1, TY0 - 1, 2 do put(3, bx - 1, y, 3, 1) end
-        put(3 + 2 * kk, bx - 1, by - 1, 3, 1)
+        put(3 + (fine and 3.2 or 2) * kk, bx - 1, by - 1, 3, 1)
       end
       -- the hum: heat shimmer over the tank
       local hum = 0.12 + lo
@@ -237,37 +265,48 @@ return function(K)
       local wx = cx + 2 + ((i - 1) % 3) * 6
       local wy = cy + 3 + ((i - 1) // 3) * 6
       local f = fade(win[i], 0.5)
-      local l = 1.2 + mid * 1.8 + 7 * f
+      local l = 1.2 + mid * (fine and 2.2 or 1.8) + (fine and 8 or 7) * f
       put(l, wx, wy, 4, 3)
       if f > 0 then
-        put(3 * f, wx - 1, wy + 3, 6, 1)
-        put(2 * f, wx - 2, wy - 1, 8, 1)
+        put(E(3 * f), wx - 1, wy + 3, 6, 1)
+        put(E(2 * f), wx - 2, wy - 1, 8, 1)
       end
     end
 
     -- the fence: rails, posts, mesh, barbed top
-    line(1.8 + 3 * acc.perc, 0, FY0, 127, FY0); line(1.4, 0, FY1, 127, FY1)
-    for x = 2, 127, 16 do line(1.8, x, FY0 - 2, x, FY1) end
+    line(1.8 + (fine and 4 or 3) * acc.perc, 0, FY0, 127, FY0); line(1.4 + (fine and hi * 1.2 or 0), 0, FY1, 127, FY1)
+    for x = 2, 127, 16 do line(1.8 + (fine and hi * 1.0 or 0), x, FY0 - 2, x, FY1) end
     for x = 0, 127, 10 do line(0.7, x, FY0 + 1, x + 8, FY1 - 1) end
-    K.dashes(1.4 + 3 * acc.hat, FY0 - 2, 1, 3, T * 2, 0, 128)
+    if fine then sdash(1.4 + 4 * acc.hat + 1.6 * hi, FY0 - 2, 1, 3, T * 2, 0, 128)
+    else K.dashes(1.4 + 3 * acc.hat, FY0 - 2, 1, 3, T * 2, 0, 128) end
     -- floodlight heads on the posts glow with the pad
     if pdz > 0.05 then
       for x = 14, 127, 24 do
-        put(2 + 4 * pdz, x - 1, FY0 - 4, 3, 1)
-        put(1.6 * pdz, x - 4, FY0 - 3, 9, 1)
+        put(2 + (fine and 4.8 or 4) * pdz, x - 1, FY0 - 4, 3, 1)
+        put((fine and 2.2 or 1.6) * pdz, x - 4, FY0 - 3, 9, 1)
       end
     end
     if hf > 0 then
-      put(7 * hf, hat_x - 1, FY0 - 3, 3, 1)
-      put(4 * hf, hat_x - 6, FY0 - 2, 13, 1)
-      put(2.5 * hf, hat_x - 10, FY0 - 1, 21, 1)
+      put(E(7 * hf * (fine and 1.2 or 1)), hat_x - 1, FY0 - 3, 3, 1)
+      put(E(4 * hf * (fine and 1.2 or 1)), hat_x - 6, FY0 - 2, 13, 1)
+      put(E(2.5 * hf), hat_x - 10, FY0 - 1, 21, 1)
+      if fine then put(E(3 * hf), hat_x - 1, FY0 - 6, 3, 3) end
     end
     K.grain(function(u, v) return u * 127, FY0 + v * 8 end, hi * 90, 7)
     if hi > 0.04 then
       K.dashes(hi * 4, FY0 + 2, 1, 9, T * 9, 0, 128); K.dashes(hi * 3, FY1 + 1, 2, 11, T * 5, 0, 128)
     end
     if pf > 0.05 then
-      for y = FY0 + 1, FY1, 4 do put(4.5 * pf, 0, y, 128, 1) end
+      for y = FY0 + 1, FY1, 4 do put(E(4.5 * pf), 0, y, 128, 1) end
+    end
+
+    -- dense: moths circle the floodlights, and the control room's beacon blinks
+    if dense and fp then
+      for x = 14, 127, 24 do
+        local ph = T * 2.6 + x
+        K.put_sub(1.8, x + math.cos(ph) * 4, FY0 - 4 + math.sin(ph) * 2, 1, 1)
+      end
+      if math.floor(T * 0.8) % 2 == 0 then put(4, cx + 9, cy - 5, 1, 2) end
     end
 
     -- sparks off the radiators
@@ -275,6 +314,7 @@ return function(K)
       local s = sparks[i]
       local f = fade(s.t, 0.25)
       if f > 0 then
+        if fine then f = f * 1.15 end
         put(8 * f, s.x, s.y, 1, 1)
         put(6 * f, s.x - 3, s.y, 7, 1)
         put(6 * f, s.x, s.y - 3, 1, 7)
@@ -293,7 +333,7 @@ return function(K)
       local a = arcs[i]
       local f = fade(a.t, 0.16)
       if f > 0 then
-        bolt(2.5 + 2.5 * f, a, f)
+        bolt(2.5 + (fine and 3.2 or 2.5) * f, a, f)
         local mx, my = (a.x0 + a.x1) / 2, math.min(a.y0, a.y1)
         put(3 * f, mx - 12, my - 2, 25, 1)
         put(2.4 * f, mx - 18, my, 37, 1)
@@ -303,8 +343,8 @@ return function(K)
     end
     -- the kick's thin pulse along the ground
     if kk > 0.04 then
-      put(3 * kk, 0, GY + 1, 128, 1)
-      put(2 * kk, 20, GY - 1, 88, 1)
+      put(E((fine and 3.6 or 3) * kk), 0, GY + 1, 128, 1)
+      put(E(2 * kk), 20, GY - 1, 88, 1)
     end
   end
 

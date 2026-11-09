@@ -36,9 +36,30 @@ return function(K)
   local function add(k) acc[k] = math.min(2, acc[k] + 0.3) end
   local ang = 0.3
 
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function fade(t, tau)
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
+  end
+
+  -- a bar w wide whose left edge sits at a fractional x: the end pixels share the level
+  local function sbar(l, x, y, w)
+    local ix = math.floor(x)
+    local fx = x - ix
+    if fx == 0 then put(l, ix, y, w, 1); return end
+    if w > 1 then put(l, ix + 1, y, w - 1, 1) end
+    put(l * (1 - fx), ix, y, 1, 1)
+    put(l * fx, ix + w, y, 1, 1)
+  end
+  -- K.dashes with each whole dash placed on the sub-pixel (the clipped ones at the ends stay whole)
+  local function sdash(l, y, w, gap, off, x0, x1)
+    for x = x0 + (off % gap) - gap, x1 - 1, gap do
+      local a, b = math.max(x0, x), math.min(x1, x + w)
+      if b > a then
+        if a == x and b == x + w then sbar(l, x, y, w) else put(l, a, y, b - a, 1) end
+      end
+    end
   end
 
   function M.init()
@@ -98,6 +119,11 @@ return function(K)
   function M.draw(S)
     local T, DT, NOW, e = K.T, K.DT, K.NOW, K.energy
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.2 end      -- barely above 1: the frame-change bound is tight here
+    local fp = fine and K.playing                   -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     ang = (ang + DT * (0.5 + 1.6 * clamp(e, 0, 1)) * (1 - 0.5 * K.kickless)) % K.TAU
     local kk, pf, cf = fade(kick_t, 0.3), fade(pump_t, 0.3), fade(clap_t, 0.3)
@@ -110,6 +136,12 @@ return function(K)
     for i = 1, 9 do
       if K.hash(i, 11) > 0.3 then
         put(1 + 1.2 * math.sin(T * 0.4 + i * 2.3) ^ 2, K.hash(i, 5) * 80, 1 + K.hash(i, 6) * 12, 1, 1)
+      end
+    end
+    -- dense: a second rank of fainter stars
+    if dense then
+      for i = 10, 20 do
+        put(0.7 + (fp and 0.9 * math.sin(T * 0.3 + i * 2.9) ^ 2 or 0.45), K.hash(i, 5) * 80, 1 + K.hash(i, 6) * 14, 1, 1)
       end
     end
 
@@ -128,9 +160,16 @@ return function(K)
         line(l, LX - 3, LY, tx, ty)
       end
       -- haze on the beam: dither in the cone
-      K.dashes(bl * 0.5, LY + 3, 2, 4, T * 6, tx + 20, LX - 4)
-      K.dashes(bl * 0.4, LY + 6, 2, 5, -T * 5, tx + 10, LX - 6)
-      K.dashes(bl * 0.4 + mid, LY + 9, 2, 5, T * 4, tx, LX - 10)
+      if fine then
+        -- the light runs outward along the beam, gliding on the sub-pixel
+        sdash(bl * 0.55, LY + 3, 2, 4, -T * 6, tx + 20, LX - 4)
+        sdash(bl * 0.45, LY + 6, 2, 5, -T * 5, tx + 10, LX - 6)
+        sdash(bl * 0.45 + mid, LY + 9, 2, 5, -T * 4, tx, LX - 10)
+      else
+        K.dashes(bl * 0.5, LY + 3, 2, 4, T * 6, tx + 20, LX - 4)
+        K.dashes(bl * 0.4, LY + 6, 2, 5, -T * 5, tx + 10, LX - 6)
+        K.dashes(bl * 0.4 + mid, LY + 9, 2, 5, T * 4, tx, LX - 10)
+      end
       put(bl * 0.6, tx - 1, LY + 4, 2, 2)
     else
       -- the beam swings away behind the headland: a short stub into the sky
@@ -148,59 +187,73 @@ return function(K)
     local prev
     for x = 66, 127, 3 do
       local yy = 45 - 7 * math.exp(-((x - 100) / 20) ^ 2) - 2 * K.hash(x, 2)
-      if prev then line(2 + 4 * ak, x - 3, prev, x, yy) end
+      if prev then line(2 + (fine and 5 or 4) * ak + (fine and 1.8 * lo or 0), x - 3, prev, x, yy) end
       prev = yy
     end
     for y = 46, 56, 2 do
       local x0 = 70 + (y - 46) * 2.5
-      K.dashes(1 + (y % 4 == 0 and 0.6 or 0) + 4 * at, y, 3, 5, y * 7, x0, 128)
+      K.dashes(1 + (y % 4 == 0 and 0.6 or 0) + (fine and 5 or 4) * at, y, 3, 5, y * 7, x0, 128)
     end
     -- the tower: tapered, banded
-    line(2, LX - 3, 24, LX - 5, 44); line(2, LX + 3, 24, LX + 5, 44)
+    line(2 + (fine and 0.9 * hi or 0), LX - 3, 24, LX - 5, 44); line(2 + (fine and 0.9 * hi or 0), LX + 3, 24, LX + 5, 44)
     for y = 28, 42, 5 do
       local hw = 3 + (y - 24) / 20 * 2
-      line(1.2 + 6 * as, LX - hw, y, LX + hw, y)
+      line(1.2 + (fine and 7 or 6) * as, LX - hw, y, LX + hw, y)
     end
     line(1.4, LX - 5, 44, LX + 5, 44)
+    -- dense: the tower's plaster, a fine dither between the bands
+    if dense then
+      for y = 26, 42, 5 do
+        local hw = 3 + (y - 24) / 20 * 2
+        K.dashes(0.7, y + 2, 1, 3, y, LX - hw + 1, LX + hw)
+      end
+    end
     -- the gallery and the lantern
     line(2.2, LX - 6, 24, LX + 6, 24)
     line(1.5, LX - 6, 24, LX - 6, 22); line(1.5, LX + 6, 24, LX + 6, 22)
     line(1.5, LX - 3, 20, LX + 3, 20); line(1.5, LX - 3, 20, LX - 3, 22); line(1.5, LX + 3, 20, LX + 3, 22)
     line(1.8, LX - 4, 20, LX, 15); line(1.8, LX + 4, 20, LX, 15)
-    local lamp = 3 + 2 * amp + 2.5 * pf + 1.5 * kk
+    local lamp = 3 + (fine and 2.4 or 2) * amp + (fine and 3 or 2.5) * pf + (fine and 2 or 1.5) * kk
     if kk > 0.05 then
       for q = 0, 7 do
         local a = q * 0.785 + 0.2
-        line(3.2 * kk, LX + math.cos(a) * 5, LY + 1 + math.sin(a) * 5, LX + math.cos(a) * (9 + 4 * kk), LY + 1 + math.sin(a) * (9 + 4 * kk))
+        line(3.2 * kk * (fine and 1.25 or 1), LX + math.cos(a) * 5, LY + 1 + math.sin(a) * 5, LX + math.cos(a) * (9 + 4 * kk), LY + 1 + math.sin(a) * (9 + 4 * kk))
       end
-      line(2.2 * kk, 0, HZ + 1, 76, HZ + 1)
+      line(E((fine and 3 or 2.2) * kk), 0, HZ + 1, 76, HZ + 1)
     end
     if pf > 0.05 then
-      for y = 8, 26, 2 do K.dashes(3 * pf, y, 2, 3, y * 3, LX - 14, LX + 14) end
+      for y = 8, 26, 2 do K.dashes((fine and 3.8 or 3) * pf, y, 2, 3, y * 3, LX - 14, LX + 14) end
     end
     put(lamp, LX - 1, LY + 1, 3, 2)
+    -- fine: a ring of faint glow dots round the lamp, lifted by the level and the pump
+    if fine then
+      for q = 0, 7 do
+        local a = q * 0.785 + 0.39
+        put(0.7 + 1.5 * amp + 1.4 * pf, LX + math.floor(math.cos(a) * 7 + 0.5), LY + 1 + math.floor(math.sin(a) * 7 + 0.5), 1, 1)
+      end
+    end
     for i = 1, 4 do
       local wy = 27 + (i - 1) * 4
       local h = win[i] * sf
       put(1.3, LX - 1, wy, 3, 1)
-      if h > 0.05 then put(2.5 + 4.5 * sf, LX - 1, wy, math.max(1, math.floor(h * 3 + 0.5)), 1) end
+      if h > 0.05 then put(2.5 + (fine and 5.5 or 4.5) * sf, LX - 1, wy, math.max(1, math.floor(h * 3 + 0.5)), 1) end
     end
     if sf > 0.05 then
-      line(3 * sf, LX - 6, 25, LX - 6, 44); line(3 * sf, LX + 6, 25, LX + 6, 44)
-      for i = 1, 4 do put(3.5 * sf * win[i], LX - 12, 25 + i * 4, 24, 1) end
+      line(E((fine and 3.6 or 3) * sf), LX - 6, 25, LX - 6, 44); line(E((fine and 3.6 or 3) * sf), LX + 6, 25, LX + 6, 44)
+      for i = 1, 4 do put(E(3.5 * sf * win[i] * (fine and 1.2 or 1)), LX - 12, 25 + i * 4, 24, 1) end
     end
     -- the cottage at the foot, windows for perc
     line(1.4, 82, 45, 82, 40); line(1.4, 92, 45, 92, 40); line(1.4, 82, 40, 87, 37); line(1.4, 92, 40, 87, 37)
     for i = 1, 3 do
       local f = fade(cot[i], 0.4)
-      if f > 0 then put(1.5 + 5.5 * f, 83 + i * 2 - 1, 41, 1, 2) end
+      if f > 0 then put(1.5 + (fine and 7.2 or 5.5) * f, 83 + i * 2 - 1, 41, 1, 2) end
       if f > 0.1 then
-        put(2.5 * f, 78, 43, 22, 1); put(2 * f, 74, 44, 28, 1); put(1.5 * f, 70, 45, 36, 1)
-        line(4 * f, 83 + i * 2, 38, 83 + i * 2 - 4, 30 - i * 3)
+        put(E(2.5 * f), 78, 43, 22, 1); put(E(2 * f), 74, 44, 28, 1); put(E(1.5 * f), 70, 45, 36, 1)
+        line(E(4 * f), 83 + i * 2, 38, 83 + i * 2 - 4, 30 - i * 3)
       end
     end
     -- the signal line along the horizon, thrown by the clap
-    if cf > 0.05 then line(4 * cf, 0, HZ, 76, HZ); put(2 * cf, 0, HZ + 1, 76, 1) end
+    if cf > 0.05 then line(4 * cf, 0, HZ, 76, HZ); put(2 * cf, 0, HZ + 1, 76, 1); if fine then put(2.4 * cf, 0, HZ - 1, 76, 1) end end
     line(1.2, 0, HZ, 76, HZ)
 
     -- sparks off the rocks
@@ -208,7 +261,7 @@ return function(K)
       local sp = sparks[i]
       local a = NOW - sp.t
       if a < 0.4 then
-        local l = 7 * (1 - a / 0.4)
+        local l = E(7 * (1 - a / 0.4) * (fine and 1.2 or 1))
         put(l, sp.x - a * 8, sp.y - a * 14, 1, 1)
         put(l * 0.7, sp.x + a * 9, sp.y - a * 10, 1, 1)
         line(l * 0.7, sp.x, sp.y, sp.x - a * 16, sp.y - a * 22)
@@ -228,7 +281,7 @@ return function(K)
         local pre
         for x = 0, 128, 4 do
           local yy = y + math.sin(x * 0.06 + T * (0.8 + k * 0.1) + k * 0.4) * amy
-          if pre then line(1 + (k % 3) * 0.4 + 0.3 * k * 0.2 + hi * 1.5, x - 4, pre, x, yy) end
+          if pre then line((fine and (1 + (k % 3) * 0.4 + 0.06 * k) * (k < 2 and 0.8 or 1) or 1 + (k % 3) * 0.4 + 0.3 * k * 0.2) + hi * 1.5, x - 4, pre, x, yy) end
           pre = yy
         end
       end
@@ -242,15 +295,15 @@ return function(K)
     -- the bass: a long swell crest rolling in
     if bf > 0.05 then
       local u = 1 - bf
-      line(5.5 * bf, bass_x - 10, 48 + u * 12, bass_x + 22, 48 + u * 12)
+      line(E((fine and 6 or 5.5) * bf), bass_x - 10, 48 + u * 12, bass_x + 22, 48 + u * 12)
       line(3 * bf, bass_x - 18, 49 + u * 12, bass_x + 30, 49 + u * 12)
     end
     -- hats glint on the wave tops
     local hf = fade(hat_t, 0.2)
     if hf > 0.05 then
       for q = 0, 5 do
-        put(6 * hf, hat_x + q * 11 % 60, HZ + 4 + q * 3, 3, 1)
-        put(4 * hf, hat_x + q * 7 % 50 + 4, HZ + 5 + q * 3, 2, 1)
+        put(E(6 * hf * (fine and 1.4 or 1)), hat_x + q * 11 % 60, HZ + 4 + q * 3, 3, 1)
+        put(E(4 * hf * (fine and 1.3 or 1)), hat_x + q * 7 % 50 + 4, HZ + 5 + q * 3, 2, 1)
       end
     end
 
@@ -264,7 +317,7 @@ return function(K)
         local x = K.px(pad_notes[i]) * 0.6
         for r = 0, 4 do
           local w = 8 + r * 5 + math.floor(math.sin(T * 0.5 + i + r) * 3)
-          put(pdz * (3.2 - r * 0.5), x - w / 2, 46 + r * 3, w, 1)
+          put(pdz * (3.2 - r * 0.5) * (fine and 1.2 or 1), x - w / 2, 46 + r * 3, w, 1)
         end
       end
     end
@@ -275,16 +328,36 @@ return function(K)
       local f = fade(b.t, 0.5)
       local by = HZ + 5 + b.lane * 3 + math.floor(b.n * 3)
       if f > 0 then
-        put(1.2 + 6 * f, b.x, by, 2, 2)
+        if fine then
+          -- the buoy bobs on the swell, a sub-pixel in y (the music running)
+          local bb = by + (fp and 0.9 * math.sin(T * 1.4 + i * 1.7) or 0)
+          local iy = math.floor(bb)
+          local fy = bb - iy
+          local bl2 = 1.2 + 7 * f
+          put(bl2, b.x, iy + 1, 2, 1)
+          put(bl2 * (1 - fy), b.x, iy, 2, 1)
+          put(bl2 * fy, b.x, iy + 2, 2, 1)
+        else
+          put(1.2 + 6 * f, b.x, by, 2, 2)
+        end
         line(2 * f, b.x + 1, by + 2, b.x + 1, by + 1 + 4)
         if f > 0.05 then put(2.5 * f, b.x - 3, by + 4, 8, 1); put(1.5 * f, b.x - 5, by + 6, 12, 1) end
       end
     end
 
     -- the haze over the water, lifted by the mids
-    K.haze(0, HZ - 14, 80, HZ + 2, 0.1 + mid * 0.9 + 0.3 * ap, 1 + mid * 2, T * 2)
+    K.haze(0, HZ - 14, 80, HZ + 2, 0.1 + mid * 0.9 + 0.3 * ap, 1 + mid * (fine and 2.5 or 2), T * 2)
     if aa > 0.03 then
       for k = 0, 5 do K.dashes(2.5 * aa, 14 + k * 4, 2, 8, T * 2 + k * 11, 0, 74) end
+    end
+    -- dense: a far ship's lamps crawl along the horizon and foam breathes at the headland's foot
+    if dense and fp then
+      local fx = (T * 1.8) % 90 - 5
+      K.put_sub(2.4, fx, HZ - 1, 1, 1); K.put_sub(1.8, fx + 3, HZ - 1, 1, 1); K.put_sub(1.4, fx + 6, HZ - 2, 1, 1)
+      for i = 1, 5 do
+        local fo = math.sin(T * (0.9 + 0.17 * i) + i * 2.4)
+        if fo > 0.2 then put(1.8 * fo, 66 + i * 6, 58 + i % 2, 3, 1) end
+      end
     end
     K.grain(function(u, v) return u * 76, HZ + 3 + v * 24 end, hi * 40, 7)
   end

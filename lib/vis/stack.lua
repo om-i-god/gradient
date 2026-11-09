@@ -64,9 +64,42 @@ return function(K)
   end
   local prof = {}
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own.
+  -- pump, hat, bass and arp take turns between the two stacks
+  local hit, percs, pdz = {}, {}, 0
+  local pn, hn, bn, an = 0, 0, 0, 0
+  local PS, HS, BS, AS = {"pump0", "pump1"}, {"hat0", "hat1"}, {"bass0", "bass1"}, {"arp0", "arp1"}
+  local alane = {1, 1}
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.pump() pn = pn + 1; mark(PS[pn % 2 + 1]) end
+  function M.hat() hn = hn + 1; mark(HS[hn % 2 + 1]) end
+  function M.bass() bn = bn + 1; mark(BS[bn % 2 + 1]) end
+  function M.clap() mark("clap") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 2 end
+  function M.arp(lane)
+    an = an + 1
+    mark(AS[an % 2 + 1])
+    alane[an % 2 + 1] = clamp(math.floor(K.num(lane, 1)), 1, 4)
+  end
+  -- a perc shocks the bin of its voice: a ring of air, as far as its note says
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, bin = (clamp(math.floor(K.num(voice, 1)), 1, 4) - 1) % 4,
+      r = 8 + (math.floor(K.num(note, 60)) % 12) / 12 * 1.8}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
     ex, vb, glow = 0, 0, 0
     vk, lk, echoes = {0, 0, 0, 0}, {0, 0, 0, 0}, {}
+    hit, percs, pdz, pn, hn, bn, an = {}, {}, 0, 0, 0, 0, 0
+    alane = {1, 1}
   end
   M.clear = M.init
 
@@ -103,6 +136,8 @@ return function(K)
     end
     local hi = A[K.HI]
     local mid = A[K.MID]
+    pdz = follow(pdz, K.env.pad, 0.25, DT)
+    local pd, cl, tkk = pdz, fade("clap", 0.3), fade("tick", 0.4)
 
     -- the floor glow the kick throws, and the crowd against it
     local g = math.max(env.kick * (1 - kl) * 0.9, K.duck * 0.35, A[K.LO] * 0.55, 0.15)
@@ -153,12 +188,15 @@ return function(K)
       end
     end
 
-    for _, x0 in ipairs(STACKS) do
+    for si, x0 in ipairs(STACKS) do
+      local pf, bf, hf, af = fade(PS[si], 0.3), fade(BS[si], 0.4), fade(HS[si], 0.25), fade(AS[si], 0.3)
       -- bass bins: two scoops, one cone each
       for b = 0, 1 do
         local bx = x0 + b * 20
         box(1.6, bx, 32, 20, 20)
+        if pf > 0.03 then box(4 * pf, bx, 32, 20, 20) end          -- a pump thumps the cabinets
         local cx, cy = bx + 10, 42
+        if bf > 0.03 then ring(5 * bf, cx, cy, 8, 12) end           -- a bass note lights the rims
         ring(2 + ex * 1.5, cx, cy, 8, 12)
         ring(2.5 + ex * 5 + vb * 2, cx, cy, 3.9 + ex * 3, 12)
         disc(3.5 + ex * 7 + vb * 2, cx, cy, 1.2 + ex * 2.2)
@@ -169,6 +207,7 @@ return function(K)
         local cx, cy = x0 + 5 + (i - 1) * 10, 26
         local v = vk[i]
         ring(2 + v * 5 + mid, cx, cy, 3.6 + v * 0.6, 8)
+        if cl > 0.03 then ring(6 * cl, cx, cy, 3.6 + v * 0.6, 8) end   -- a clap swells the mid cones
         disc(2 + v * 9, cx, cy, 1.2 + v * 0.6)
       end
       -- the echo's air: an arc off the mid box into the yard
@@ -192,18 +231,47 @@ return function(K)
         line(1, hx + 1, 12, hx + 3, 13); line(1, hx + 15, 12, hx + 13, 13)
         line(1, hx + 1, 18, hx + 3, 17); line(1, hx + 15, 18, hx + 13, 17)
         local sh = 0.5 + 0.5 * math.sin(T * 9 + j * 2.1 + x0)
+        if hf > 0.03 then                                            -- a hat sprays the horn's mouth
+          K.dashes(5 * hf, 14, 1, 3, T * 40 + j * 3, hx + 2, hx + 15)
+          K.dashes(5 * hf, 16, 1, 3, -T * 40 + j * 3, hx + 2, hx + 15)
+        end
         put(3 + hi * (5 + 3 * sh) + env.hat * 2, hx + 7, 15, 3, 1)
         if hi > 0.1 then K.dashes(hi * 3 * sh, 12 + (j + math.floor(T * 7)) % 2 * 6, 2, 5, T * 30 + j * 3, hx + 2, hx + 15) end
       end
       -- tweeters on top: one per arp lane
       box(1.6, x0 + 2, 6, 36, 5)
       for i = 1, 4 do put(2.5 + lk[i] * 9, x0 + 5 + (i - 1) * 9, 8, 2, 1) end
+      if af > 0.03 then                                              -- an arp note flares its tweeter
+        put(6 * af, x0 + 4 + (alane[si] - 1) * 9, 7, 4, 3)
+      end
     end
+
+    -- a perc shocks its bin with a ring of air
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.35)
+      if f < 0.03 then table.remove(percs, i)
+      else
+        local cx, cy = STACKS[p.bin // 2 + 1] + (p.bin % 2) * 20 + 10, 42
+        ring(6 * f, cx, cy, 2 + (1 - f) * (p.r - 2), 12)
+      end
+    end
+    -- the pad lifts a haze over the yard's sky
+    if pd > 0.03 then K.haze(0, 0, 128, 44, pd * 0.4, 1, T * 2) end
 
     -- haze drifting through, thicker with dub and kickless stretches
     local hz = 0.1 + 0.12 * K.dub * (0.5 + K.throw) + 0.18 * kl
     K.haze(0, 44, 128, FLOOR, hz, 1, T * (6 + 8 * K.throw))
     K.haze(44, 18, 84, 44, hz * 1.3, 1, T * (6 + 8 * K.throw) + 40)
+    -- ticks run along the string of bulbs, every other one by their kind
+    if tkk > 0.03 then
+      for k = 1, 16 do
+        local u = k / 16
+        local x = 44 + u * 40
+        line(4 * tkk, x - 2.5, 9 + 7 * (1 - (2 * u - 1 - 0.125) ^ 2), x, 9 + 7 * (1 - (2 * u - 1) ^ 2))
+        if (k + (hit.tk or 0)) % 2 == 1 then put(8 * tkk, x, 9 + 7 * (1 - (2 * u - 1) ^ 2) + 1, 1, 2) end
+      end
+    end
     -- the highs as a fine fizz off the horns
     K.grain(function(u, v)
       local x0 = STACKS[1 + math.floor(u * 2) % 2]

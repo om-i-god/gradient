@@ -46,7 +46,36 @@ return function(K)
     return clamp(math.floor((K.num(note, 72) - 48) / 48 * nfl(t)), 0, nfl(t) - 1)
   end
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own.
+  -- kick, hat, bass and arp notes take turns (odd / even towers, tellies, piers, sides)
+  local hit, percs, pdz = {}, {}, 0
+  local kn, hn, bn, an = 0, 0, 0, 0
+  local KS, HS, BS = {"kick0", "kick1"}, {"hat0", "hat1"}, {"bass0", "bass1"}
+  local AK = {{"a10", "a11"}, {"a20", "a21"}, {"a30", "a31"}, {"a40", "a41"}}
+  local aflr = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.kick() kn = kn + 1; mark(KS[kn % 2 + 1]) end
+  function M.hat() hn = hn + 1; mark(HS[hn % 2 + 1]) end
+  function M.bass() bn = bn + 1; mark(BS[bn % 2 + 1]) end
+  function M.clap() mark("clap") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 2 end
+  -- a perc lights a whole floor in the tower of its voice, the floor its note's
+  function M.perc(voice, note)
+    local ti = clamp(math.floor(K.num(voice, 1)), 1, 4)
+    percs[#percs + 1] = {t = K.NOW, ti = ti, f = floor_of(TOW[ti], note)}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.init()
+    hit, percs, pdz, kn, hn, bn, an = {}, {}, 0, 0, 0, 0, 0
+    aflr = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
     lit = {{}, {}, {}, {}}
     echoes, trains, dir = {}, {}, 1
     vk = {0, 0, 0, 0}
@@ -67,6 +96,9 @@ return function(K)
     local ti = clamp(math.floor(K.num(lane, 1)), 1, 4)
     local t = TOW[ti]
     local f = floor_of(t, note)
+    an = an + 1                                  -- the notes take turns at the two halves of the tower
+    mark(AK[ti][an % 2 + 1])
+    aflr[ti][an % 2 + 1] = f
     local c = math.floor(K.num(step, 1)) % ncol(t)
     light(ti, f, c, 1)
     -- the dub brings it back at the echo time, fainter by the feedback
@@ -92,6 +124,9 @@ return function(K)
     arch = follow(arch, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.5), A[K.LO] * 0.8), 0.08, DT)
     local breathe = 1 - stair * 0.35
     local hi = A[K.HI]
+    pdz = follow(pdz, K.env.pad, 0.25, DT)
+    local pd, mid, cl, tkk = pdz, A[K.MID], fade("clap", 0.3), fade("tick", 0.4)
+    local kf0, kf1, hf0, hf1 = fade(KS[1], 0.3), fade(KS[2], 0.3), fade(HS[1], 0.25), fade(HS[2], 0.25)
 
     -- the sky: the city's glow low down, a few clouds catching it
     K.gradient(32, BOT - 1, function(y) return (y - 32) / 18 * (0.45 + A[K.LO] * 0.5) end, SKYP)
@@ -148,14 +183,14 @@ return function(K)
           local y = wy(f)
           for cc = 0, nc - 1 do
             if K.hash(ti * 997 + f * 31 + cc, 7) < 0.5 then
-              put((1.3 + v * 3) * breathe, wx(t, cc), y, 2, 2)
+              put((1.3 + v * 3) * breathe * (1 + 0.5 * mid), wx(t, cc), y, 2, 2)
             end
           end
         end
       end
       -- the stairwell: a column of landing lights, dimmed by the pump
       local sx = x0 + w - 3
-      for f = 0, n - 1, 1 do put((2.6 + K.energy) * (1 - stair * 0.7), sx, wy(f), 1, 2) end
+      for f = 0, n - 1, 1 do put((2.6 + K.energy) * (1 - stair * 0.7) * (1 + 0.5 * A[K.AMP]), sx, wy(f), 1, 2) end
       -- the arp's windows: warm, slowly going dark
       local L = lit[ti]
       for k = #L, 1, -1 do
@@ -177,6 +212,42 @@ return function(K)
       -- a red light on the roof, pulsing slowly
       local r = 0.5 + 0.5 * math.sin(T * 1.3 + ti * 1.9)
       put(1 + r * 4, x0 + math.floor(w / 2), top - 2, 1, 1)
+      -- a kick catches the towers' edges, odd and even in turn; a tick flares the roof lamp
+      if (ti % 2 == 1 and kf0 or kf1) > 0.03 then
+        local kv = ti % 2 == 1 and kf0 or kf1
+        put(5 * kv, x0, top, 1, BOT - top)
+        put(5 * kv, x0 + w - 1, top, 1, BOT - top)
+      end
+      if tkk > 0.03 then put(((ti + (hit.tk or 0)) % 2 == 0 and 8 or 5) * tkk, x0 + math.floor(w / 2) - 1, top - 4, 3, 3) end
+      -- the hats flicker one of each tower's two tellies, in turn
+      local hv = hf0
+      for k = 1, 2 do
+        if hv > 0.03 then
+          local f = math.floor(K.hash(ti * 7 + k, 41) * n)
+          local cc = math.floor(K.hash(ti * 7 + k, 42) * nc)
+          put(4 * hv, wx(t, cc) - 1, wy(f) - 1, 4, 4)
+        end
+        hv = hf1
+      end
+      -- the arp notes light half a floor each, odd and even in turn
+      for sd = 1, 2 do
+        local av = fade(AK[ti][sd], 0.3)
+        if av > 0.03 then
+          local hw = math.floor((w - 4) / 2)
+          put(6 * av, x0 + 2 + (sd - 1) * hw, BOT - FLH * (aflr[ti][sd] + 1), hw, 1)
+        end
+      end
+    end
+    -- a perc lights a whole floor of the tower of its voice
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      if f < 0.03 then table.remove(percs, i)
+      else
+        local t = TOW[p.ti]
+        put(7 * f, t[1] + 2, wy(p.f), t[2] - 4, 2)
+        put(5 * f, t[1] + 2, BOT - FLH * (p.f + 1), t[2] - 4, 1)
+      end
     end
     -- echoes coming due
     for k = #echoes, 1, -1 do
@@ -193,16 +264,21 @@ return function(K)
       return wx(t, math.floor(v * ncol(t))), wy(math.floor(K.rnd() * nfl(t)))
     end, hi * 110, 7)
 
+    -- the pad lifts a haze over the sky
+    if pd > 0.03 then K.haze(0, 0, 128, 30, pd * 0.4, 1, T * 2) end
     -- mist between the blocks: kickless, the dub
     K.haze(0, 30, 128, BOT, 0.06 + 0.32 * K.kickless + 0.12 * K.dub * K.throw, 1, T * 4)
 
     -- the viaduct: the deck, piers, and the arches between them glowing
     -- from the street underneath with the bass
     put(3, 0, DECK, 128, 1)
-    local glow = 0.7 + arch * 4
+    if cl > 0.03 then put(6 * cl, 0, DECK, 128, 1) end            -- a clap swells the deck
+    local glow = (0.7 + arch * 4) * (1 + 0.4 * A[K.AMP])
     for k = 0, 7 do
       local ax = k * 16
       put(1.5, ax, DECK + 1, 2, 11)            -- the pier
+      local bv = fade(BS[k % 2 + 1], 0.4)         -- the bass shakes the piers, odd and even in turn
+      if bv > 0.03 then put(5 * bv, ax, DECK + 1, 2, 11) end
       -- the arch: its curve, and the light pooled under it
       for j = 0, 13, 1 do
         local u = (j - 6.5) / 7

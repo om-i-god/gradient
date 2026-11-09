@@ -30,6 +30,32 @@ return function(K)
   local sod, lo, bs, hs = 0, 0, 0, 0
   local sign_seed = 1
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, percs, pdz = {}, {}, 0
+  local AK = {"arp1", "arp2", "arp3", "arp4"}
+  local af, arps = {0, 0, 0, 0}, {}
+  local an = 0
+  local kn, bn = 0, 0                     -- kicks and bass notes so far: they alternate sides
+  local KS, BS = {"kick0", "kick1"}, {"bass0", "bass1"}
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.kick() kn = kn + 1; mark(KS[kn % 2 + 1]) end
+  function M.hat() mark("hat") end
+  function M.clap() mark("clap") end
+  function M.tick(kind) mark("tick"); hit.tk = clamp(math.floor(K.num(kind, 1)), 0, 99) % 2 end
+  -- a perc cuts a rumble strip across the lane of its voice, near or far by its note
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, lx = LX[clamp(math.floor(K.num(voice, 1)), 1, 4)],
+      d = 1.4 + (math.floor(K.num(note, 60)) % 12) / 12 * 4}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   local function sy(d) return HY + 46 / d end
   local function sx(lx, d) return VX + (lx + OFF) * W / d end
 
@@ -47,6 +73,8 @@ return function(K)
     vk = {0, 0, 0, 0}
     sod, lo, bs, hs = 0, 0, 0, 0
     sign_seed = 1
+    hit, percs, pdz, kn, bn, an = {}, {}, 0, 0, 0, 0
+    af, arps = {0, 0, 0, 0}, {}
   end
 
   local function spawn(i, note, lv)
@@ -69,10 +97,16 @@ return function(K)
 
   function M.arp(lane, note)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
+    mark(AK[lane])
+    -- the note lights a stretch of its lane: a higher note, further up the road
+    an = an + 1                                 -- and the notes take turns at the two edges of the lane
+    arps[#arps + 1] = {t = K.NOW, lx = LX[lane] + (an % 2 * 2 - 1) * 0.45, d = 1.3 + clamp((K.num(note, 72) - 48) / 36, 0, 1) * 9}
+    while #arps > 8 do table.remove(arps, 1) end
     spawn(lane, note, 0.6 + 0.4 * K.gain(K.S or {}, "lane" .. lane))
   end
 
   function M.bass()
+    bn = bn + 1; mark(BS[bn % 2 + 1])
     -- a lorry when the slow lane is clear; otherwise the bass is its engine
     local near = false
     for _, l in ipairs(lorries) do if l.d < 7 then near = true end end
@@ -113,16 +147,25 @@ return function(K)
     bs = follow(bs, K.env.bass, 0.05, DT)
     local hi = A[K.HI]
     hs = follow(hs, hi, 0.5, DT)           -- the highs, slow: a sheen on the paint
+    pdz = follow(pdz, K.env.pad, 0.25, DT)
+    local kk, hh, cl, bh, tkk = fade(KS[1], 0.3), fade("hat", 0.25), fade("clap", 0.3), fade(BS[1], 0.4), fade("tick", 0.4)
+    local kk1, bh1 = fade(KS[2], 0.3), fade(BS[2], 0.4)
+    for i = 1, 4 do af[i] = fade(AK[i], 0.35) end
+    local pd, mid = pdz, A[K.MID]
     local fog = 0.1 + K.kickless * 0.35 + K.dub * K.throw * 0.15
-    local lamp = (6 + K.energy * 1.5) * (1 - sod * 0.55)
-    local pool = (2.4 + K.energy) * (1 - sod * 0.8)
+    local lamp = (6 + K.energy * 1.5) * (1 - sod * 0.55) * (1 + 0.3 * A[K.AMP])
+    local pool = (2.4 + K.energy) * (1 - sod * 0.8) * (1 + 0.4 * A[K.AMP])
     local breathe = 1 - sod * 0.35          -- the whole road breathes with the pump
 
     -- the sky: the city's glow over the horizon, more with the low end
-    local glow = 1.4 + lo * 2.2 + K.bar_pulse * 0.5
+    local glow = (1.4 + lo * 2.2 + K.bar_pulse * 0.5) * (1 + 0.5 * A[K.AMP])
     -- the skyline: a dark mass, its roofs catching the glow, and a few
     -- windows in it
     K.mass(1, SKY, HY)
+    -- a clap swells the roofs in the glow
+    if cl > 0.03 then
+      for c = 0, 63 do put(6 * cl, c * 2, math.floor(SKY[c] + 0.5), 2, 1) end
+    end
     for c = 0, 63 do
       local t = math.floor(SKY[c] + 0.5)
       put(glow * (0.8 + 0.4 * K.hash(c, 21)), c * 2, t, 2, 1)
@@ -137,6 +180,30 @@ return function(K)
     line(2, sx(-EDGE, dnear), sy(dnear), sx(-EDGE, dend), sy(dend))
     line(2, sx(EDGE, dnear), sy(dnear), sx(EDGE, dend), sy(dend))
     line(1.6 + hs, sx(0, dnear), sy(dnear), sx(0, dend), sy(dend))
+    -- a kick thumps down the central barrier
+    if kk > 0.03 then line(6 * kk, sx(-EDGE, dnear), sy(dnear), sx(-EDGE, dend), sy(dend)) end
+    if kk1 > 0.03 then line(6 * kk1, sx(EDGE, dnear), sy(dnear), sx(EDGE, dend), sy(dend)) end
+    -- an arp note lights the lane it sends a car down
+    for i = #arps, 1, -1 do
+      local p = arps[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.35)
+      if f < 0.03 then table.remove(arps, i)
+      else
+        for y = math.floor(sy(math.min(dend, p.d * 2))), math.floor(sy(math.max(1.05, p.d * 0.5))) do
+          local d = 46 / (y - HY)
+          put(6 * f, sx(p.lx - 0.3, d), y, 0.6 * W / d, 1)
+        end
+      end
+    end
+    -- the cat's eyes along both verges wake on a tick
+    if tkk > 0.03 then
+      for k = 0, 9 do
+        local d = 1.4 + k * 1.3
+        for s = -1, 1, 2 do
+          put(((k + (hit.tk or 0)) % 2 == 0 and 8 or 4) * tkk, sx(s * (EDGE - 0.15), d), math.floor(sy(d)) - 1, d < 3 and 2 or 1, d < 4 and 2 or 1)
+        end
+      end
+    end
     for k = 0, 6 do
       local d0 = 1.2 + k * 1.6
       local d1 = d0 + 0.55
@@ -198,6 +265,35 @@ return function(K)
         local d = 46 / (y - HY)
         local x0, x1 = sx(-EDGE, d) + 1, math.min(128, sx(EDGE, d))
         put(l, x0, y, x1 - x0, 1)
+      end
+    end
+
+    -- hats scatter rain-glints over the near road, the bass shakes its glow
+    if hh > 0.03 then
+      for y = 52, 62, 2 do
+        local d = 46 / (y - HY)
+        K.dashes(5 * hh, y, 1, 5, T * 30 + y * 7, sx(-EDGE, d) + 1, math.min(128, sx(EDGE, d)))
+      end
+    end
+    if bh > 0.03 or bh1 > 0.03 then
+      for y = 52, 62, 3 do
+        local d = 46 / (y - HY)
+        local x0, x1 = sx(-EDGE, d) + 1, math.min(128, sx(EDGE, d))
+        local xm = (x0 + x1) / 2
+        put(3 * bh * (y - 50) / 13, x0, y, xm - x0, 1)
+        put(3 * bh1 * (y - 50) / 13, xm, y, x1 - xm, 1)
+      end
+    end
+    -- a perc cuts rumble strips across its lane
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      if f < 0.03 then table.remove(percs, i)
+      else
+        for r = 0, 2 do
+          local d = p.d * (1 + r * 0.14)
+          put(7 * f, sx(p.lx - 0.9, d), math.floor(sy(d)), 1.8 * W / d, 1)
+        end
       end
     end
 
@@ -270,11 +366,13 @@ return function(K)
     put(1.5, xl, top, 1, math.floor(gh))
     put(1.5, xr, top, 1, math.floor(gh))
     put(1.5, xl, top, xr - xl + 1, 1)
+    if cl > 0.03 then put(6 * cl, xl, top, xr - xl + 1, 1) end        -- a clap swells the gantry beam
     local pw = math.floor((xr - xl - 9) / 4)
     for i = 1, 4 do
       local x0 = xl + 3 + (i - 1) * (pw + 1)
       local lit = vk[i]
       put(1.3 + lit * 0.7, x0, top + 1, pw, 7)               -- the panel
+      if af[i] > 0.03 then put(3 * af[i], x0, top + 1, pw, 7) end
       -- its legend: dashes from the chord note and the bar
       local h = K.hash(math.floor(K.num(K.chord[i], 60)) + sign_seed * 31, i)
       for r = 0, 1 do
@@ -292,6 +390,9 @@ return function(K)
       local d = 1.3 + v * v * 10
       return sx((u - 0.5) * 2 * EDGE, d), sy(d) - 0.5
     end, hi * 45, 7)
+    -- the pad lifts a haze over the sky, the mids thicken the air over the road
+    if pd > 0.03 then K.haze(0, 0, 128, HY, pd * 0.5, 1, T * 2) end
+    if mid > 0.05 then K.haze(0, HY, 128, 40, mid * 0.3, 1, -T * 3) end
     -- fog over the road: kickless and dub
     K.haze(0, HY - 6, 128, 50, fog, 1, T * 4)
   end

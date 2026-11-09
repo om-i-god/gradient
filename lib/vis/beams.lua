@@ -31,8 +31,8 @@ return function(K)
   local prof = {}
 
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
-  local hit, arps, percs = {}, {0, 0, 0, 0}, {}
-  local pdz = 0                            -- the pad, eased in
+  local hit, arps, percs = {}, {-99, -99, -99, -99}, {}
+  local pdz, mz = 0, 0  -- the pad, eased in
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
@@ -60,7 +60,7 @@ return function(K)
     for i = 1, 4 do tx[i], bi[i] = FX[i] + (i - 2.5) * 6, 0.5 end
     sw, glow, vb = 0, 0, 0
     past, pn = {}, 0
-    hit, arps, percs, pdz = {}, {0, 0, 0, 0}, {}, 0
+    hit, arps, percs, pdz, mz = {}, {-99, -99, -99, -99}, {}, 0, 0
   end
   M.clear = M.init
 
@@ -96,6 +96,7 @@ return function(K)
     local kl, e = K.kickless, K.energy
     local hi = A[K.HI]
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    mz = K.follow(mz, A[K.MID], 1.0, DT)
     local pu, hh, cl, bh, tk = fade("pump", 0.3), fade("hat", 0.25), fade("clap", 0.3), fade("bass", 0.4), fade("tick", 0.4)
     local pd, mid = pdz, A[K.MID]
     -- the truss and the heads on it
@@ -229,7 +230,7 @@ return function(K)
       put(0.8 + bi[i] * 0.9, tx[i] - hw * 0.7, FLOOR + 1, 1.4 * hw, 1)
     end
     -- haze through it all
-    K.haze(0, 10, 128, FLOOR, 0.05 + 0.13 * K.dub + 0.15 * kl + 0.08 * K.throw + 0.05 * mid + 0.1 * pd, 1, T * (5 + 4 * kl) + 30 * mid)
+    K.haze(0, 10, 128, FLOOR, 0.05 + 0.13 * K.dub + 0.15 * kl + 0.08 * K.throw + 0.13 * mz + 0.1 * pd, 1, T * (5 + 4 * kl))
   end
 
   M.init()

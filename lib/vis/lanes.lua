@@ -129,7 +129,7 @@ return function(K)
         for s = 1, len do
           local a = (s - 1) / len + rot
           local live = not seq or K.num(seq[s], 1) > 0
-          local f = fl[s] and math.exp(-(NOW - fl[s]) / 0.45) or 0
+          local f = fl[s] and math.exp(-(NOW - fl[s]) / 0.35) or 0
           if f < 0.02 then fl[s] = nil; f = 0 end
           local x0, y0 = pt(rx - 1, ry - 1, a, cx, cy)
           local out = live and 3 or 1.5

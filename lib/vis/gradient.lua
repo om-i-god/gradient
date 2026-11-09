@@ -58,7 +58,7 @@ return function(K)
     local T, e, c = K.T, K.energy, K.chord
     local breathe = 1 - K.duck * (0.18 + 0.1 * (1 - K.kickless))
     local kk, cl, pd = fade("kick", 0.25), fade("clap", 0.3), K.env.pad
-    local width = (1.2 + (1 - e) * 1.6 + K.kickless * 0.4) * (1 + cl * 0.35)
+    local width = (1.2 + (1 - e) * 1.6 + K.kickless * 0.4)
     local loose = 1.5 + (1 - e) * 3 + K.kickless * 3
     -- the chord spread over the sky around its own centre, so voice leading
     -- moves the bands wherever the chord sits
@@ -72,7 +72,7 @@ return function(K)
     local lv = {}
     for col = 0, 31 do wobs[col] = math.sin(T * 0.6 + col * 0.22) * loose end
     for i = 1, 4 do gains[i] = (2.2 + i * 0.5) * (1 + vk[i] * 0.45 + (i >= 3 and hi * 0.5 or 0))
-      * (1 + kk * 0.3 + ((i == 2 or i == 3) and cl * 0.5 or 0)) end
+      * (1 + kk * 0.3 + ((i == 2 or i == 3) and cl * 0.15 or 0)) end
     for row = 0, FLOOR // 2 - 1 do
       local y = row * 2
       for col = 0, 31 do
@@ -83,7 +83,7 @@ return function(K)
           -- past 3 widths a band adds nothing visible
           if d > -3 and d < 3 then v = v + math.exp(-d * d) * gains[i] end
         end
-        v = v * breathe * (0.75 + 0.35 * A[K.MID]) * (0.6 + 0.4 * A[K.AMP])
+        v = v * breathe * (0.75 + 0.35 * A[K.MID]) * (1 + 0.05 * A[K.AMP])
         -- soft knee: close voices merge into a glow, not a flat slab; the
         -- tails thin to a dither so the black stays black
         local l = 12 * (1 - math.exp(-v * v * 0.045))
@@ -119,7 +119,7 @@ return function(K)
     -- haze: a light bank low down, heavier with dub and kickless
     K.haze(0, 36, 128, FLOOR, 0.12 + 0.2 * K.dub * K.throw + 0.18 * K.kickless + 0.25 * pd, 1, T * 4)
     -- the pad: a slow fog that climbs the whole sky and thins again
-    if pd > 0.05 then K.haze(0, 4, 128, 36, 0.4 * pd, 1, -T * 3) end
+    if pd > 0.05 then K.haze(0, 4, 128, 36, 0.12 * pd, 1, -T * 3) end
     -- the hats: a few fine sparks that catch in the light
     local hh = fade("hat", 0.25)
     if hh > 0 then
@@ -136,7 +136,7 @@ return function(K)
     live(percs, 0.5)
     for _, p in ipairs(percs) do
       local x, y, f = math.floor(p.x), math.floor(p.y), p.f
-      put(7 * f, x, y - 1, 3, 1); put(7 * f, x, y + 1, 3, 1)
+      put(7 * f, x, y + 1, 3, 1)
       put(5 * f, x, y, 1, 1); put(5 * f, x + 2, y, 1, 1)
       for d = 3, 11, 2 do put(4.5 * f, x + 1, y + d, 1, 1) end
     end

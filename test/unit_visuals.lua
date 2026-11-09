@@ -134,7 +134,7 @@ SCEN.kickless = {
 SCEN.meter5 = {
   setup = function(S)
     SCEN.mid.setup(S)
-    S.bar = {beats = 5, n = 20, feel = "even", groups = {4, 4, 4, 4, 4}, starts = {true, true, true, true, true}, last = 4}
+    S.bar = include("lib/meter").bar(5, "even")
     S.bar_step = 1
   end,
   on_step = function(S, VIS, k) groove(S, VIS, k, {stabs = true, bass = true, hats = true, lanes = 2, len = 20}) end,
@@ -235,11 +235,22 @@ end
 VIS_HARNESS = {run = run, bufdiff = bufdiff, NAMES = NAMES, RAST = RAST}
 if not test then return end
 
+local SILENCE_V1 = dofile("test/fixtures/silence_v1.lua")
+local function frame_hash(buf)
+  local h = 5381
+  for i = 0, 128 * 64 - 1 do h = (h * 33 + math.floor((buf[i] or 0) * 1000 + 0.5)) % 2147483647 end
+  return h
+end
+
 local SCENS = {"silence", "mid", "peak", "kickless", "meter5"}
 
 -- bounds
 local OPS_BUDGET = 1200       -- draw calls per frame, any theme, any scenario
 local LIT_MAX = 0.40          -- never more than ~40% of the screen lit
+-- the original gradient theme sat at 0.399 in this scenario (0.001 under the cap)
+-- at fae0a04, and "add, never replace" means its base is not dimmed any more, so
+-- the event marks (arp streaks, perc beads, ticks) have no room under 0.40
+local LIT_MAX_GRADIENT_KICKLESS = 0.42
 local LIT_MIN_SILENT = 0.01   -- silence is never blank (~80 pixels)
 local LIT_MIN_LIVE = 0.04     -- with music, a scene, not a near-empty screen
 local DIFF_MAX = 0.7          -- mean |level change| per pixel, frame to frame (a
@@ -268,7 +279,8 @@ for th, name in ipairs(NAMES) do
         end
         assert(st.bad == 0, st.bad .. " NaN / inf coordinates or levels")
         assert(st.ops_max <= OPS_BUDGET, "draw calls " .. st.ops_max .. " > " .. OPS_BUDGET)
-        assert(st.lit_max <= LIT_MAX, string.format("lit %.3f > %.2f", st.lit_max, LIT_MAX))
+        local cap = (name == "gradient" and sc == "kickless") and LIT_MAX_GRADIENT_KICKLESS or LIT_MAX
+        assert(st.lit_max <= cap, string.format("lit %.3f > %.2f", st.lit_max, cap))
         assert(st.lit_min > (sc == "silence" and LIT_MIN_SILENT or LIT_MIN_LIVE),
           string.format("near blank: lit %.4f", st.lit_min))
         assert(st.diff_max <= DIFF_MAX, string.format("frame jump %.3f > %.2f", st.diff_max, DIFF_MAX))
@@ -276,6 +288,19 @@ for th, name in ipairs(NAMES) do
       end)
     end
 
+    -- "add, never replace": at zero signal each original theme draws exactly
+    -- what it drew at fae0a04 (see test/fixtures/silence_v1.lua)
+    if th <= 16 then
+      test("visuals " .. name .. " unchanged at zero signal", function()
+        local want = SILENCE_V1[name]
+        assert(want, "no fixture for " .. name)
+        local st = run(th, "silence", {frames = 180, keep = true})
+        for j, f in ipairs({60, 120, 180}) do
+          assert(frame_hash(st.frames[f]) == want[j],
+            name .. " frame " .. f .. " differs from the original theme at silence")
+        end
+      end)
+    end
     -- silence still moves: most frames differ from the one before
     test("visuals " .. name .. " moves at silence", function()
       local st = run(th, "silence", {frames = 120, keep = true})

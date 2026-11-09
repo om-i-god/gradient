@@ -684,6 +684,39 @@ do
   params:set("meter", 1); params:set("feel", 1)
 end
 
+-- 7/4: the swell fires at step n-11 and the dip reaches full at step n-4
+do
+  local S = getS()
+  S.mute, S.solo = {}, {}
+  params:set("fills", 2)
+  params:set("meter", 4); params:set("feel", 1)
+  for i = 1, 28 * 64 * 2 do
+    if S.bar.beats == 7 and S.bar_step == 1 then break end
+    tick_all()
+  end
+  assert(S.bar.beats == 7, "7/4 never took effect")
+  local n = S.bar.n
+  local swells, dips = {}, {}
+  local es, et = engine.swell, engine.tweak
+  engine.swell = function(...) swells[#swells + 1] = S.bar_step; return es(...) end
+  engine.tweak = function(k, v)
+    if k == "pump_lpf" and S.fill == "dip" then dips[S.bar_step] = v end
+    return et(k, v)
+  end
+  for i = 1, 28 * 2048 do
+    tick_all()
+    if #swells > 0 and dips[n - 4] and dips[n - 5] then break end
+  end
+  engine.swell, engine.tweak = es, et
+  assert(#swells > 0, "no swell fills in 2048 bars of 7/4")
+  for _, st in ipairs(swells) do assert(st == n - 11, "swell at step " .. st .. ", want " .. (n - 11)) end
+  assert(dips[n - 4] and math.abs(dips[n - 4] - 20000 * 0.025) < 1e-6, "dip not full at step n-4")
+  assert(dips[n - 5] and dips[n - 5] > dips[n - 4], "dip already full before step n-4")
+  print(string.format("7/4: %d swells all at step %d; dip full at step %d", #swells, n - 11, n - 4))
+  params:set("fills", 1)
+  params:set("meter", 1); params:set("feel", 1)
+end
+
 assert((calls.wash_chord or 0) > 0, "no wash chords")
 assert((evcalls.pad or 0) == calls.wash_chord,
   string.format("pad events (%d) must match engine.wash_chord calls (%d)", evcalls.pad or 0, calls.wash_chord))

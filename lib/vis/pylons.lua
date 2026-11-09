@@ -46,9 +46,9 @@ return function(K)
   local pump_t = -99
 
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
-  local hit, arps, percs = {}, {0, 0, 0, 0}, {}
+  local hit, arps, percs = {}, {-99, -99, -99, -99}, {}
   local acnt = {0, 0, 0, 0}             -- arp notes so far, per lane
-  local pdz = 0                          -- the pad, eased in
+  local pdz, mz = 0, 0  -- the pad, eased in
   local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
   local function fade(k, tau)
     local t = hit[k]
@@ -70,7 +70,7 @@ return function(K)
 
   function M.init()
     ring, sag, sway, sparks, pump_t = {0, 0, 0, 0}, 0, 0, {}, -99
-    hit, arps, percs, pdz = {}, {0, 0, 0, 0}, {}, 0
+    hit, arps, percs, pdz, mz = {}, {-99, -99, -99, -99}, {}, 0, 0
     acnt = {0, 0, 0, 0}
   end
 
@@ -127,6 +127,7 @@ return function(K)
     local kl = K.kickless
     local hi, lo = A[K.HI], A[K.LO]
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    mz = K.follow(mz, A[K.MID], 1.0, DT)
     local kk, hh, cl, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("tick", 0.4)
     local pd, mid = pdz, A[K.MID]
     for i = 1, 4 do ring[i] = K.follow(ring[i], K.voice_kick[i], 0.05, DT) end
@@ -170,7 +171,7 @@ return function(K)
       if y < 64 and kk > 0.03 then K.dashes(4 * kk, y, 2 + k, 5 + k * 3, k * 13 + T * 0.4, 0, 128) end
     end
     local fog_top = HY - 2 - kl * 8
-    K.haze(0, math.floor(fog_top), 128, 64, 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw + 0.04 * mid + 0.15 * pd, 1, T * 2.5 + 30 * mid)
+    K.haze(0, math.floor(fog_top), 128, 64, 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw + 0.3 * mz + 0.15 * pd, 1, T * 2.5)
 
     -- the towers, far to near; the near one's warning light marks the bar
     tower(TW[3], 1.2, 0)

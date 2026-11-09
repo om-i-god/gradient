@@ -42,7 +42,7 @@
 //   tweak key val   -- see `st` defaults / fxMap below
 //   listen on       -- 1 runs the input key tracker, 0 pauses it
 //   verb_type n     -- 1 hall 2 plate 3 spring (swaps the reverb synth in place)
-//   pad_type n      -- 1 wash 2 choir 3 strings 4 drone (crossfades the pad over ~6 s)
+//   pad_type n      -- 1 wash 2 choir 3 strings 4 drone (crossfades the pad: mostly done in about 2 s, settled in about 6 s)
 //   bed path        -- load a sound file as the looping field-recording bed
 //
 // polls
@@ -721,7 +721,7 @@ Engine_Gradient : CroneEngine {
       fifth = LPF.ar(fifth, (Lag.kr(cutoff, 4) * 1.2).clip(120, 5000));
       sig = ((low * 0.5) + fifth) * (1 + (LFNoise2.kr(0.08) * 0.15));
       sig = (sig * 1.4).tanh * 0.7;
-      sig = sig + (HPF.ar(PinkNoise.ar ! 2, 3000) * 0.012);
+      sig = sig + (HPF.ar({ PinkNoise.ar } ! 2, 3000) * 0.012);
       sig = LPF.ar(sig, 7000) * 0.22;
       sig = sig * Lag.kr(amp, 6);
       Out.ar(out, sig);
@@ -1186,7 +1186,7 @@ Engine_Gradient : CroneEngine {
 
   // the pad crossfade, the way verb_type swaps the reverb: the new pad
   // starts silent after the old one with the remembered settings and the
-  // last chord, then lags up to the remembered amp (6 s) while the old one
+  // last chord, then lags up to the remembered amp (Lag.kr 6: mostly done in about 2 s, settled in about 6 s) while the old one
   // lags down and is freed after 7 s. a swap that lands while one is still
   // fading frees that one at once, so at most two pads ever coexist
   swapPad { arg def;

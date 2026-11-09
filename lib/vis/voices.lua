@@ -150,7 +150,7 @@ return function(K)
     local function cx(k) return x0 - 2 * (k - 1) end
 
     local breathe = 1 - K.duck * (0.35 + 0.1 * (1 - K.kickless))
-    local base = (playing and (2.2 + K.energy * 1.8) or 2.2) * (0.8 + 0.4 * A[K.MID]) * (0.65 + 0.4 * A[K.AMP])
+    local base = (playing and (2.2 + K.energy * 1.8) or 2.2) * (0.8 + 0.4 * A[K.MID]) * (1 + 0.4 * A[K.AMP])
     local kk, cl, hh, pd = fade("kick", 0.25), fade("clap", 0.3), fade("hat", 0.25), K.env.pad
 
     -- the staff: dotted lines drifting with the scroll

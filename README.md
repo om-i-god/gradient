@@ -53,13 +53,13 @@ risers and gaps come up more when the energy is heading up; dips and throws when
 
 **voices.** bass, chords, hats, pad and the arp lanes each have a choice of sound, set in SOUND. on **auto** (the default) gradient picks for you, from the seed and the energy, and re-picks at phrase edges, so a long set doesn't keep one timbre. fix any of them to stop that part moving.
 
-- **bass:** **sub** (clean sine), **reese** (detuned saws beating slowly) or **rubber** (a plucked, elastic low)
+- **bass:** **sub** (a round sine), **reese** (detuned saws beating slowly) or **rubber** (a round FM bass that bounces in on a pitch blip)
 - **chords:** **dub** (the classic filtered stab), **felt** (soft, muted), **organ**, **glass** or **rhodes**
-- **hats:** **noise**, **metal** (ringing, inharmonic) or **dust** (crackly, short)
-- **pad:** **wash**, **choir**, **strings** or **drone**. on auto the pad can change when the section changes. a pad change crossfades: the new pad takes between a quarter second and two seconds to arrive while the old one fades out.
+- **hats:** **noise**, **metal** (ringing, inharmonic) or **dust** (soft and breathy, with a longer tail)
+- **pad:** **wash**, **choir**, **strings** or **drone**. on auto the pad can change when the section changes. a pad change lands a moment after you stop turning, then crossfades over a few seconds.
 - **arp lanes:** **classic** (triangle/pulse), **bell** (two-operator FM), **pluck** (karplus string), **soft** (sine), **glass**, **reed**, **kalimba** or **marimba**. on auto the seed picks, mostly classic.
 
-**time signatures.** **time signature** (GRADIENT) is 4/4, 3/4, 5/4 or 7/4. **feel** sets how the beats group: **even**, or one of the two uneven groupings of that meter (shown as the groups themselves, e.g. `3+2` or `2+3` in 5/4, `4+3` or `3+4` in 7/4). the patterns, fills and bass lines are built for the bar length, and in A / B feels soft ghost beats sit on the beats that aren't the start of a group. a change lands at the next phrase, not mid-bar, and while stopped it applies at once. the screen shows the meter next to the bar, and the visuals follow the bar: their pulse, rings and sweeps count the real beats.
+**time signatures.** **time signature** (GRADIENT) is 4/4, 3/4, 5/4 or 7/4. **feel** sets how the beats group: **even**, or one of the two uneven groupings of that meter (shown as the groups themselves, e.g. `3+2` or `2+3` in 5/4, `4+3` or `3+4` in 7/4). the patterns, fills and bass lines are built for the bar length, and in A / B feels soft ghost beats sit on the beats that aren't the start of a group. a change lands at the next phrase, not mid-bar, and while stopped it applies at once. the screen shows the meter in front of the section label, and the visuals follow the bar: their pulse, rings and sweeps count the real beats.
 
 **phasing arps.** four lanes, each with its own odd length (3, 5, 7, 9, 11, 13 steps...), its own rate (16th, 8th, dotted 8th), register, pan, decay and slow filter LFO. lanes keep stepping even while silent, so when one fades back in it lands in a new phase against the others. lanes are written as chord-tone indices, so when the harmony moves, the arps move with it.
 

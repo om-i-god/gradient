@@ -277,11 +277,11 @@ local function play_step()
   local gap  = fill == "gap" and s >= (S.fill_from or 13) + n - 16
 
   -- fills that run under everything else
-  if fill == "swell" and s == 5 then
+  if fill == "swell" and s == n - 11 then
     engine.swell(0.14 + e * 0.1, beat * 3)
   elseif fill == "dip" then
     S.dipped = true
-    tweak("pump_lpf", 20000 * 0.025 ^ (math.min(s, 12) / 12))
+    tweak("pump_lpf", 20000 * 0.025 ^ (math.min(s, n - 4) / (n - 4)))
   elseif fill == "stutter" then
     -- the last beat repeats, a 16th, then 32nds, then a 64th roll
     if s == n - 3 then glitch(1, 1, 2)

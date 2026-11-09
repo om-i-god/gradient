@@ -249,7 +249,7 @@ return function(K)
     K.haze(0, Y0, 128, GROUND, 0.02 + 0.14 * kl + 0.08 * K.throw, 1, T * 3)
 
     -- the far fence then the near one
-    bands((2.3 + 0.3 * e) * (0.7 + 0.3 * mid) + kk * 0.3)
+    bands((2.3 + 0.3 * e) * (1 + 0.1 * mid) + kk * 0.3)
     grating(2, 3 + lk2 * 4 + A[K.HI] * 2 + pd * 1.5, 0)
     grating(1, 4 + lk1 * 4 + A[K.HI] * 2, 1)
 

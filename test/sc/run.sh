@@ -22,9 +22,13 @@ includePaths:
 excludePaths: []
 postInlineWarnings: false
 YAML
+# scsynth servers that were already running (another session's): never ours
+BEFORE=" $(pgrep -f 'SuperCollider.app/Contents/Resources/../Resources/scsynth' | tr '\n' ' ')"
 perl -e 'alarm 120; exec @ARGV' "$SCLANG" -l "$LIB/lang.yaml" run.scd "$OUT" $EXTRA 2>&1 \
   | grep -E "ERROR|WARNING|FAILURE|ENGINE|SMOKE|LEVEL|PAD|CPU|SEG|poll |Message|RECEIVER|not understood|nil|CHECK|exception|Exception|error|late" \
   | grep -v "^Exception in World_OpenUDP"
-# belt and braces: never leave a test server behind
-pkill -f "SuperCollider.app/Contents/Resources/../Resources/scsynth" 2>/dev/null
+# belt and braces: never leave our own test server behind (only the ones started here)
+for p in $(pgrep -f "SuperCollider.app/Contents/Resources/../Resources/scsynth"); do
+  case "$BEFORE" in *" $p "*) ;; *) kill "$p" 2>/dev/null ;; esac
+done
 exit 0

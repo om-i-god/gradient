@@ -62,6 +62,8 @@ return function(K)
 
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
   local hit, percs, flashes = {}, {}, {}
+  local acc = {bass = 0, hat = 0, arp = 0}  -- hits piling up and draining: each adds, so a hit shows whenever it lands
+  local ba = 0                            -- the bass pile, eased
   local pdz, bz = 0, 0                   -- the pad and the bass hit, eased in
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
@@ -71,9 +73,10 @@ return function(K)
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
-  function M.hat() mark("hat") end
+  local function add(k, a, cap) acc[k] = math.min(cap, acc[k] + a) end
+  function M.hat() mark("hat"); add("hat", 0.3, 2) end
   function M.clap() mark("clap") end
-  function M.bass() mark("bass") end
+  function M.bass() mark("bass"); add("bass", 0.15, 2) end
   function M.tick() mark("tick") end
   function M.perc(voice, note)
     percs[#percs + 1] = {t = K.NOW, b = BLK[(math.floor(K.num(note, 60)) + 3 * clamp(math.floor(K.num(voice, 1)), 1, 4)) % #BLK + 1]}
@@ -87,10 +90,12 @@ return function(K)
     for j = 1, NMAX do sq[j], sqs[j] = 1, 1 end
     lv_sky, lv_gnd, flare, lo, lights = {0, 0, 0, 0}, 0, 0, 0, {}
     hit, percs, flashes, pdz, bz = {}, {}, {}, 0, 0
+    acc, ba = {bass = 0, hat = 0, arp = 0}, 0
   end
 
   function M.arp(lane, note)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
+    add("arp", 0.15, 2)
     flashes[#flashes + 1] = {t = K.NOW, x = 64 + (K.px(note) - 64) / 64 * 6, lane = lane}
     while #flashes > 4 do table.remove(flashes, 1) end
     local fb, et = K.echo_fb, K.echo_t * K.SP
@@ -133,6 +138,8 @@ return function(K)
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local cl, hh, bh, tk = fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
     bz = K.follow(bz, bh, 0.1, DT)
+    local dk = math.exp(-DT / 0.3)
+    for k, v in pairs(acc) do acc[k] = v < 0.01 and 0 or v * dk end
     local pd, mid, amp = pdz, A[K.MID], A[K.AMP]
 
     -- the city's glow, low on the sky and cut by the skyline
@@ -149,10 +156,10 @@ return function(K)
       local y = math.floor(HY - dist(j, n, sqs, 34) + 0.5)
       if y >= 0 then
         local v = (j - 1) % 4 + 1
-        local l = 1 + f * (0.4 + e * 0.7) + cl * 1.2
+        local l = 1 + f * (0.4 + e * 0.7) + cl * 0.25
         local cx = 64 + clamp((c[v] - mean) * 4, -50, 50) + math.sin(T * 0.21 + v * 1.9) * 12
         local hw = 12 + 8 * f
-        local sl = lv_sky[v] * (1.5 + 2 * f)
+        local sl = lv_sky[v] * (1.5 + 2 * f) * 1.7
         local off = T * (4 + j * 1.5) + j * 11
         if f < 0.45 then
           dash_above(l + hi * 2.5, y, 5, 7, off)
@@ -208,19 +215,19 @@ return function(K)
       local f = math.exp(-(K.NOW - fl.t) / 0.5)
       if f < 0.03 then table.remove(flashes, i)
       else
-        put(6 * f, fl.x - 10, HY + 1, 21, 1)
-        put(4 * f, fl.x - 2, HY - 12 - fl.lane * 4, 5, 12 + fl.lane * 4)
-        put(3 * f, fl.x - 14, HY + 2, 29, 1)
+        put(8 * f, fl.x - 6, HY + 1, 13, 1)
+        put(6 * f, fl.x - 1, HY - 12 - fl.lane * 4, 3, 12 + fl.lane * 4)
+        put(3 * f, fl.x - 8, HY + 2, 17, 1)
       end
     end
     -- haze lying along the horizon, thicker in kickless stretches
-    K.haze(0, HY - 6, 128, HY + 6, 0.2 + 0.2 * w + 0.1 * K.dub * K.throw + 0.2 * mid + 0.15 * pd, 1, T * 4)
+    K.haze(0, HY - 6, 128, HY + 6, 0.2 + 0.2 * w + 0.1 * K.dub * K.throw + 0.1 * mid + 0.15 * pd, 1, T * 4)
     if mid > 0.05 then K.haze(0, 4, 128, HY - 6, 0.2 * mid, 1, -T * 2) end
 
     -- hats glitter along the horizon
-    if hh > 0.03 then K.dashes(4 * hh, HY - 1, 2, 10, T * 30, 0, 128) end
+    if hh > 0.03 or acc.hat > 0.03 then K.dashes(4 * hh + 4 * acc.hat, HY - 1, 2, 10, T * 30, 0, 128) end
     -- the horizon: flares with the kick (eased, never a slab)
-    put(2 + flare * 7 + K.bar_pulse * 1.5, 0, HY, 128, 1)
+    put(math.min(12, 2 + flare * 7 + K.bar_pulse * 1.5 + 8 * acc.arp), 0, HY, 128, 1)
 
     -- the ground: the field's rays (sinking into water when kickless)
     if w < 0.95 then
@@ -229,6 +236,8 @@ return function(K)
         line((1 + lo * 1.2 + flare * 1.5 + bz * 4) * (1 - w), 64 + k * 3, HY + 1, 64 + k * 22, 63)
       end
     end
+    ba = K.follow(ba, acc.bass, 0.06, DT)
+    if ba > 0.03 then put(math.min(10, 22 * ba), 32, HY + 2, 64, 1) end
     -- the field's lines: dry, straight rules; wet, a swell of segments
     local swell = 1.2 + 2.2 * A[K.LO]
     for j = 1, n do

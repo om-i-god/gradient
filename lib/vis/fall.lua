@@ -145,7 +145,7 @@ return function(K)
     local cl, hh, bh, tk = fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
     local pd, mid = pdz, A[K.MID]
     lamp = K.follow(lamp, (0.55 + 0.45 * e) * (1 - K.duck * 0.55) * (1 - kl * 0.3) * (1 + 0.3 * A[K.AMP]) + pd * 0.2, 0.06, DT)
-    glow = K.follow(glow, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.4), A[K.LO] * 0.85, bh * 0.9), 0.08, DT)
+    glow = K.follow(glow, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.4), A[K.LO] * 0.85, bh * 1.3), 0.08, DT)
 
     -- the brick face of the near arch: courses, joints, the voussoirs
     for y = 1, 63, 4 do K.row_above(1, y, face) end
@@ -215,7 +215,7 @@ return function(K)
     line(1, VX + S0, VY, VX + SF, VY)
     for k = -4, 4 do
       local X = k / 4
-      line(1 + 5 * bh, VX + X * SF, FAR_FLOOR + 1, VX + X * S0 * 1.25, 63)
+      line(1 + 10 * bh, VX + X * SF, FAR_FLOOR + 1, VX + X * S0 * 1.25, 63)
     end
 
     -- hats throw a mist of spray across the far light

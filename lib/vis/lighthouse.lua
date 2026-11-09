@@ -31,6 +31,9 @@ return function(K)
   local bi = 0
   local pad_notes = {}
   local pdz = 0
+  -- hits pile up and drain: each one adds, so it shows whenever it lands
+  local acc = {kick = 0, pump = 0, hat = 0, tick = 0, stab = 0, arp = 0}
+  local function add(k) acc[k] = math.min(2, acc[k] + 0.3) end
   local ang = 0.3
 
   local function fade(t, tau)
@@ -46,13 +49,14 @@ return function(K)
     for i = 1, 6 do buoys[i].t = -99 end
     pad_notes = {}
     pdz = 0
+    for k in pairs(acc) do acc[k] = 0 end
   end
   M.clear = M.init
 
-  function M.kick() kick_t = K.NOW end
-  function M.pump() pump_t = K.NOW end
+  function M.kick() kick_t = K.NOW; add("kick") end
+  function M.pump() pump_t = K.NOW; add("pump") end
   function M.hat()
-    hat_t = K.NOW
+    hat_t = K.NOW; add("hat")
     hat_x = 10 + math.floor(K.NOW * 13) % 6 * 11
   end
   function M.clap() clap_t = K.NOW end
@@ -62,12 +66,13 @@ return function(K)
   end
   function M.tick(kind)
     kind = clamp(math.floor(K.num(kind, 1)), 1, 4)
+    add("tick")
     si = si % #sparks + 1
     local s = sparks[si]
     s.t, s.x, s.y = K.NOW, 78 + kind * 5, 42 - kind
   end
   function M.stab(notes)
-    stab_t = K.NOW
+    stab_t = K.NOW; add("stab")
     for i = 1, 4 do win[i] = clamp((K.num(K.chord[i], 55) - 40) / 36, 0.25, 1) end
   end
   function M.bass(note)
@@ -76,6 +81,7 @@ return function(K)
   end
   function M.arp(lane, note, step)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
+    add("arp")
     bi = bi % #buoys + 1
     local b = buoys[bi]
     b.t, b.lane, b.x = K.NOW, lane, clamp(K.px(K.num(note, 72)) * 0.6 + 4, 4, 74)
@@ -96,6 +102,9 @@ return function(K)
     ang = (ang + DT * (0.5 + 1.6 * clamp(e, 0, 1)) * (1 - 0.5 * K.kickless)) % K.TAU
     local kk, pf, cf = fade(kick_t, 0.3), fade(pump_t, 0.3), fade(clap_t, 0.3)
     local sf = fade(stab_t, 0.4)
+    local dk = math.exp(-DT / 0.3)
+    for k, v in pairs(acc) do acc[k] = v < 0.01 and 0 or v * dk end
+    local ak, ap, ah, at, as, aa = acc.kick, acc.pump, acc.hat, acc.tick, acc.stab, acc.arp
 
     -- stars, a few
     for i = 1, 9 do
@@ -139,18 +148,18 @@ return function(K)
     local prev
     for x = 66, 127, 3 do
       local yy = 45 - 7 * math.exp(-((x - 100) / 20) ^ 2) - 2 * K.hash(x, 2)
-      if prev then line(2, x - 3, prev, x, yy) end
+      if prev then line(2 + 4 * ak, x - 3, prev, x, yy) end
       prev = yy
     end
     for y = 46, 56, 2 do
       local x0 = 70 + (y - 46) * 2.5
-      K.dashes(1 + (y % 4 == 0 and 0.6 or 0), y, 3, 5, y * 7, x0, 128)
+      K.dashes(1 + (y % 4 == 0 and 0.6 or 0) + 4 * at, y, 3, 5, y * 7, x0, 128)
     end
     -- the tower: tapered, banded
     line(2, LX - 3, 24, LX - 5, 44); line(2, LX + 3, 24, LX + 5, 44)
     for y = 28, 42, 5 do
       local hw = 3 + (y - 24) / 20 * 2
-      line(1.2, LX - hw, y, LX + hw, y)
+      line(1.2 + 6 * as, LX - hw, y, LX + hw, y)
     end
     line(1.4, LX - 5, 44, LX + 5, 44)
     -- the gallery and the lantern
@@ -245,6 +254,10 @@ return function(K)
       end
     end
 
+    -- the hats' glitter lingers in rows across the wave tops
+    if ah > 0.03 then
+      for k = 0, 4 do K.dashes(3 * ah, HZ + 6 + k * 4, 2, 7, T * (3 + k) + k * 9, 2, 76) end
+    end
     -- the pad: slow swells at its notes' columns
     if pdz > 0.03 then
       for i = 1, #pad_notes do
@@ -269,7 +282,10 @@ return function(K)
     end
 
     -- the haze over the water, lifted by the mids
-    K.haze(0, HZ - 14, 80, HZ + 2, 0.1 + mid * 0.9, 1 + mid * 2, T * 2)
+    K.haze(0, HZ - 14, 80, HZ + 2, 0.1 + mid * 0.9 + 0.3 * ap, 1 + mid * 2, T * 2)
+    if aa > 0.03 then
+      for k = 0, 5 do K.dashes(2.5 * aa, 14 + k * 4, 2, 8, T * 2 + k * 11, 0, 74) end
+    end
     K.grain(function(u, v) return u * 76, HZ + 3 + v * 24 end, hi * 40, 7)
   end
 

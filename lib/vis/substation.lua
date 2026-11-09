@@ -41,6 +41,9 @@ return function(K)
   local spi, tick_n = 0, 0
   local pad_notes = {}
   local pdz = 0
+  -- hits pile up and drain: each one adds, so it shows whenever it lands
+  local acc = {tick = 0, bass = 0, arp = 0, hat = 0, perc = 0}
+  local function add(k) acc[k] = math.min(2, acc[k] + 0.3) end
 
   function M.init()
     kick_t, pump_t, bass_t, hat_t = -99, -99, -99, -99
@@ -49,6 +52,7 @@ return function(K)
     for i = 1, 4 do arcs[i].t = -99; sparks[i].t = -99 end
     pad_notes = {}
     pdz = 0
+    for k in pairs(acc) do acc[k] = 0 end
   end
   M.clear = M.init
 
@@ -67,9 +71,10 @@ return function(K)
 
   function M.kick() kick_t = K.NOW end
   function M.pump() pump_t = K.NOW end
-  function M.bass(note) bass_t = K.NOW end
+  function M.bass(note) bass_t = K.NOW; add("bass") end
   function M.hat()
     hat_n = hat_n + 1
+    add("hat")
     hat_t = K.NOW
     hat_x = 6 + (hat_n * 37) % 112
   end
@@ -82,6 +87,7 @@ return function(K)
   end
   function M.perc(voice, _)
     voice = clamp(math.floor(K.num(voice, 1)), 1, 4)
+    add("perc")
     local tank = (voice + arc_n) % 3 + 1
     local bx, by = bush(tank, voice % 3 + 1)
     arc(STR[(voice + tank) % 6 + 1], GANT + 5, bx, by)
@@ -89,6 +95,7 @@ return function(K)
   function M.tick(kind)
     kind = clamp(math.floor(K.num(kind, 1)), 1, 4)
     tick_n = tick_n + 1
+    add("tick")
     spi = spi % #sparks + 1
     local s = sparks[spi]
     s.t, s.k = K.NOW, kind
@@ -106,6 +113,7 @@ return function(K)
   function M.arp(lane, note, step)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
     note = K.num(note, 72)
+    add("arp")
     local s = strs[(lane * 2 + math.floor(K.num(step, 1))) % 6 + 1]
     s.t = K.NOW
     s.n = clamp(math.floor((note - 48) / 12) + 2, 1, 5)
@@ -143,6 +151,8 @@ return function(K)
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, pf, bt = fade(kick_t, 0.25), fade(pump_t, 0.3), fade(bass_t, 0.3)
     local hf = fade(hat_t, 0.12)
+    local dk = math.exp(-DT / 0.3)
+    for k, v in pairs(acc) do acc[k] = v < 0.01 and 0 or v * dk end
 
     -- the sky: faint sodium haze low over the yard, thicker with the pad
     for y = 6, GY - 6, 6 do
@@ -157,11 +167,11 @@ return function(K)
     end
 
     -- ground and the gravel line
-    line(1.5, 0, GY, 127, GY)
+    line(1.5 + 4 * acc.bass, 0, GY, 127, GY)
 
     -- the gantry bar, wires swaying with the pump, strings hanging off it
     local sag = 1 + 5 * pf
-    line(2 + mid * 1.5 + 4 * pf, 2, GANT, 108, GANT)
+    line(math.min(11, 2 + mid * 1.5 + 4 * pf + 4 * acc.arp), 2, GANT, 108, GANT)
     if pf > 0.05 then line(3 * pf, 2, GANT - 2, 108, GANT - 2); line(2.5 * pf, 2, GANT + 1, 108, GANT + 1) end
     line(1.4, 4, GANT, 4, GY); line(1.4, 106, GANT, 106, GY)
     for i = 1, #STR do
@@ -197,7 +207,7 @@ return function(K)
       line(2 + 3 * kk + bt, x0, TY0, x0, GY)
       line(2 + 3 * kk + bt, x0 + w, TY0, x0 + w, GY)
       line(1.5, x0 - 2, TY0 + 4, x0 + w + 2, TY0 + 4)
-      for fx = x0 + 3, x0 + w - 2, 5 do line(1, fx, TY0 + 5, fx, GY - 1) end
+      for fx = x0 + 3, x0 + w - 2, 5 do line(1 + 3 * acc.tick, fx, TY0 + 5, fx, GY - 1) end
       if bt > 0.04 then
         for y = TY0 + 6, GY - 2, 3 do put(6 * bt, x0 + 1, y, w - 1, 1) end
         put(4 * bt, x0 - 3, GY - 1, w + 7, 1); put(3 * bt, x0 - 5, GY, w + 11, 1)
@@ -236,10 +246,10 @@ return function(K)
     end
 
     -- the fence: rails, posts, mesh, barbed top
-    line(1.8, 0, FY0, 127, FY0); line(1.4, 0, FY1, 127, FY1)
+    line(1.8 + 3 * acc.perc, 0, FY0, 127, FY0); line(1.4, 0, FY1, 127, FY1)
     for x = 2, 127, 16 do line(1.8, x, FY0 - 2, x, FY1) end
     for x = 0, 127, 10 do line(0.7, x, FY0 + 1, x + 8, FY1 - 1) end
-    K.dashes(1.4, FY0 - 2, 1, 3, T * 2, 0, 128)
+    K.dashes(1.4 + 3 * acc.hat, FY0 - 2, 1, 3, T * 2, 0, 128)
     -- floodlight heads on the posts glow with the pad
     if pdz > 0.05 then
       for x = 14, 127, 24 do
@@ -257,7 +267,7 @@ return function(K)
       K.dashes(hi * 4, FY0 + 2, 1, 9, T * 9, 0, 128); K.dashes(hi * 3, FY1 + 1, 2, 11, T * 5, 0, 128)
     end
     if pf > 0.05 then
-      for y = FY0 + 1, FY1, 2 do put(2.4 * pf, 0, y, 128, 1) end
+      for y = FY0 + 1, FY1, 4 do put(4.5 * pf, 0, y, 128, 1) end
     end
 
     -- sparks off the radiators

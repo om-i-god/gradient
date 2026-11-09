@@ -25,6 +25,8 @@ return function(K)
   local stab_hit, beat_seen, bar_seen = 0, 0, 0
   local vk = {0, 0, 0, 0}
   local bs, glow = 0, 0
+  local kg = 0                            -- the kick's afterglow, which rises over a few frames
+  local arp_row, arp_t = 40, nil          -- the last arp note, held as a pip at the playhead
 
   local function vrow(n) return clamp(50 - (K.num(n, 60) - 46) * 1.5, 4, 49) end
   local function brow(n)
@@ -51,7 +53,7 @@ return function(K)
   function M.hat() mark("hat") end
   function M.clap() mark("clap") end
   function M.tick(kind) tick_seen = clamp(math.floor(K.num(kind, 1)), 1, 4) end
-  function M.arp(lane, note) arp_seen = vrow(note or 72) end
+  function M.arp(lane, note) arp_seen = vrow(note or 72); arp_row, arp_t = math.floor(arp_seen), K.NOW end
   function M.perc(voice, note)
     marks[#marks + 1] = {t = K.T, y = math.floor(vrow(note or 60)), v = clamp(math.floor(K.num(voice, 1)), 1, 4)}
     while #marks > 5 do table.remove(marks, 1) end
@@ -63,6 +65,7 @@ return function(K)
     ys, by = {40, 33, 29, 22}, 57
     stab_hit, beat_seen, bar_seen, bs, glow = 0, 0, 0, 0, 0
     vk = {0, 0, 0, 0}
+    kg, arp_t = 0, nil
   end
 
   function M.stab()
@@ -135,6 +138,7 @@ return function(K)
     by = follow(by, brow(K.bass_note or 36), 0.15, DT)
     bs = follow(bs, math.max(K.env.bass * (bg > 0 and 1 or 0.5), A[K.LO] * 0.6), 0.05, DT)
     glow = follow(glow, A[K.LO], 0.12, DT)
+    kg = follow(kg, fade("kick", 0.3), 0.15, DT)
 
     -- scroll: columns on an exact time ladder, so neighbours sit 2 px apart
     if not next_t or next_t > T + 1 then next_t = T end
@@ -153,12 +157,19 @@ return function(K)
     for _, n2 in ipairs(STAFF) do
       K.dashes(1 + A[K.HI] * 1.6 + pd * 1.5, math.floor(vrow(n2)), 1, 6, -T * RATE, 0, HEAD)
       -- the hats catch on the staff near the playhead
-      if hh > 0.02 then K.dashes(4.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
+      if hh > 0.02 then K.dashes(5.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
     end
     -- the kick throws a short glow back from the playhead
     if kk > 0.05 then
-      for y = 4, BASS_TOP - 2, 2 do put(3.5 * kk, HEAD - 2, y, 1, 1) end
+      for y = 4, BASS_TOP - 2, 2 do put(20 * math.max(kk * 0.3, kg), HEAD - 2, y, 1, 1) end
     end
+    -- the arp's last note stays as a pip beside the playhead
+    if arp_t then
+      local ag = math.exp(-(K.NOW - arp_t) / 0.5)
+      if ag < 0.03 then arp_t = nil else put(6 * ag, HEAD + 3, arp_row - 2, 1, 5) end
+    end
+    -- the clap lights a line beside the playhead
+    if cl > 0.05 then put(6 * cl, HEAD + 3, 20, 1, 14) end
     -- the playhead: the pump breathes it, the kick lights it
     put(1.5 + (1 - breathe) * 6 + K.env.kick * 4, HEAD + 2, 3, 1, BASS_BOT - 3)
 
@@ -180,9 +191,9 @@ return function(K)
       if col.tick then
         -- a tick: a dotted hair through its voice's ribbon
         local yy = col.y[col.tick]
-        for y = yy - 14, yy + 14, 2 do put(5 * fade, x, y, 1, 1) end
+        for y = yy - 14, yy + 14, 2 do put(8 * fade * math.max(0, 1 - k / 26), x, y, 1, 1) end
       end
-      if col.arpy then put(6 * fade, x, col.arpy - 1, 2, 3) end
+      if col.arpy then put(11 * fade * math.max(0, 1 - k / 14), x, col.arpy - 1, 2, 3) end
       if col.stem then
         local top, bot = math.min(col.y[4], col.y[1]), math.max(col.y[4], col.y[1])
         for y = top + 2, bot - 2, 3 do put((1 + col.stem) * fade, x + 1, y, 1, 1) end
@@ -246,11 +257,11 @@ return function(K)
     for j = #marks, 1, -1 do
       local m = marks[j]
       local age = T - m.t
-      local f = 1 - age / 1.6
+      local f = 1 - age / 1.0
       local x = math.floor(HEAD - 4 - age * RATE + 0.5)
       if f <= 0 or x < 2 then table.remove(marks, j)
       else
-        local l = 8 * f
+        local l = 14 * f
         put(l, x, m.y - 2, 1, 1); put(l, x - 2, m.y, 1, 1); put(l, x + 2, m.y, 1, 1); put(l, x, m.y + 2, 1, 1)
         put(l * 0.6, x - 1, m.y - 1, 1, 1); put(l * 0.6, x + 1, m.y - 1, 1, 1)
         put(l * 0.6, x - 1, m.y + 1, 1, 1); put(l * 0.6, x + 1, m.y + 1, 1, 1)
@@ -259,7 +270,7 @@ return function(K)
 
     -- the heads at the playhead: bright points where each voice is written
     for i = 1, 4 do
-      put(4 + vk[i] * 6 + K.env.kick * 2 + kk * 3, HEAD, math.floor(ys[i] + 0.5), 2, 1)
+      put(4 + vk[i] * 6 + K.env.kick * 2 + kk * 1.5 + kg * 4, HEAD, math.floor(ys[i] + 0.5), 2, 1)
     end
 
     -- haze: kickless and dub loosen the picture

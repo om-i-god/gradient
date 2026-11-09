@@ -231,8 +231,7 @@ return function(K)
       for _, a in ipairs(air) do
         local r = 21 + a.u * 10
         local side = x0 < 64 and 1 or -1
-        local l = 1 + 3 * a.v * (1 - a.u)
-        l = fine and math.min(13, 1 + 3.4 * a.v * (1 - a.u)) or l
+        local l = fine and math.min(13, 1 + 3.4 * a.v * (1 - a.u)) or (1 + 3 * a.v * (1 - a.u))
         local px, py
         for k = -3, 3 do
           local th = k * 0.2
@@ -261,7 +260,7 @@ return function(K)
       for i = 1, 4 do put(2.5 + lk[i] * 9, x0 + 5 + (i - 1) * 9, 8, 2, 1) end
       if af > 0.03 then                                              -- an arp note flares its tweeter
         put(E(6 * af), x0 + 4 + (alane[si] - 1) * 9, 7, 4, 3)
-        if fine then                                                 -- the whole tweeter bar and the horn above it ring
+        if fine then                                                 -- the whole tweeter bar rings
           box(E(4 * af), x0 + 2, 6, 36, 5)
         end
       end

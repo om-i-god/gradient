@@ -309,12 +309,12 @@ return function(K)
     -- dense: the winding of each pack, a ring or two turning with the reel
     if dense and fp then
       for r = 1, 2 do
-        local cx, rp, an = r == 1 and LX or RX, r == 1 and rpL or rpR, r == 1 and -angL or -angR
+        local cx, rp, rot = r == 1 and LX or RX, r == 1 and rpL or rpR, r == 1 and -angL or -angR
         for ring = 1, 2 do
           local rr = rp - 2 - ring * 3
           if rr > 5 then
             for k = 0, 5 do
-              local a0 = an * 0.5 + k / 6 * TAU
+              local a0 = rot * 0.5 + k / 6 * TAU
               line(2.2 + ring * 0.3, cx + math.cos(a0) * rr, RY + math.sin(a0) * rr, cx + math.cos(a0 + 0.8) * rr, RY + math.sin(a0 + 0.8) * rr)
             end
           end

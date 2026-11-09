@@ -528,7 +528,7 @@ end
 -- a theme switch eases through black rather than cutting
 if not ONLY then
   test("visuals theme switch eases", function()
-    local st = run(1, "mid", {frames = 400, switch_every = 25})
+    local st = run(1, "mid", {frames = 25 * (#NAMES + 1) + 25, switch_every = 25})  -- every theme, and the wrap back to the first
     if REPORT then print(string.format("switch diffMax %.3f", st.diff_max)) end
     assert(st.diff_max <= DIFF_MAX * 0.8, string.format("theme switch jump %.3f", st.diff_max))
     assert(st.bad == 0)

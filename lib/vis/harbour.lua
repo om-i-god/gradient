@@ -157,6 +157,8 @@ return function(K)
     local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, pf, cf = fade(kick_t, 0.3), fade(pump_t, 0.3), fade(clap_t, 0.35)
+    -- fine: the kick lands with the pump, bass ring and arps; it ramps in over 70 ms instead of jumping
+    if fine then kk = kk * math.min(1, (NOW - kick_t) / 0.07) end
     local bf = fade(bridge_t, 0.35)
     local sway = 0.5 + 3.5 * lo + 1.5 * K.env.bass
 

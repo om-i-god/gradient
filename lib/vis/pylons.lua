@@ -49,11 +49,13 @@ return function(K)
   local hit, arps, percs = {}, {-99, -99, -99, -99}, {}
   local acnt = {0, 0, 0, 0}             -- arp notes so far, per lane
   local pdz, mz = 0, 0  -- the pad, eased in
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -124,6 +126,11 @@ return function(K)
 
   function M.draw(S)
     local T, DT, e = K.T, K.DT, K.energy
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.15 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     local kl = K.kickless
     local hi, lo = A[K.HI], A[K.LO]
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
@@ -168,36 +175,63 @@ return function(K)
       local y = HY + 2 + math.floor(k * k * 0.42)
       if y < 64 then K.dashes(1, y, 2 + k, 5 + k * 3, k * 13 + T * 0.4, 0, 128) end
       -- a kick thumps the furrows
-      if y < 64 and kk > 0.03 then K.dashes(4 * kk, y, 2 + k, 5 + k * 3, k * 13 + T * 0.4, 0, 128) end
+      if y < 64 and kk > 0.03 then K.dashes(E(fine and 4.6 * kk or 4 * kk), y, 2 + k, 5 + k * 3, k * 13 + T * 0.4, 0, 128) end
+    end
+    if fp then            -- fine: furrows between the furrows, dimmer and shorter, for depth
+      for k = 0, 5 do
+        local y = HY + 3 + math.floor((k + 0.5) * (k + 0.5) * 0.42)
+        if y < 64 then K.dashes(1, y, 1 + k * 0.5, 7 + k * 3, k * 9 - T * 0.3, 0, 128) end
+      end
+    end
+    if dense and fp then  -- dense: a fence along the field and the town's lights on the horizon
+      for fx = 3, 124, 8 do put(1.5, fx, HY + 2, 1, 2) end
+      line(1, 0, HY + 2, 127, HY + 2)
+      for i = 0, 17 do
+        local lx = 62 + math.floor(K.hash(i, 85) * 64)
+        put(1.2 + (0.5 + 0.5 * math.sin(T * (0.7 + K.hash(i, 86)) + i)) * 1.6, lx, HY - 1 - math.floor(K.hash(i, 87) * 4), 1, 1)
+      end
     end
     local fog_top = HY - 2 - kl * 8
-    K.haze(0, math.floor(fog_top), 128, 64, 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw + 0.3 * mz + 0.15 * pd, 1, T * 2.5)
+    K.haze(0, math.floor(fog_top), 128, 64, 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw + (fp and 0.36 or 0.3) * mz + (fp and 0.19 or 0.15) * pd, 1, T * 2.5)
 
     -- the towers, far to near; the near one's warning light marks the bar
     tower(TW[3], 1.2, 0)
     tower(TW[2], 1.8, 0)
     tower(TW[1], 2.6, 0)
+    if fp then        -- the near tower's legs have thickness
+      local t1 = TW[1]
+      line(1.3, t1.x - 9 + 1, t1.y, t1.x - 3 + 1, t1.y - 34); line(1.3, t1.x + 9 - 1, t1.y, t1.x + 3 - 1, t1.y - 34)
+    end
     put(2 + 7 * K.bar_pulse, TW[1].x, TW[1].y - 56, 1, 1)
     -- a clap swells the moon's halo
     if cl > 0.03 then
       for dy = -6, 6 do
         local hw = math.floor(math.sqrt(math.max(0.5, 42 - dy * dy)) + 0.5)
-        put(4 * cl, 54 + 1 - hw, 9 + dy, 2 * hw, 1)
+        put(E(4 * cl), 54 + 1 - hw, 9 + dy, 2 * hw, 1)
       end
     end
     -- a tick blinks a far tower's warning light
     if tk > 0.03 then
       local t = TW[hit.tk]
-      put(6 * tk, t.x - 2, t.y - 56 * t.s - 1, 5, 3)
+      put(E(6 * tk), t.x - 2, t.y - 56 * t.s - 1, 5, 3)
+      if fine then                             -- and the whole far tower catches it
+        tower(t, E(4.6 * tk), 0)
+        put(E(8 * tk), t.x - 3, t.y - 56 * t.s - 2, 7, 5)
+      end
     end
     -- a perc: a farm light in the dark, its voice the depth, its note the place
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local v = math.exp(-(K.NOW - p.t) / 0.35)
+      local v = math.exp(-(K.NOW - p.t) / (0.35 * TR()))
       if v < 0.03 then table.remove(percs, i)
       else
         local x, y = 6 + p.n * 10, HY + 1 + p.v * 3
-        put(6 * v, x - 2, y, 5, 3); put(6 * v, x, y - 1, 1, 5)
+        put(E(6 * v), x - 2, y, 5, 3); put(E(6 * v), x, y - 1, 1, 5)
+        if fine then                           -- the farm light throws a pool on the ground and a halo in the air
+          put(E(4 * v), x - 6, y + 1, 13, 1)
+          put(E(3.4 * v), x - 9, y + 3, 19, 1); put(E(2.8 * v), x - 12, y + 5, 25, 1)
+          put(E(3.4 * v), x - 4, y - 3, 9, 7)
+        end
       end
     end
 
@@ -205,7 +239,7 @@ return function(K)
     local hum = (0.3 + 1.2 * lo) * math.sin(T * 31)
     local sw = sway * math.sin(T * 0.9) * 2.5
     local function wire_sag(i, near)
-      return (2 + 4 * sag + 2.2 * dip) * near + sw * near + (i % 2 == 0 and 0.3 or 0)
+      return (2 + (fp and 4.8 or 4) * sag + (fp and 3 or 2.2) * dip) * near + sw * near + (i % 2 == 0 and 0.3 or 0)
     end
     for i = 1, 4 do
       local wl = (1.6 + K.lane_kick[i] * 1.5 + e * 0.5 + hi * 1.3) * (1 + 0.15 * A[K.AMP])
@@ -220,7 +254,8 @@ return function(K)
           local u = k / n
           local x, y = span_pt(p, q, u, sg)
           y = y + hum * near * 0.5 * math.sin(u * math.pi)
-          line(wl * (si == 4 and 0.7 or 1), px0, py0, x, y)
+          if fp and si == 1 and sway > 0.1 then K.line_sub(wl * 1.3, px0, py0, x, y)    -- swaying, the near span glides between pixels
+          else line(wl * (si == 4 and 0.7 or 1), px0, py0, x, y) end
           px0, py0 = x, y
         end
       end
@@ -244,20 +279,21 @@ return function(K)
       local ti = (hit.hatn or 0) % 3 + 1
       for i = 1, 4 do
         local p = TIP[ti][i]
-        put(6 * hh, p[1] - 1, p[2], 3, 3)
+        put(E(6 * hh), p[1] - 1, p[2], 3, 3)
       end
+      if fine then tower(TW[ti], E(4.8 * hh), 0) end    -- the whole tower crackles
     end
     -- a stab lights the near tower's insulators in a halo
     local sb = fade("stab", 0.4)
     if sb > 0.03 then
-      for i = 1, 4 do put(5 * sb, TIP[1][i][1] - 2, TIP[1][i][2] - 1, 5, 4) end
+      for i = 1, 4 do put(E(5 * sb), TIP[1][i][1] - 2, TIP[1][i][2] - 1, 5, 4) end
     end
     -- an arp note flares its wire's insulator, each on the next tower along
     for i = 1, 4 do
-      local ar = math.exp(-(K.NOW - arps[i]) / 0.35)
+      local ar = math.exp(-(K.NOW - arps[i]) / (0.35 * TR()))
       if ar > 0.03 then
         local q = TIP[acnt[i] % 3 + 1][i]            -- each note on the next tower along
-        put(6 * ar, q[1] - 3, q[2] - 2, 7, 7)
+        put(E(fine and 6.6 * ar or 6 * ar), q[1] - 3, q[2] - 2, 7, 7)
       end
     end
     -- the highs crackle round the near insulators
@@ -285,9 +321,15 @@ return function(K)
         end
         local x, y, near = at(pos)
         local lv = sp.a * (6 + 6 * near) * (1 - u ^ 4)
-        put(lv, x, y - 1, 1, 1)
         local tx, ty = at(math.max(0, pos - 0.08))
-        line(lv * 0.35, tx, ty, x, y)
+        if fp then
+          -- the spark glides along the wire between pixels, its tail drawn from where it just was
+          K.put_sub(math.min(lv * 1.5, 13), x, y - 1, 1, 1)
+          line(lv * 0.35, tx, ty, x, y)
+        else
+          put(lv, x, y - 1, 1, 1)
+          line(lv * 0.35, tx, ty, x, y)
+        end
       end
     end
   end

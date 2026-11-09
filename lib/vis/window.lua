@@ -44,11 +44,13 @@ return function(K)
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
   local hit, percs = {}, {}
   local pdz = 0                          -- the pad, eased in
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -104,24 +106,34 @@ return function(K)
   end
 
   function M.pump()
+    mark("pump")
     -- the pump shakes the glass: drops jerk on, sometimes a new one starts
     for _, d in ipairs(drops) do d.hold = 0; d.v = d.v + 14 + 10 * K.rnd() end
     if K.rnd() < 0.5 then new_drop() end
   end
 
-  local function draw_disc(l, cx, cy, r, rim)
+  -- a row at a fractional x: the end pixels take the share they cover
+  local function srow(l, x, y, w)
+    local ix = math.floor(x)
+    local f = x - ix
+    if f < 0.12 or w < 2 then return row(l, ix, y, w) end
+    row(l * (1 - f), ix, y, 1); row(l, ix + 1, y, w - 1); row(l * f, ix + w, y, 1)
+  end
+
+  local function draw_disc(l, cx, cy, r, rim, sub)
     if l < 0.4 or r < 1 then return end
+    local rw = sub and srow or row
     for dy = -r, r do
       local u = dy / (r + 0.5)
       local hw = math.floor(r * math.sqrt(math.max(0, 1 - u * u)) + 0.5)
       if hw > 0 then
         local y = math.floor(cy + dy)
-        if math.abs(dy) >= r - 1 then row(l + rim, cx - hw, y, 2 * hw)
+        if math.abs(dy) >= r - 1 then rw(l + rim, cx - hw, y, 2 * hw)
         elseif dy % 2 == 0 and rim > 0 then
-          row(l, cx - hw + 1, y, 2 * hw - 2)
-          row(l + rim, cx - hw, y, 1); row(l + rim, cx + hw - 1, y, 1)
+          rw(l, cx - hw + 1, y, 2 * hw - 2)
+          rw(l + rim, cx - hw, y, 1); rw(l + rim, cx + hw - 1, y, 1)
         else
-          row(l, cx - hw, y, 2 * hw)
+          rw(l, cx - hw, y, 2 * hw)
         end
       end
     end
@@ -129,14 +141,21 @@ return function(K)
 
   function M.draw(S)
     local T, DT, e = K.T, K.DT, K.energy
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.15 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     local kl = K.kickless
     local c = K.chord
     local mean = (c[1] + c[2] + c[3] + c[4]) / 4
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, hh, cl, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("tick", 0.4)
     local bh = fade("bass", 0.4)
+    local pu = fade("pump", 0.3)
     local pd, mid = pdz, A[K.MID]
-    mist = K.follow(mist, 0.2 * kl + 0.1 * K.dub * K.throw + 0.2 * pd + 0.05 * mid, 1, DT)
+    local mf = fp and mid or 0             -- the mids lift the lit windows and the glow (fine)
+    mist = K.follow(mist, 0.2 * kl + 0.1 * K.dub * K.throw + (fp and 0.23 or 0.2) * pd + 0.05 * mid, 1, DT)
     local soft = 1 + kl * 0.25
 
     -- the far skyline, a dim blur; the city's ground glow under it
@@ -149,27 +168,33 @@ return function(K)
       local y = 40 + math.floor(K.hash(i, 62) * 14)
       local w = 3 + math.floor(K.hash(i, 63) * 7)
       local sh = 0.5 + 0.5 * math.sin(T * (0.4 + K.hash(i, 64)) + i * 2.7 + 2.5 * mid)
-      local l = 1 + K.hash(i, 65) * 1.2 + sh * 0.8 + e * 0.5
+      local l = 1 + K.hash(i, 65) * 1.2 + sh * 0.8 + e * 0.5 + ((x < 90 or x > 122) and 1.6 * mf or 0)
       row(l, x, y, w)
-      if w > 4 then row(l * 0.6, x + 1, y + 1, w - 2) end
+      if w > 4 and not fp then row(l * 0.6, x + 1, y + 1, w - 2) end
     end
     -- buildings: unlit masses cut out of the glow are too sharp through
     -- wet glass, so they show only as the dim rows of their windows
     for c2 = 0, 63, 2 do
       local top = far[c2]
       for y = top + 2, SILL - 6, 3 do
-        if K.hash(c2 * 31 + y, 5) > 0.55 then row(1.8, c2 * 2, y, 2) end
+        if K.hash(c2 * 31 + y, 5) > (fp and 0.66 or 0.55) then row(1.8 + ((c2 * 2 < 92 or c2 * 2 > 120) and 2.4 * mf or 0), c2 * 2, y, 2) end
       end
     end
 
     -- the bass: a big streetlamp blur low on the right, and the kick in it
     local bassg = K.gain(S, "bass") > 0 and 1 or 0.4
-    lamp = K.follow(lamp, math.max(K.env.bass * bassg * 0.8, A[K.LO] * 0.75, K.env.kick * 0.5), 0.07, DT)
-    draw_disc(1 + lamp * 3, 106, 50, math.floor(8 + lamp * 3 + kl * 2), 0.8)
+    lamp = K.follow(lamp, math.max(K.env.bass * bassg * 0.8, A[K.LO] * 0.75, K.env.kick * (fp and 0.6 or 0.5)), 0.07, DT)
+    draw_disc(1 + lamp * (fp and 3.4 or 3), 106, 50, math.floor(8 + lamp * 3 + kl * 2), 0.8)
     -- the kick swells the lamp's blur
     -- a bass note lights a hot core in it
-    if bh > 0.03 then draw_disc(4 * bh, 106, 50, 6, 0) end
-    if kk > 0.03 then draw_disc(3.5 * kk, 106, 50, math.floor(9 + (hit.kickn or 0) % 3 * 2 + lamp * 3 + kl * 2), 0) end
+    if bh > 0.03 then
+      draw_disc(E(4 * bh), 106, 50, 6, 0)
+      if fine then                          -- the blur blooms round the core, and the sill below it takes the light
+        local bn = (hit.bassn or 0) % 3        -- each note throws its light to the next place along the sill
+        row(E(4.5 * bh), 90 + bn * 4, SILL - 1, 24); row(E(3 * bh), 94 + bn * 4, SILL - 2, 16)
+      end
+    end
+    if kk > 0.03 then draw_disc(E(fine and 4.4 * kk or 3.5 * kk), 106, 50, math.floor(9 + (hit.kickn or 0) % 3 * 2 + lamp * 3 + kl * 2), 0) end
 
     -- the arp lights: far windows switching on, holding, going out
     for i = #lights, 1, -1 do
@@ -194,8 +219,8 @@ return function(K)
       d.y = K.follow(d.y, ty, 0.4, DT)
       d.k = K.follow(d.k, K.voice_kick[i], 0.06, DT)
       local r = math.floor((5 + (4 - i) * 0.7 + d.k * 2) * soft * breathe + 0.5)
-      local l = (1.6 + 1.2 * e + d.k * 4) * (1 - kl * 0.25) * (1 + 0.3 * A[K.AMP])
-      draw_disc(l, d.x, d.y, r, 1 + A[K.HI] * 0.5)
+      local l = (1.6 + 1.2 * e + d.k * (fp and 4.6 or 4)) * (1 - kl * 0.25) * (1 + (fp and 0.36 or 0.3) * A[K.AMP])
+      draw_disc(l, d.x, d.y, r, 1 + A[K.HI] * 0.5, fp)
     end
     -- the discs' ghosts in the double glazing, at the echo time
     for i = #ghost, 1, -1 do
@@ -218,22 +243,26 @@ return function(K)
     -- the newest window flares in the wet air round it
     local af = fade("arp", 0.45)
     if af > 0.03 then
-      for dy = -3, 3 do row(5 * af, hit.ax - 6, hit.ay + dy, 13) end
+      for dy = -3, 3 do row(E(fine and 6.5 * af or 5 * af), hit.ax - 6, hit.ay + dy, 13) end
+      if fine then                          -- a wider bloom of wet air, and the pane's reflection of the window
+        for dy = -4, 4, 4 do row(E(4 * af), hit.ax - 10, hit.ay + dy, 21) end
+        row(E(5 * af), hit.ax - 1, math.min(SILL - 1, hit.ay + 8), 3)
+      end
     end
     -- a clap swells the light along the mullion
-    if cl > 0.03 then put(5 * cl, MX, 0, MW, SILL) end
+    if cl > 0.03 then put(E(5 * cl), MX, 0, MW, SILL) end
     -- a perc: a small far light, its voice the height, its note the place
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local v = math.exp(-(K.NOW - p.t) / 0.35)
+      local v = math.exp(-(K.NOW - p.t) / (0.35 * TR()))
       if v < 0.03 then table.remove(percs, i)
-      else draw_disc(5 * v, 8 + p.n * 9, 12 + p.v * 8, 3, 0) end
+      else draw_disc(E(fine and 5.6 * v or 5 * v), 8 + p.n * 9, 12 + p.v * 8, 3, 0) end
     end
     -- a tick: a glint on a bead of the glass
     if tk > 0.03 then
       local gx, gy = 10 + hit.tk * 24 + (hit.tickn or 0) % 3 * 5, 16 + (hit.tickn or 0) % 4 * 9
-      for dy = -1, 1 do row(6 * tk, gx - 5, gy + dy, 11) end
-      for dy = -3, 3 do if dy < -1 or dy > 1 then row(6 * tk, gx - 1, gy + dy, 3) end end
+      for dy = -1, 1 do row(E(fine and 6.8 * tk or 6 * tk), gx - 5, gy + dy, 11) end
+      for dy = -3, 3 do if dy < -1 or dy > 1 then row(E(fine and 6.8 * tk or 6 * tk), gx - 1, gy + dy, 3) end end
     end
     put(1, 0, SILL + 3, 128, 1)
 
@@ -258,7 +287,15 @@ return function(K)
       local hn = hit.hatn or 0
       for j = 1, 8 do
         local gx, gy = math.floor(K.hash(hn * 8 + j, 91) * 126), math.floor(K.hash(hn * 8 + j, 92) * (SILL - 3))
-        row(6 * hh, gx, gy, 3); row(6 * hh, gx, gy + 1, 3)
+        row(E(fine and 6.8 * hh or 6 * hh), gx, gy, 3); row(E(fine and 6.8 * hh or 6 * hh), gx, gy + 1, 3)
+      end
+    end
+    -- a pump shivers the beads on the glass, a different handful each time (fine)
+    if fine and pu > 0.03 then
+      local pn = hit.pumpn or 0
+      for j = 1, 5 do
+        local gx, gy = math.floor(K.hash(pn * 10 + j, 93) * 124), math.floor(K.hash(pn * 10 + j, 94) * (SILL - 3))
+        row(E(5.5 * pu), gx, gy, 4); row(E(5.5 * pu), gx, gy + 1, 4)
       end
     end
     for i = 0, 33 do
@@ -273,6 +310,19 @@ return function(K)
       local ln = lens(x, y)
       row((1.5 + ln + hi * 3 * tw) * a, x, y, 1)
       if a > 0.5 then row((2.5 + ln * 1.5 + hi * 4 * tw) * a, x, y - 1, i % 3 == 0 and 2 or 1) end
+    end
+    -- dense: a second, finer set of beads, condensation on the cold glass
+    if dense and fp then
+      for i = 34, 45 do
+        local life = 9 + 5 * K.hash(i, 51)
+        local ph = T / life + K.hash(i, 52)
+        local gen = math.floor(ph)
+        local u = ph - gen
+        local a = math.min(1, u * 5, (1 - u) * 5)
+        local x = math.floor(K.hash(i * 97 + gen, 53) * 127)
+        local y = math.floor(K.hash(i * 89 + gen, 54) * (SILL - 2))
+        row((1.4 + lens(x, y) + hi * 2) * a, x, y, 1)
+      end
     end
     if #drops < 5 then new_drop() end
     local g = 26 * (1 - kl * 0.6)
@@ -294,9 +344,17 @@ return function(K)
         -- the wet track it leaves, and its head catching the light
         if y - d.y0 > 1 then put(1, x, d.y0, 1, y - d.y0) end
         local ln = lens(x, y)
-        row(2 + ln, x, y - 1, d.w)
-        row(5 + ln * 1.5 + hi * 3 + (d.v > 4 and 1.5 or 0), x, y, d.w)
-        row(2.5 + ln, x, y + 1, d.w)
+        local hl = 5 + ln * 1.5 + hi * 3 + (d.v > 4 and 1.5 or 0)
+        if fp and y < SILL - 1 and (d.x < MX - 2 or d.x > MX + MW + 1) then
+          -- the head glides: its level split between the rows (and columns) it sits across
+          row(2 + ln, x, y - 1, d.w)
+          K.put_sub(hl, d.x, d.y, d.w, 1)
+          row(2.5 + ln, x, y + 1, d.w)
+        else
+          row(2 + ln, x, y - 1, d.w)
+          row(hl, x, y, d.w)
+          row(2.5 + ln, x, y + 1, d.w)
+        end
       end
     end
     -- two drops meeting run on as one

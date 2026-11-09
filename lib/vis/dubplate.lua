@@ -29,11 +29,13 @@ return function(K)
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
   local hit, percs = {}, {}
   local pdz = 0                           -- the pad, eased in
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -63,11 +65,11 @@ return function(K)
   end
 
   -- an arc of the plate at radius r from a0 to a1, in n segments
-  local function arc(l, r, a0, a1, n, dy)
+  local function arc(l, r, a0, a1, n, dy, sub)
     local x0, y0 = pt(r, a0, dy)
     for k = 1, n do
       local x1, y1 = pt(r, a0 + (a1 - a0) * k / n, dy)
-      line(l, x0, y0, x1, y1)
+      if sub then K.line_sub(l, x0, y0, x1, y1) else line(l, x0, y0, x1, y1) end
       x0, y0 = x1, y1
     end
   end
@@ -90,6 +92,11 @@ return function(K)
 
   function M.draw(S)
     local T, DT, DTS = K.T, K.DT, K.DTS
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.15 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     local kl = K.kickless
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, hh, cl, bh, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("bass", 0.4), fade("tick", 0.4)
@@ -120,14 +127,14 @@ return function(K)
     put(1.5, 118, 39, 1, 15)
     -- a tick blinks the start / stop light or the pitch fader
     if tk > 0.03 then
-      if hit.tk == 0 then put(6 * tk, 3, 49, 9, 7) else put(4 * tk, 114, 38, 9, 17) end
+      if hit.tk == 0 then put(E(6 * tk), 3, 49, 9, 7) else put(E(4 * tk), 114, 38, 9, 17) end
     end
     local tp = clamp((K.num(S.tempo, 124) - 100) / 50, 0, 1)
     put(4, 116, 52 - tp * 12, 5, 2)
     K.gradient(59, 63, function(y) return bs * 1.6 * (y - 58) / 5 end)
     -- a bass note lights the plinth's underside in dashes that step along
     if bh > 0.03 then
-      for y = 59, 63 do K.dashes(5 * bh, y, 10, 4, (hit.bassn or 0) * 3 + y * 2, 0, 128) end
+      for y = 59, 63 do K.dashes(E(5 * bh), y, 10, 4, (hit.bassn or 0) * 3 + y * 2, 0, 128) end
     end
     put(4 + lamp * 5, LMX - 3, LMY, 8, 2)
     put(2, LMX - 1, 0, 2, LMY)
@@ -144,10 +151,10 @@ return function(K)
         local x, y = pt(pr, a, 1.5)
         put((2 + 6 * lamp) * (k % 2 == 0 and 1 or 0.55), x, y, 2, 1)
         -- a kick lights every third dot, a different third each time
-        if kk > 0.03 and (k + (hit.kickn or 0)) % 3 == 0 then put(6 * kk, x - 1, y - 1, 4, 3) end
+        if kk > 0.03 and (k + (hit.kickn or 0)) % 3 == 0 then put(E(6 * kk), x - 1, y - 1, 4, 3) end
       end
     end
-    if kk > 0.03 then arc(4 * kk, pr, 0.05, math.pi - 0.05, 12, 3) end
+    if kk > 0.03 then arc(E(4 * kk), pr, 0.05, math.pi - 0.05, 12, 3) end
 
     -- the record: its edge, the gaps between tracks, the grooves where they
     -- catch the light
@@ -173,18 +180,27 @@ return function(K)
     for dy = -math.floor(lr * RY), math.floor(lr * RY) do
       local u = dy / (lr * RY)
       local hw = math.floor(lr * RX * math.sqrt(math.max(0, 1 - u * u)) + 0.5)
-      if hw > 0 then put(2 + lamp * 1.2, CX - hw, CY + dy + warp * 0.3, 2 * hw, 1) end
+      if hw > 0 then
+        if fp then K.put_sub(2 + lamp * 1.2, CX - hw, CY + dy + warp * 0.3, 2 * hw, 1)
+        else put(2 + lamp * 1.2, CX - hw, CY + dy + warp * 0.3, 2 * hw, 1) end
+      end
+    end
+    if fp then            -- the print round the label's edge, turning with it
+      for k = 0, 3 do
+        local a = -rot + k * 1.57 + 0.3
+        arc(3 + lamp, 0.27, a, a + 0.7, 3, warp * 0.3, true)
+      end
     end
     -- an arp note lights the next pilot along the plinth's top
     local af = fade("arp", 0.4)
-    if af > 0.03 then put(6 * af, 16 + ((hit.arpn or 1) - 1) % 8 * 11, 8, 7, 3) end
+    if af > 0.03 then put(E(6 * af), 16 + ((hit.arpn or 1) - 1) % 8 * 11, 8, 7, 3) end
     -- a clap swells the label's paper
     if cl > 0.03 then
-      put(5 * cl, 0, 0, 14, 8)                       -- and the lamp's shade
+      put(E(5 * cl), 0, 0, 14, 8)                       -- and the lamp's shade
       for dy = -math.floor(lr * RY), math.floor(lr * RY) do
         local u = dy / (lr * RY)
         local hw = math.floor(lr * RX * math.sqrt(math.max(0, 1 - u * u)) + 0.5)
-        if hw > 0 then put(4.5 * cl, CX - hw, CY + dy + warp * 0.3, 2 * hw, 1) end
+        if hw > 0 then put(E(4.5 * cl), CX - hw, CY + dy + warp * 0.3, 2 * hw, 1) end
       end
     end
     for k = 0, 1 do
@@ -223,17 +239,17 @@ return function(K)
       local hn = hit.hatn or 0
       for j = 1, 6 do
         local x, y = pt(0.4 + K.hash(hn * 6 + j, 95) * 0.55, K.hash(hn * 6 + j, 96) * TAU - rot, 0)
-        put(6 * hh, x - 1, y - 1, 3, 3)
+        put(E(6 * hh), x - 1, y - 1, 3, 3)
       end
     end
     -- a perc leaves a speck on the groove, round with the record
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local v = math.exp(-(K.NOW - p.t) / 0.35)
+      local v = math.exp(-(K.NOW - p.t) / (0.35 * TR()))
       if v < 0.03 then table.remove(percs, i)
       else
         local x, y = pt(p.r, p.a + rot, warp * p.r)
-        put(6 * v, x - 3, y - 2, 7, 5)
+        put(E(6 * v), x - 3, y - 2, 7, 5)
       end
     end
     -- the stabs' glints, riding the groove round
@@ -241,11 +257,11 @@ return function(K)
       local g = glints[i]
       if g then
         local age = T - g.t0
-        local v = math.exp(-age / 0.5)
+        local v = math.exp(-age / (0.5 * TR()))
         if v < 0.05 then glints[i] = nil
         else
           local a = g.a + rot
-          arc(3 + 9 * v * (0.6 + 0.4 * K.voice_kick[i]), g.r, a - 0.25, a + 0.25, 2, warp * g.r)
+          arc(E(3 + 9 * v * (0.6 + 0.4 * K.voice_kick[i])), g.r, a - 0.25, a + 0.25, 2, warp * g.r)
         end
       end
     end
@@ -257,11 +273,30 @@ return function(K)
     put(4 + lamp, PX + 3, PY - 2, 5, 4)
     local bx, by = PX - 10, PY + 14
     line(5, PX, PY, bx, by)
-    line(5, bx, by, sx + 4, sy - 2)
-    line(7, sx + 4, sy - 2, sx, sy)
-    put(4, sx - 1, sy - 3, 4, 2)
-    put(6 + K.env.kick * 5 + bs * 2, sx, sy, 1, 1)
+    if fp then
+      -- the arm creeps inward a fraction of a pixel a frame: its lines and the stylus glide
+      K.line_sub(5, bx, by, sx + 4, sy - 2)
+      K.line_sub(7, sx + 4, sy - 2, sx, sy)
+      put(4, sx - 1, sy - 3, 4, 2)
+      K.put_sub(6 + K.env.kick * 5 + bs * 2, sx, sy, 1, 1)
+    else
+      line(5, bx, by, sx + 4, sy - 2)
+      line(7, sx + 4, sy - 2, sx, sy)
+      put(4, sx - 1, sy - 3, 4, 2)
+      put(6 + K.env.kick * 5 + bs * 2, sx, sy, 1, 1)
+    end
     put(3, PX - 2, 30, 2, 6)                         -- the arm rest
+
+    -- dense: motes drifting in the lamp's light
+    if dense and fp then
+      for i = 1, 10 do
+        local u = (T * (0.03 + 0.012 * (i % 4)) + K.hash(i, 97)) % 1
+        local mx2 = LMX + 4 + u * 56 + math.sin(T * 0.5 + i * 2.3) * 3
+        local my2 = LMY + 3 + u * 26 + math.sin(T * 0.7 + i) * 2
+        K.put_sub((1.4 + 2.2 * lamp) * math.sin(u * math.pi), mx2, my2, 1, 1)
+      end
+      for _, sx2 in ipairs({8, 119}) do put(2.5, sx2, 54, 1, 1); put(2.5, sx2, 8, 1, 1) end   -- the plinth's screws
+    end
 
     -- crackle: the highs as sparks over the record
     K.grain(function(u, v)

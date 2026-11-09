@@ -33,15 +33,19 @@ return function(K)
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
   local hit, arps, percs = {}, {-99, -99, -99, -99}, {}
   local pdz, mz = 0, 0  -- the pad, eased in
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  local hz_ph = 0        -- the haze's roll down the beams, quickened by the mids (fine)
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
   function M.pump() mark("pump") end
+  function M.kick() mark("kick") end
   function M.hat() mark("hat"); hit.hn = (hit.hn or 0) + 1 end
   function M.clap() mark("clap") end
   function M.bass() mark("bass"); hit.bn = (hit.bn or 0) + 1 end
@@ -61,6 +65,7 @@ return function(K)
     sw, glow, vb = 0, 0, 0
     past, pn = {}, 0
     hit, arps, percs, pdz, mz = {}, {-99, -99, -99, -99}, {}, 0, 0
+    hz_ph = 0
   end
   M.clear = M.init
 
@@ -68,7 +73,8 @@ return function(K)
   -- brightness v (~0..4): a dithered body in haze, crisper edges
   local function beam(i, x1, hw, v, T, ghost, edge)
     local x0 = FX[i]
-    local n = FLOOR - TOP
+    local fp = K.detail ~= "classic" and K.playing
+      local n = FLOOR - TOP
     if ghost then
       line(v, x0, TOP + 1, x1 - hw * 0.6, FLOOR)
       line(v, x0, TOP + 1, x1 + hw * 0.6, FLOOR)
@@ -79,13 +85,27 @@ return function(K)
       local cx = x0 + (x1 - x0) * t
       local w = 0.6 + hw * t
       -- haze in the beam: slow bands rolling down it
-      local hz = 0.65 + 0.35 * math.sin(y * 0.31 - T * 0.9 + i * 1.7) * math.sin(y * 0.11 + T * 0.4 + i)
+      local hz
+      if fp then
+        hz = 0.65 + (0.35 + 0.3 * mz) * math.sin(y * 0.31 - hz_ph + i * 1.7) * math.sin(y * 0.11 + T * 0.4 + i)
+      else
+        hz = 0.65 + 0.35 * math.sin(y * 0.31 - T * 0.9 + i * 1.7) * math.sin(y * 0.11 + T * 0.4 + i)
+      end
       local lv = v * hz * (1.2 - 0.9 * t)
       local th = (TH8[(y + i) % 8 + 1] + 0.5) / 8
       local l
       if lv < 1 then l = lv > th and 1 or 0
       else l = math.floor(lv); if lv - l > th then l = l + 1 end end
-      if l > 0 then put(l, cx - w, y, 2 * w + 1, 1) end
+      if l > 0 then
+        if fp then
+          -- sub-pixel edges: the row's end is dithered by its threshold, so a slow lean
+          -- moves the edge a row at a time instead of the whole beam at once
+          local xl, xr = math.floor(cx - w + th), math.floor(cx + w + 0.5 + th)
+          put(l, xl, y, math.max(1, xr - xl), 1)
+        else
+          put(l, cx - w, y, 2 * w + 1, 1)
+        end
+      end
     end
     line(v * 0.45 + edge, x0, TOP + 1, x1 - hw, FLOOR - 1)
     line(v * 0.45 + edge, x0, TOP + 1, x1 + hw, FLOOR - 1)
@@ -95,9 +115,19 @@ return function(K)
     local T, DT, env = K.T, K.DT, K.env
     local kl, e = K.kickless, K.energy
     local hi = A[K.HI]
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.15 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     mz = K.follow(mz, A[K.MID], 1.0, DT)
+    if fp then hz_ph = hz_ph + DT * (0.9 + 0.9 * mz) end
     local pu, hh, cl, bh, tk = fade("pump", 0.3), fade("hat", 0.25), fade("clap", 0.3), fade("bass", 0.4), fade("tick", 0.4)
+    local kk = fade("kick", 0.5)
+    -- the floor's kick and the truss's pump come up over a couple of frames, not in one
+    local function rise(k) return math.min(1, (K.NOW - (hit[k] or -99)) / 0.07) end
+    kk = kk * rise("kick")
     local pd, mid = pdz, A[K.MID]
     -- the truss and the heads on it
     put(2, 4, 2, 120, 1)
@@ -143,36 +173,45 @@ return function(K)
     end
     for i = 1, 4 do
       local hw = (4 + 2 * ((i % 2 == 0) and 1 or 0)) * spread + sw * 2
-      beam(i, tx[i], hw, bi[i] * 1.35, T, false, 0.6 + hi * 2.2)
+      local ar = math.exp(-(K.NOW - arps[i]) / ((fine and 0.5 or 0.3) * TR()))
+      -- a note warms its own beam through (fine)
+      beam(i, tx[i], hw, bi[i] * 1.35 + (fine and E(5.8 * ar * math.min(1, (K.NOW - arps[i]) / 0.07)) or 0), T, false, 0.6 + hi * 2.2)
       put(2, FX[i] - 2, 6, 5, 2)
       put(4 + bi[i] * 2.5, FX[i] - 1, TOP, 3, 1)
       -- a pump swells each lens housing's halo
-      if pu > 0.03 then put(5 * pu, FX[i] - 4, 5, 9, 5) end
+      if pu > 0.03 then put(E(5 * pu), FX[i] - 4, 5, 9, 5) end
       -- an arp note flares its own beam down its core
-      local ar = math.exp(-(K.NOW - arps[i]) / 0.3)
       if ar > 0.03 then
-        line(6 * ar, FX[i], TOP + 1, tx[i], FLOOR - 1)
-        put(5 * ar, tx[i] - 4, FLOOR - 1, 9, 2)
+        line(E(6 * ar), FX[i], TOP + 1, tx[i], FLOOR - 1)
+        put(E(5 * ar), tx[i] - 4, FLOOR - 1, 9, 2)
+        if fine then                      -- the core doubled, the lens flared, the pool splashed
+          line(E(5 * ar), FX[i] + 1, TOP + 1, tx[i] + 1, FLOOR - 1)
+          put(E(7 * ar), FX[i] - 2, 5, 5, 5)
+          put(E(6 * ar), tx[i] - 7, FLOOR + 1, 15, 1)
+          put(E(4 * ar), tx[i] - 9, FLOOR + 2, 19, 1)
+        end
       end
     end
     -- a tick glints one head's lens
-    if tk > 0.03 then put(6 * tk, FX[hit.tk] - 3, 12, 7, 3) end
+    if tk > 0.03 then put(E(6 * tk), FX[hit.tk] - 3, 12, 7, 3) end
+    -- a pump lights the truss's rails from end to end
+    if fine and pu > 0.03 then local pr = E(3.6 * pu * rise("pump")); put(pr, 4, 2, 120, 1); put(pr, 4, 5, 120, 1) end
     -- a hat glints along the truss
-    if hh > 0.03 then K.dashes(6 * hh, 3, 2, 5, (hit.hn or 0) * 2, 4, 124) end
+    if hh > 0.03 then K.dashes(E(6 * hh), 3, 2, 5, (hit.hn or 0) * 2, 4, 124) end
     -- a clap swells the mirror ball
     if cl > 0.03 then
       for dy = -4, 4 do
         local hw = math.floor(math.sqrt(math.max(0.5, 21 - dy * dy)) + 0.5)
-        put(6 * cl, BX - hw, BY + dy, 2 * hw, 1)
+        put(E(6 * cl), BX - hw, BY + dy, 2 * hw, 1)
       end
     end
     -- a perc throws a spot of the ball on the wall: its voice sets the
     -- row, its note the place along it
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local v = math.exp(-(K.NOW - p.t) / 0.35)
+      local v = math.exp(-(K.NOW - p.t) / (0.35 * TR()))
       if v < 0.03 then table.remove(percs, i)
-      else put(6 * v, 6 + p.n * 10, 14 + p.v * 8, 7, 3) end
+      else put(E(6 * v), 6 + p.n * 10, 14 + p.v * 8, 7, 3) end
     end
     -- the mirror ball and its spots round the room
     line(1, BX, 6, BX, BY - 4)
@@ -185,7 +224,8 @@ return function(K)
       local fx = ((f * 2 + T * 1.6) % 7) - 3.5
       local fy = (f % 3) * 2 - 2
       local tw = 0.5 + 0.5 * math.sin(T * 2.3 + f * 1.9)
-      put(2.5 + (1.5 + hi * 6) * tw * (1 - math.abs(fx) / 4), BX + fx, BY + fy, 1, 1)
+      local fl = 2.5 + (1.5 + hi * 6) * tw * (1 - math.abs(fx) / 4)
+      if fp then K.put_sub(fl * 1.25, BX + fx, BY + fy, 1, 1) else put(fl, BX + fx, BY + fy, 1, 1) end
     end
     for j = 1, NSPOT do
       local az = K.hash(j, 31) * TAU + T * 0.35
@@ -193,7 +233,8 @@ return function(K)
       if c > 0.15 then
         local x = BX + 74 * math.sin(az)
         local y = 16 + K.hash(j, 32) * 34
-        put((1.6 + hi * 6) * c, x, y, 1 + (j % 3 == 0 and 1 or 0), 1)
+        if fp then K.put_sub((1.6 + hi * 6) * c * 1.2, x, y, 1 + (j % 3 == 0 and 1 or 0), 1)
+        else put((1.6 + hi * 6) * c, x, y, 1 + (j % 3 == 0 and 1 or 0), 1) end
       end
     end
     -- the floor: a low glow the kick lands on, the bass under it
@@ -218,19 +259,51 @@ return function(K)
     -- the pools where the beams land
     K.gradient(FLOOR + 1, 63, function(y)
       local d = y - FLOOR - 1
-      return (1 + glow * 4.5) * math.exp(-d / (3 + glow * 3))
+      return (1 + glow * (fp and 5.3 or 4.5)) * math.exp(-d / ((3 + glow * 3) * (fp and 0.8 or 1)))
     end, prof)
     -- a bass note rolls along the front of the floor
     if bh > 0.03 then
-      for y = FLOOR + 1, FLOOR + 5, 2 do K.dashes(5 * bh, y, 8, 4, (hit.bn or 0) * 3 + y * 3, 0, 128) end
+      for y = FLOOR + 1, FLOOR + 5, 2 do K.dashes(E(5 * bh), y, 8, 4, (hit.bn or 0) * 3 + y * 3, 0, 128) end
+      if fine then                        -- and on down the dim front of the floor
+        K.dashes(E(7 * bh), FLOOR + 8, 4, 8, (hit.bn or 0) * 3 + 6, 0, 128)
+      end
+    end
+    -- a kick lands in each beam's pool
+    if fine and kk > 0.03 then
+      for i = 1, 4 do
+        local hw = 5 * spread + sw * 2
+        put(E(6 * kk), tx[i] - hw, FLOOR + 1, 2 * hw, 1)
+        put(E(4.8 * kk), tx[i] - hw * 1.2, FLOOR + 2, 2.4 * hw, 1)
+        put(E(3.4 * kk), tx[i] - hw * 1.4, FLOOR + 3, 2.8 * hw, 1)
+      end
+      put(E(2.6 * kk), 0, FLOOR + 4, 128, 1); put(E(2.2 * kk), 0, FLOOR + 5, 128, 1)
     end
     for i = 1, 4 do
       local hw = 5 * spread + sw * 2
-      put(1.2 + bi[i] * 1.6, tx[i] - hw, FLOOR, 2 * hw, 1)
-      put(0.8 + bi[i] * 0.9, tx[i] - hw * 0.7, FLOOR + 1, 1.4 * hw, 1)
+      local lo2 = fp and A[K.LO] * 2.4 or 0              -- the lows brighten the pools (fine)
+      put(1.2 + bi[i] * 1.6 + lo2, tx[i] - hw, FLOOR, 2 * hw, 1)
+      put(0.8 + bi[i] * 0.9 + lo2, tx[i] - hw * 0.7, FLOOR + 1, 1.4 * hw, 1)
     end
     -- haze through it all
-    K.haze(0, 10, 128, FLOOR, 0.05 + 0.13 * K.dub + 0.15 * kl + 0.08 * K.throw + 0.13 * mz + 0.1 * pd, 1, T * (5 + 4 * kl))
+    if fp then
+      -- the haze, less of its own so the mids and the pad can show: the pad lifts a veil
+      -- round the heads, the mids thicken it
+      K.haze(0, 10, 128, FLOOR, 0.04 * K.dub + 0.05 * kl + 0.03 * K.throw + 0.06 * mz, 1, T * (5 + 4 * kl))
+      if pd > 0.03 then K.haze(0, 6, 128, 26, 0.5 * pd, 1, T * 3) end
+    else
+      K.haze(0, 10, 128, FLOOR, 0.05 + 0.13 * K.dub + 0.15 * kl + 0.08 * K.throw + 0.13 * mz + 0.1 * pd, 1, T * (5 + 4 * kl))
+    end
+    -- dense: dust turning in the beams, falling slowly down each
+    if dense and fp then
+      for i = 1, 4 do
+        for k = 1, 3 do
+          local t = (T * (0.05 + 0.02 * k) + K.hash(i * 5 + k, 33)) % 1
+          local y = TOP + 3 + t * (FLOOR - TOP - 6)
+          local cx = FX[i] + (tx[i] - FX[i]) * ((y - TOP) / (FLOOR - TOP)) + (K.hash(i * 7 + k, 34) - 0.5) * 3 * (0.6 + ((y - TOP) / (FLOOR - TOP)) * 3)
+          K.put_sub(2.2 + bi[i] * 0.8, cx, y, 1, 1)
+        end
+      end
+    end
   end
 
   M.init()

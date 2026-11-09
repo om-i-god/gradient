@@ -349,7 +349,8 @@ return function(K)
       K.put_sub(1.6, fx + 2, math.floor(fy + 0.5) - 1, 1, 1)
     end
 
-    K.grain(function(u, v) return u * 124 + 2, 4 + v * 56 end, hi * 40, 7)  end
+    K.grain(function(u, v) return u * 124 + 2, 4 + v * 56 end, hi * 40, 7)
+    end
 
   M.init()
   return M

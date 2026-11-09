@@ -1,5 +1,5 @@
 -- gradient / visuals
--- sixteen places on the 128x64 OLED at night, drawn from what the music is
+-- twenty-four places on the 128x64 OLED at night, drawn from what the music is
 -- doing and from what the engine hears of itself. greys on black; the dim
 -- levels carry the atmosphere (haze, far structure, texture) and the bright
 -- ones are kept for the music. the pulse shows in every theme, the dub

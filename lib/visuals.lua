@@ -884,6 +884,10 @@ function VIS.draw(i, S, dt)
       xf, cur = 0, i
       -- a fresh visit gives a broken theme another go
       broken[cur] = nil
+      -- the trails clamp starts over: the old theme's lit history is not the new one's
+      for k = 1, 10 do lit_hist[k] = 0 end
+      lit_i, trail_scale = 0, 1
+      trails_clamp()
     end
   else
     xf = math.min(1, xf + DT / 0.5)

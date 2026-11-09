@@ -631,6 +631,28 @@ if not ONLY or os.getenv("VISKIT") then
     for _ = 1, 400 do screen.clear(); VIS.draw(1, S, 1 / FPS) end
     assert(VIS.kit.trail > 2.3, "trail not restored: " .. VIS.kit.trail)
   end)
+
+  test("visuals kit: a theme switch resets the trails clamp", function()
+    env(); local VIS = include("lib/visuals"); VIS.init(); VIS.set_trails(100)
+    local THEMES
+    for j = 1, 60 do
+      local nm, val = debug.getupvalue(VIS.draw, j)
+      if not nm then break end
+      if nm == "THEMES" then THEMES = val end
+    end
+    THEMES[1].draw = function() VIS.kit.put(8, 0, 0, 128, 40) end
+    local S = mkS()
+    for _ = 1, 60 do screen.clear(); VIS.draw(1, S, 1 / FPS) end
+    assert(VIS.kit.trail < 1.2, "clamp did not engage: " .. VIS.kit.trail)
+    -- switch: the old picture eases out over 0.25 s, then the new theme takes over
+    local f = 0
+    repeat
+      f = f + 1
+      screen.clear(); VIS.draw(2, S, 1 / FPS)
+    until f > 20 or (f > 1 and VIS.kit.trail > 2.4)
+    assert(VIS.kit.trail > 2.4, "trail still throttled after the switch: " .. VIS.kit.trail)
+    assert(f <= 8, "took " .. f .. " frames")
+  end)
 end
 
 -- the glitch tear: every mode, on every theme, stays inside the bounds and

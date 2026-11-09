@@ -187,7 +187,7 @@ return function(K)
       K.haze(0, 2, 128, VY - 2, pdz * 0.7, 2.2 * pdz + 0.6, T * 4)
       for i = 1, #pad_notes do
         local x = K.px(pad_notes[i])
-        put(4.5 * pdz, x - 3, 4, 7, 2); put(3 * pdz, x - 5, 6, 11, 1)
+        put((fine and 5.8 or 4.5) * pdz, x - 3, 4, 7, 2); put((fine and 3.8 or 3) * pdz, x - 5, 6, 11, 1)
       end
     end
 

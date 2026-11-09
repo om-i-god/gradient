@@ -245,7 +245,7 @@ return function(K)
         put(l, s.x - 1, s.y, 3, 1); line(1.2 + amp * 2, s.x, s.y + 1, s.x, 34); put(amp * 4, s.x - 4, s.y + 2, 9, 1); put(amp * 3, s.x - 3, s.y + 3, 7, 3)
       else
         l = 1.5; len = 1
-        if fine then l = 1.1 + 0.9 * mid + 0.3 * math.sin(T * 0.9 + i) end      -- the far shore twinkles
+        if fine then l = 1.1 + 0.9 * mid + (fp and 0.3 * math.sin(T * 0.9 + i) or 0.3) end      -- the far shore twinkles
         put(l, s.x, s.y, 1, 1)
       end
       if s.k == 1 then put(l, s.x - 1, s.y, 3, 2) end
@@ -273,16 +273,7 @@ return function(K)
       if y < 63 then
         local wlv = 1 + (k % 2) * 0.5 + lo * (fine and 2.8 or 2) + hi * (fine and 3.8 or 3)
         local woff = T * (4 + k) * (k % 2 == 0 and 1 or -1) + k * 17
-        if false then
-          -- the wave lines glide on the sub-pixel
-          local gap, w = 14 + 2 * k, 5 + k
-          for x = (woff % gap) - gap, 127, gap do
-            local a, b = math.max(0, x), math.min(128, x + w)
-            if b > a then K.put_sub(wlv, a, math.floor(y), math.max(1, math.floor(b - a + 0.5)), 1) end
-          end
-        else
-          K.dashes(wlv, math.floor(y), 5 + k, 14 + 2 * k, woff, 0, 128)
-        end
+        K.dashes(wlv, math.floor(y), 5 + k, 14 + 2 * k, woff, 0, 128)
       end
     end
 
@@ -305,7 +296,7 @@ return function(K)
         local u = a / 0.9
         local w = 6 + u * 50
         local y = 44 + u * 12
-        local l = 6 * (1 - u)
+        local l = (fine and 7.5 or 6) * (1 - u)
         put(l, r.x - w / 2, y, w, 1)
         put(l * 0.5, r.x - w / 2 - 3, y + 1, w + 6, 1)
         if fine then put(E(l * 0.5), r.x - w / 2 + 3, y - 1, w - 6, 1) end

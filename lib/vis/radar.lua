@@ -178,7 +178,7 @@ return function(K)
       end
     end
     -- fine: ground clutter that the arm lights as it passes (dense: more of it)
-    if fine then
+    if fine and K.playing then
       for k = 1, dense and 40 or 14 do
         local ca = K.hash(k, 21) * TAU
         local cr = 5 + K.hash(k, 22) * 21
@@ -201,7 +201,7 @@ return function(K)
       local c = cells[ci2]
       local age = NOW - c.t
       if age >= 0 and age < 14 then
-        local lv = math.min(1, age / 1.5) * math.exp(-age / 6) * (1 + 0.8 * pdz) * (fine and 1.3 or 1)
+        local lv = math.min(1, age / 1.5) * math.exp(-age / 6) * (1 + 0.8 * pdz) * (fine and 1.7 or 1)
         if lv > 0.1 then
           local a0 = c.a + T * 0.05
           for ri = 0, 3 do
@@ -222,7 +222,7 @@ return function(K)
     for ci2 = 1, 2 do
       local c = cells[ci2]
       local f = fade(c.t, 0.35)
-      if f > 0.03 then arc(5 * f, c.a - c.w, c.a + c.w, R - 2); arc(3 * f, c.a - c.w, c.a + c.w, R - 5) end
+      if f > 0.03 then arc((fine and 6.5 or 5) * f, c.a - c.w, c.a + c.w, R - 2); arc((fine and 4 or 3) * f, c.a - c.w, c.a + c.w, R - 5) end
     end
     -- the pad itself, before any cell: a faint cloud at the rim
     if pdz > 0.03 then

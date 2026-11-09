@@ -15,7 +15,18 @@ The engine gained commands (`bass_type`, `chord_type`, `hat_type`, `pad_type`, f
 - **New voices: level and CPU.** At energy near 1, set the heaviest choices together (bass reese, chords organ or glass, hats metal, pad choir or strings, arp lanes on the new voices, glitch = heavy) and watch the CPU readout and the levels against the kick. Then walk each choice on its own. Anything much louder or quieter than the rest wants its amp trimmed in the engine.
 - **Auto picks.** On auto, let a set run several phrases. Voices should change at phrase edges and the pad only around section changes.
 - **Pad swaps.** Change the pad type by hand while the pad is loud, and several times in quick succession. A pad change should land a moment after you stop turning, then crossfade over a few seconds, with no click, no gap and no CPU spike from stacked pads.
-- **Themes.** Step through all 24 with hold K1 + E1, including radar, subway, harbour, sodium, lighthouse, tramlines, substation and cooling. For each: every part visibly answers (kick, pump, hats, clap, perc, ticks, stabs, bass, arps, pad), it reads at low brightness, nothing strobes, and the frame rate holds at peak.
+- **Themes.** Step through all of them with hold K1 + E1, including radar, subway, harbour, sodium, lighthouse, tramlines, substation and cooling. For each: every part visibly answers (kick, pump, hats, clap, perc, ticks, stabs, bass, arps, pad), it reads at low brightness, nothing strobes, and the frame rate holds at peak.
 - **5/4 in each feel.** Set the time signature to 5/4 and try even, `3+2` and `2+3`. A change made mid-phrase should land on the phrase edge, not before. Check that the bar counts five beats, the ghost beats sit on the non-group beats in the uneven feels, and the visuals pulse on the beat (sweeps and rings complete once per bar).
 - **7/4 even.** Same checks with 7/4 and the even feel, then try `4+3` and `3+4`. Go back to 4/4 and confirm it returns to a 4/4 groove (a fresh set of patterns from the seed).
 - **Meter and sync.** With an external clock or MIDI sync out connected, a meter change should keep the clock and start/stop lined up.
+
+# round 3: more voices, echo types, character, finer visuals: device checks
+
+The engine gained voices (kick deep and tight, bass fm sub and tape, stab choir and strings, hat tape, pad glass and tape loop, arp steel and bowed), the `echo_type` command and the master `character` stage, so do **SYSTEM > RESTART** before loading.
+
+- **CPU at the heaviest settings.** At energy near 1, set echo type space, character dusty, pad glass or tape loop, the arp lanes on bowed and glitch = heavy, then swap the echo type while it plays. CPU should stay under about 45%. The warm and dusty paths run all the time, even on clean.
+- **Echo swaps.** Change the echo type several times quickly while the echo is loud. It should land a moment after you stop, crossfade with no click, and keep the echo time, feedback and throws. Watch for a single dropout on a swap to space, which clears a 1 MB loop as it starts.
+- **RT memory.** During an echo crossfade two echoes run at once, about 1 MB each. If engine load shows `alloc failed`, this is where to look.
+- **Character.** Clean should sound exactly as before. Warm should be gently rounder and dusty narrower and crunchier, each at about the same loudness.
+- **Visual settings.** In VISUALS, try detail classic, fine and dense, and trails and reactivity at 0, 50 and 100, on a few themes each. Classic should look as it did before round 3. Nothing should strobe at reactivity 100, and the frame rate should hold at dense.
+- **The four new places.** Carpark, laundrette, signalbox and rooftop come after cooling. Check that each reads at a glance and every part answers.

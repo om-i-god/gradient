@@ -53,11 +53,13 @@ return function(K)
   local KS, HS, BS = {"kick0", "kick1"}, {"hat0", "hat1"}, {"bass0", "bass1"}
   local AK = {{"a10", "a11"}, {"a20", "a21"}, {"a30", "a31"}, {"a40", "a41"}}
   local aflr = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -118,6 +120,11 @@ return function(K)
 
   function M.draw(S)
     local T, DT, DTS, NOW = K.T, K.DT, K.DTS, K.NOW
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.15 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     local c = K.chord
     for i = 1, 4 do vk[i] = follow(vk[i], K.voice_kick[i], 0.12, DT) end
     stair = follow(stair, K.duck, 0.04, DT)
@@ -140,20 +147,21 @@ return function(K)
         if h < 0.35 then
           local y = t[3] + 1 + f * FLH * 2
           if y < BOT - 1 then
-            put(1.5 + h * 2 + hi * 3 * h, t[1] + 1 + math.floor(K.hash(f, k) * (t[2] - 3)), y, 2, 1)
+            put(1.5 + h * 2 + hi * (fine and 4 or 3) * h, t[1] + 1 + math.floor(K.hash(f, k) * (t[2] - 3)), y, 2, 1)
           end
         end
       end
     end
 
     -- the chord: which floors are lived in tonight, eased as it moves
-    local want = {}
+    local want, slab = {}, {}
     for ti, t in ipairs(TOW) do
       local n = nfl(t)
       for i = 1, 4 do
         local f = floor_of(t, c[i] + 12)
         local key = ti * 100 + f
         want[key] = math.max(want[key] or 0, 0.6 + vk[i] * 0.8)
+        if fine then slab[key] = math.max(slab[key] or 0, vk[i]) end
         if f + 1 < n then
           local k2 = key + 1
           want[k2] = math.max(want[k2] or 0, 0.25 + vk[i] * 0.3)
@@ -177,29 +185,33 @@ return function(K)
       put(2, x0, top - 1, w, 1)
       for f = 0, n - 1 do put(1, x0 + 2, BOT - FLH * (f + 1), w - 4, 1) end
       -- lived-in floors: some of their windows on, merged into runs
+      for f = 0, n - 1 do                                    -- a stab lights the slab of each lived-in floor
+        local sv = slab[ti * 100 + f]
+        if sv and sv > 0.03 then put(E(4.5 * sv), x0 + 2, BOT - FLH * (f + 1), w - 4, 1) end
+      end
       for f = 0, n - 1 do
         local v = fl[ti * 100 + f]
         if v and v > 0.05 then
           local y = wy(f)
           for cc = 0, nc - 1 do
             if K.hash(ti * 997 + f * 31 + cc, 7) < 0.5 then
-              put((1.3 + v * 3) * breathe * (1 + 0.5 * mid), wx(t, cc), y, 2, 2)
+              put((1.3 + v * 3) * breathe * (1 + 0.5 * mid + (fp and 0.6 * pd or 0)), wx(t, cc), y, 2, 2)
             end
           end
         end
       end
       -- the stairwell: a column of landing lights, dimmed by the pump
       local sx = x0 + w - 3
-      for f = 0, n - 1, 1 do put((2.6 + K.energy) * (1 - stair * 0.7) * (1 + 0.5 * A[K.AMP]), sx, wy(f), 1, 2) end
+      for f = 0, n - 1, 1 do put((2.6 + K.energy) * (1 - stair * (fp and 0.85 or 0.7)) * (1 + (fine and 0.7 or 0.5) * A[K.AMP]), sx, wy(f), 1, 2) end
       -- the arp's windows: warm, slowly going dark
       local L = lit[ti]
       for k = #L, 1, -1 do
         local wi = L[k]
-        local u = (NOW - wi.t0) / (1.4 + K.dub * 1.2)
+        local u = (NOW - wi.t0) / ((1.4 + K.dub * 1.2) * TR())
         if u > 3.5 or u < 0 then table.remove(L, k)
         else
           local l = (3 + 7 * wi.pk * (0.6 + 0.4 * g)) * math.exp(-u) * breathe
-          put(math.min(l, 13), wx(t, wi.c), wy(wi.f), 2, 2)
+          put(math.min(fine and l * RT or l, 13), wx(t, wi.c), wy(wi.f), 2, 2)
         end
       end
       -- two tellies on: their light flickers with the highs
@@ -207,7 +219,12 @@ return function(K)
         local f = math.floor(K.hash(ti * 7 + k, 41) * n)
         local cc = math.floor(K.hash(ti * 7 + k, 42) * nc)
         local fx = 0.5 + 0.5 * math.sin(T * (5 + k * 2.3) + ti)
-        put(1 + hi * (2 + 4 * fx), wx(t, cc), wy(f), 2, 2)
+        put(1 + hi * (fine and 2.6 + 5 * fx or 2 + 4 * fx), wx(t, cc), wy(f), 2, 2)
+      end
+      -- dense: an aerial on each roof, its tip blinking
+      if dense and fp then
+        put(1.6, x0 + w - 5, top - 4, 1, 3)
+        put(1 + 4 * (0.5 + 0.5 * math.sin(T * 2.1 + ti * 1.3)) ^ 3, x0 + w - 5, top - 5, 1, 1)
       end
       -- a red light on the roof, pulsing slowly
       local r = 0.5 + 0.5 * math.sin(T * 1.3 + ti * 1.9)
@@ -215,17 +232,21 @@ return function(K)
       -- a kick catches the towers' edges, odd and even in turn; a tick flares the roof lamp
       if (ti % 2 == 1 and kf0 or kf1) > 0.03 then
         local kv = ti % 2 == 1 and kf0 or kf1
-        put(5 * kv, x0, top, 1, BOT - top)
-        put(5 * kv, x0 + w - 1, top, 1, BOT - top)
+        put(E(5 * kv), x0, top, 1, BOT - top)
+        put(E(5 * kv), x0 + w - 1, top, 1, BOT - top)
       end
-      if tkk > 0.03 then put(((ti + (hit.tk or 0)) % 2 == 0 and 8 or 5) * tkk, x0 + math.floor(w / 2) - 1, top - 4, 3, 3) end
+      if tkk > 0.03 then
+        put(E(((ti + (hit.tk or 0)) % 2 == 0 and (fine and 9 or 8) or 5) * tkk), x0 + math.floor(w / 2) - 1, top - 4, 3, 3)
+      end
+      -- a clap swells the roof edges
+      if fine and cl > 0.03 then put(E(5 * cl), x0, top - 1, w, 1) end
       -- the hats flicker one of each tower's two tellies, in turn
       local hv = hf0
       for k = 1, 2 do
         if hv > 0.03 then
           local f = math.floor(K.hash(ti * 7 + k, 41) * n)
           local cc = math.floor(K.hash(ti * 7 + k, 42) * nc)
-          put(4 * hv, wx(t, cc) - 1, wy(f) - 1, 4, 4)
+          put(E(fine and 5.5 * hv or 4 * hv), wx(t, cc) - 1, wy(f) - 1, 4, 4)
         end
         hv = hf1
       end
@@ -234,19 +255,20 @@ return function(K)
         local av = fade(AK[ti][sd], 0.3)
         if av > 0.03 then
           local hw = math.floor((w - 4) / 2)
-          put(6 * av, x0 + 2 + (sd - 1) * hw, BOT - FLH * (aflr[ti][sd] + 1), hw, 1)
+          put(E((fine and 7.5 or 6) * av), x0 + 2 + (sd - 1) * hw, BOT - FLH * (aflr[ti][sd] + 1), hw, 1)
         end
       end
     end
     -- a perc lights a whole floor of the tower of its voice
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      local f = math.exp(-(K.NOW - p.t) / (0.5 * TR()))
       if f < 0.03 then table.remove(percs, i)
       else
         local t = TOW[p.ti]
-        put(7 * f, t[1] + 2, wy(p.f), t[2] - 4, 2)
-        put(5 * f, t[1] + 2, BOT - FLH * (p.f + 1), t[2] - 4, 1)
+        put(E(7 * f), t[1] + 2, wy(p.f), t[2] - 4, 2)
+        put(E(fine and 8 * f or 5 * f), t[1] + 2, BOT - FLH * (p.f + 1), t[2] - 4, 1)
+        if fine then put(E(4 * f), t[1] + 1, wy(p.f), 1, 2); put(E(4 * f), t[1] + t[2] - 2, wy(p.f), 1, 2) end
       end
     end
     -- echoes coming due
@@ -265,20 +287,23 @@ return function(K)
     end, hi * 110, 7)
 
     -- the pad lifts a haze over the sky
-    if pd > 0.03 then K.haze(0, 0, 128, 30, pd * 0.4, 1, T * 2) end
+    if pd > 0.03 then K.haze(0, 0, 128, 30, pd * (fine and 0.5 or 0.4), 1, T * 2) end
     -- mist between the blocks: kickless, the dub
-    K.haze(0, 30, 128, BOT, 0.06 + 0.32 * K.kickless + 0.12 * K.dub * K.throw, 1, T * 4)
+    K.haze(0, 30, 128, BOT, (0.06 + 0.32 * K.kickless + 0.12 * K.dub * K.throw) * (fp and 0.5 or 1), 1, T * 4)
 
     -- the viaduct: the deck, piers, and the arches between them glowing
     -- from the street underneath with the bass
     put(3, 0, DECK, 128, 1)
-    if cl > 0.03 then put(6 * cl, 0, DECK, 128, 1) end            -- a clap swells the deck
-    local glow = (0.7 + arch * 4) * (1 + 0.4 * A[K.AMP])
+    if dense and fp then for k = 0, 15 do put(1.6 + 1.2 * math.sin(T * 0.5 + k * 1.9) ^ 2, k * 8 + 3, DECK - 1, 1, 1) end end   -- platform lamps
+    if cl > 0.03 then                                            -- a clap swells the deck
+      put(E(fine and 8 * cl or 6 * cl), 0, DECK, 128, 1)
+    end
+    local glow = (0.7 + arch * (fine and 4.8 or 4)) * (1 + (fine and 0.55 or 0.4) * A[K.AMP])
     for k = 0, 7 do
       local ax = k * 16
       put(1.5, ax, DECK + 1, 2, 11)            -- the pier
       local bv = fade(BS[k % 2 + 1], 0.4)         -- the bass shakes the piers, odd and even in turn
-      if bv > 0.03 then put(5 * bv, ax, DECK + 1, 2, 11) end
+      if bv > 0.03 then put(E(fine and 6.5 * bv or 5 * bv), ax, DECK + 1, 2, 11) end
       -- the arch: its curve, and the light pooled under it
       for j = 0, 13, 1 do
         local u = (j - 6.5) / 7
@@ -306,10 +331,11 @@ return function(K)
         table.remove(trains, k)
       else
         local yb = DECK - 5
+        local psub = fp and K.put_sub or put        -- the train glides between pixels
         for car = 0, tr.cars - 1 do
           local cx = tr.x - tr.dir * car * 17 - (tr.dir > 0 and 16 or 0)
-          put(2.5, cx, yb, 16, 1)                -- the roof
-          put(1.5, cx, yb + 4, 16, 1)            -- the floor
+          psub(2.5, cx, yb, 16, 1)               -- the roof
+          psub(1.5, cx, yb + 4, 16, 1)           -- the floor
           put(2, cx, yb + 1, 1, 3)
           put(2, cx + 15, yb + 1, 1, 3)
           K.dashes(5 * breathe, yb + 2, 2, 3, 1, cx + 2, cx + 14)

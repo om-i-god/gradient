@@ -32,11 +32,13 @@ return function(K)
   local kn, bn, an, hn = 0, 0, 0, 0              -- kicks, bass notes and arp notes so far: they take turns
   local HS = {"hat0", "hat1"}
   local KS, BS, AH = {"kick0", "kick1"}, {"bass0", "bass1"}, {"ah1", "ah2", "ah3", "ah4", "ah5"}
+  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
+  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / tau)
+    local v = math.exp(-(K.NOW - t) / (tau * TR()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -111,6 +113,11 @@ return function(K)
 
   function M.draw(S)
     local T, DT, DTS = K.T, K.DT, K.DTS
+    local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
+    if RT > 1 then RT = 1 + (RT - 1) * 0.15 end     -- eased above 1: the lit / frame-change bounds are tight here
+    local fp = fine and K.playing          -- time-driven fine detail waits for the music
+    -- an event's level: scaled by the reactivity, never a white point (fine only)
+    local function E(l) return fine and math.min(l * RT, 13) or l end
     local kl, th = K.kickless, K.throw
     local et, fb = K.echo_t, K.echo_fb
     -- the tape's speed: record to first playback head in one echo time
@@ -163,10 +170,11 @@ return function(K)
 
     -- the desk: a dim wall above, the deck's panel edge, the brushed lower
     -- panel and the bass glowing under it
-    line(2, 0, 40, 127, 40)
-    line(1.5, 0, 55, 127, 55)
+    local am = fp and A[K.AMP] or 0        -- the level brightens the deck's edges
+    line(2 + am * 1.2, 0, 40, 127, 40)
+    line(1.5 + am * 1.2, 0, 55, 127, 55)
     K.gradient(61, 63, function(y) return 0.3 + bs * 2 * (y - 60) / 3 end)
-    K.haze(0, 0, 128, 40, 0.2 * kl + 0.1 * th, 1, T * 2)
+    K.haze(0, 0, 128, 40, (0.2 * kl + 0.1 * th) * (fp and 0.4 or 1), 1, T * 2)
 
     -- the pad breathes a haze over the wall; the bass, in turns, glows a half of the panel
     if pd > 0.03 then K.haze(0, 0, 128, 40, pd * 0.4, 1, T * 2) end
@@ -178,12 +186,13 @@ return function(K)
     -- a kick catches a reel's flange, the two in turns; a clap swells both
     for r = 1, 2 do
       local kv = math.max(r == 1 and kk0 or kk1, cl)
+      kv = fine and math.min(1.4, kv * (RT > 1 and RT or 1)) or kv
       if kv > 0.03 then
         local cx = r == 1 and LX or RX
         local n = 14
         for k = 0, n - 1 do
           local a0, a1 = k / n * TAU, (k + 1) / n * TAU
-          line(6 * kv, cx + math.cos(a0) * FL, RY + math.sin(a0) * FL, cx + math.cos(a1) * FL, RY + math.sin(a1) * FL)
+          line(math.min(fine and 8 * kv or 6 * kv, 13), cx + math.cos(a0) * FL, RY + math.sin(a0) * FL, cx + math.cos(a1) * FL, RY + math.sin(a1) * FL)
         end
       end
     end
@@ -193,14 +202,18 @@ return function(K)
     put(1.5, 52, 3, 1, 14); put(1.5, 76, 3, 1, 14)
     for k = 0, 6 do
       local a = -2.4 + k * 0.27
-      put(k >= 5 and 4 or 2, 64 + math.cos(a) * 10, 15 + math.sin(a) * 10, 1, 1)
+      put((k >= 5 and 4 or 2) + am * 1.5, 64 + math.cos(a) * 10, 15 + math.sin(a) * 10, 1, 1)
     end
     local na = -2.4 + 1.65 * vu
-    line(8 + 3 * K.env.kick, 64, 15, 64 + math.cos(na) * 11, 15 + math.sin(na) * 11)
+    line(8 + 3 * K.env.kick + am, 64, 15, 64 + math.cos(na) * 11, 15 + math.sin(na) * 11)
     put(1.5 + rec * 9, 56, 19, 2, 2)                 -- the record lamp
+    if fine and rec > 0.03 then                      -- the record head flares as the stab is written
+      put(E(rec * 8), HR - 1, TY + 2, 8, 1); put(E(rec * 6), HR - 2, TY + 8, 10, 1); put(E(rec * 5), HR - 1, TY - 2, 8, 1)
+    end
     if cl > 0.03 then                                -- the meter's window swells with a clap
-      put(5 * cl, 52, 2, 25, 1); put(5 * cl, 52, 17, 25, 1)
-      put(5 * cl, 52, 3, 1, 14); put(5 * cl, 76, 3, 1, 14)
+      put(E(5 * cl), 52, 2, 25, 1); put(E(5 * cl), 52, 17, 25, 1)
+      put(E(5 * cl), 52, 3, 1, 14); put(E(5 * cl), 76, 3, 1, 14)
+      if fine then put(E(3 * cl), 53, 3, 23, 1); put(E(3 * cl), 53, 16, 23, 1) end
     end
 
     -- the tape path: off the left pack to the guide, along the heads, past
@@ -216,18 +229,28 @@ return function(K)
     put(4, G1 - 2, TY - 1, 3, 4); put(4, G2, TY - 1, 3, 4)
     local fy = math.floor(math.sin(T * 7) * wob * 0.9 + 0.5)
     put(2, G1, TY + fy, G2 - G1, 3)
-    K.dashes(3 + A[K.HI] * 3, TY + 1 + fy, 2, 7, tpos, G1, G2)
+    K.dashes(3 + A[K.HI] * (fine and 5 or 3), TY + 1 + fy, 2, 7, tpos, G1, G2)
 
     -- hats crackle along the tape; ticks light a rail of the head block
-    if hh > 0.03 then K.dashes(5 * hh, TY - 4, 1, 3, T * 40, G1, G2) end
-    if hh1 > 0.03 then K.dashes(5 * hh1, TY - 2, 1, 3, T * 40 + 7, G1, G2) end
-    if tkk > 0.03 then put(6 * tkk, HE - 4, (hit.tk or 0) == 0 and TY + 4 or TY + 9, CAP - HE + 4, 1) end
+    if hh > 0.03 then K.dashes(E(5 * hh), TY - 4, 1, 3, T * 40, G1, G2) end
+    if hh1 > 0.03 then K.dashes(E(5 * hh1), TY - 2, 1, 3, T * 40 + 7, G1, G2) end
+    if fine and (hh > 0.03 or hh1 > 0.03) then K.dashes(E(3.5 * math.max(hh, hh1)), TY - 6, 1, 4, -T * 30, G1, G2) end
+    if tkk > 0.03 then
+      put(E(6 * tkk), HE - 4, (hit.tk or 0) == 0 and TY + 4 or TY + 9, CAP - HE + 4, 1)
+      if fine then put(E(5 * tkk), HE - 4, (hit.tk or 0) == 0 and TY + 5 or TY + 10, CAP - HE + 4, 1); put(E(3 * tkk), HE - 4, (hit.tk or 0) == 0 and TY + 6 or TY + 11, CAP - HE + 4, 1) end
+    end
     -- a perc patches the tape where its note says
     for i = #percs, 1, -1 do
       local p = percs[i]
-      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      local f = math.exp(-(K.NOW - p.t) / (0.5 * TR()))
       if f < 0.03 then table.remove(percs, i)
-      else put(8 * f, p.x, TY - 2 + fy, p.w, 7) end
+      else
+        put(E(8 * f), p.x, TY - 2 + fy, p.w, 7)
+        if fine then                      -- the splice's tape: a frayed edge above and below
+          put(E(4 * f), p.x - 1, TY - 4 + fy, p.w + 2, 1); put(E(4 * f), p.x - 1, TY + 6 + fy, p.w + 2, 1)
+          put(E(3 * f), p.x - 2, TY - 2 + fy, 1, 7); put(E(3 * f), p.x + p.w + 1, TY - 2 + fy, 1, 7)
+        end
+      end
     end
 
     -- the head block
@@ -240,24 +263,36 @@ return function(K)
     end
     for k = 1, 5 do                                  -- the arp walks along the heads
       local a = fade(AH[k], 0.3)
-      if a > 0.03 then put(6 * a, heads[k], TY + 3, 6, 5); put(5 * a, heads[k] + 1, TY - 1, 4, 3) end
+      if a > 0.03 then
+        put(E(6 * a), heads[k], TY + 3, 6, 5); put(E(5 * a), heads[k] + 1, TY - 1, 4, 3)
+        if fine then put(E(7 * a), heads[k] + 2, TY + 9, 2, 1); put(E(4 * a), heads[k] - 1, TY + 2, 8, 1) end
+      end
     end
     -- capstan and pinch roller, the roller turning with the tape
     put(3 + bs * 4, CAP, TY + 3, 4, 4)
     put(3, CAP - 1, TY - 5, 6, 5)
-    put(6, CAP + 2 + math.floor(math.cos(tpos * 0.3) * 2 + 0.5), TY - 4 + math.floor(math.sin(tpos * 0.3) * 1.5 + 1.5), 1, 1)
+    if fp then
+      K.put_sub(6, CAP + 2.5 + math.cos(tpos * 0.3) * 2, TY - 3.5 + math.sin(tpos * 0.3) * 1.5, 1, 1)
+    else
+      put(6, CAP + 2 + math.floor(math.cos(tpos * 0.3) * 2 + 0.5), TY - 4 + math.floor(math.sin(tpos * 0.3) * 1.5 + 1.5), 1, 1)
+    end
 
     -- the marks on the tape, smeared on a throw
     for _, m in ipairs(marks) do
       if m.x >= G1 then
         if m.kind == "stab" then
-          put(m.lv, m.x, TY + fy, 2, 3)
+          if fine then K.put_sub(math.min(E(m.lv), 13), m.x, TY + fy, 2, 3) else put(m.lv, m.x, TY + fy, 2, 3) end
+          if fine and m.lv >= 9 then put(E(m.lv * 0.35), m.x - 1, TY + fy - 1, 4, 1); put(E(m.lv * 0.35), m.x - 1, TY + fy + 3, 4, 1) end
           if th > 0.05 then
             local w = math.min(14, v * 0.12 * th)
             put(m.lv * 0.3 * th, m.x - w, TY + fy, w, 3)
           end
         else
-          put(m.lv * (0.5 + 0.5 * K.lane_kick[m.lane]), m.x, TY + fy + (m.lane - 1) % 3, 1, 1)
+          local al = m.lv * (0.5 + 0.5 * K.lane_kick[m.lane])
+          if fine then
+            K.put_sub(E(al * 1.3), m.x, TY + fy + (m.lane - 1) % 3, 1, 1)
+            put(E(al * 0.4), m.x, TY + fy + (m.lane - 1) % 3 - 1, 1, 1)
+          else put(al, m.x, TY + fy + (m.lane - 1) % 3, 1, 1) end
         end
       end
     end
@@ -270,6 +305,22 @@ return function(K)
 
     -- hiss: the highs on the heads and the tape
     K.grain(function(uu, vv) return HR + uu * (CAP - HR), TY - 2 + vv * 9 end, A[K.HI] * 80, 7)
+    if fp then K.grain(function(uu, vv) return G1 + uu * (G2 - G1), TY - 1 + vv * 6 end, A[K.HI] * 40, 5) end
+    -- dense: the winding of each pack, a ring or two turning with the reel
+    if dense and fp then
+      for r = 1, 2 do
+        local cx, rp, an = r == 1 and LX or RX, r == 1 and rpL or rpR, r == 1 and -angL or -angR
+        for ring = 1, 2 do
+          local rr = rp - 2 - ring * 3
+          if rr > 5 then
+            for k = 0, 5 do
+              local a0 = an * 0.5 + k / 6 * TAU
+              line(2.2 + ring * 0.3, cx + math.cos(a0) * rr, RY + math.sin(a0) * rr, cx + math.cos(a0 + 0.8) * rr, RY + math.sin(a0 + 0.8) * rr)
+            end
+          end
+        end
+      end
+    end
   end
 
   M.init()

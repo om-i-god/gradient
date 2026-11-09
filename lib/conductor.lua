@@ -6,6 +6,7 @@
 local T = include("lib/theory")
 local G = include("lib/gen")
 local H = include("lib/harmony")
+local TB = include("lib/timbre")
 
 local C = {}
 
@@ -62,6 +63,7 @@ function C.regen_material(S)
   S.pair       = G.pick(T.PAIRS)
   S.harm_bars  = G.pick({2, 4, 4, 8})
   H.new_prog(S)
+  TB.roll(S)
 end
 
 -- new track: seed drives the material; key moves to a neighbour if asked
@@ -320,6 +322,7 @@ function C.phrase(S)
   S.roll_perc_kl  = math.random() < 0.6    -- perc stays in (or comes in) for a kickless stretch
   S.roll_clap_kl  = math.random() < 0.7    -- clap sits out a kickless stretch
   C.decide(S)
+  TB.phrase(S)
   if not S.freeze then C.mutate(S) end
 end
 

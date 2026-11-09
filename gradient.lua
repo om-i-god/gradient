@@ -31,13 +31,14 @@ local VIS = include("lib/visuals")
 local L   = include("lib/listen")
 local GU  = include("lib/gridui")
 local O   = include("lib/outs")
+local TB  = include("lib/timbre")
 
 local ECHO_DIVS      = {0.5, 0.75, 1, 1.5}          -- in beats
 local ECHO_DIV_NAMES = {"1/8", "3/16", "1/4", "3/8"}
 local LEAD_DIVS      = {0.25, 1/3, 0.5, 0.75, 2/3, 1, 1.5, 2}
 local LEAD_DIV_NAMES = {"1/16", "1/8T", "1/8", "3/16", "1/4T", "1/4", "3/8", "1/2"}
 local OUT_NAMES      = {"internal", "midi", "both"}
-local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft"}
+local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft", "glass", "reed", "kalimba", "marimba"}
 
 ------------------------------------------------------------------------
 -- state
@@ -94,6 +95,7 @@ end
 ------------------------------------------------------------------------
 
 local tweak_cache = {}
+local pad_sent   -- last pad type sent; nil = the next bar sends it
 local function tweak(k, v)
   if tweak_cache[k] ~= v then
     tweak_cache[k] = v
@@ -178,6 +180,12 @@ local function apply_bar()
   tweak("clap_echo",  0.1 + dub * 0.45 + (throwing and 0.3 or 0))
   tweak("perc_echo",  0.15 + dub * 0.45)
   tweak("tick_echo",  0.15 + dub * 0.4)
+
+  tweak("bass_type",  TB.resolve(S, "bass",  params:get("bass_type")))
+  tweak("chord_type", TB.resolve(S, "chord", params:get("chord_type")))
+  tweak("hat_type",   TB.resolve(S, "hat",   params:get("hat_type")))
+  local pad = TB.resolve(S, "pad", params:get("pad_type"))
+  if pad ~= pad_sent then pad_sent = pad; engine.pad_type(pad) end
 
   tweak("chord_cutoff", params:get("chord_cutoff") * (0.5 + tone) * (0.55 + e * 0.6))
   tweak("bass_cutoff",  params:get("bass_cutoff") * (0.8 + e * 0.4))
@@ -499,7 +507,7 @@ local function play_step()
         if arp_int or not ext then
           local v = params:get("lane" .. i .. "_voice")
           engine.arp(mtof(note), 0.13 * vel, dur, clamp(cut, 150, 12000), l.pan, l.shapeX,
-            v == 1 and (l.voice or 1) or v - 1)
+            v == 1 and ((S.timbre and S.timbre.lane[i]) or l.voice or 1) or v - 1)
         end
       end
     end
@@ -1103,6 +1111,17 @@ local function setup_params()
   params:add_control("chord_detune", "stab detune", controlspec.new(0, 1, "lin", 0.01, 0.18))
   params:set_action("chord_detune", function(v) engine.tweak("chord_detune", v) end)
   params:add_number("bass_cutoff", "bass cutoff", 80, 1200, 260)
+  for _, o in ipairs({
+    {"bass_type", "bass type", {"auto", "sub", "reese", "rubber"}},
+    {"chord_type", "stab type", {"auto", "dub", "felt", "organ", "glass", "rhodes"}},
+    {"hat_type", "hat type", {"auto", "noise", "metal", "dust"}},
+    {"pad_type", "pad type", {"auto", "wash", "choir", "strings", "drone"}},
+  }) do
+    params:add_option(o[1], o[2], o[3], 1)
+    params:set_action(o[1], function()
+      if o[1] == "pad_type" then pad_sent = nil else tweak_cache[o[1]] = nil end
+    end)
+  end
   params:add_option("clap_kind", "clap voice", {"auto", "clap", "snare", "snap"}, 1)
   params:add_option("perc_kit", "perc kit", {"auto", "hand", "wood", "metal"}, 1)
   for i = 1, 4 do
@@ -1143,6 +1162,7 @@ end
 function init()
   setup_params()
   params:bang()
+  tweak_cache, pad_sent = {}, nil
 
   math.randomseed(os.time())
   new_track(math.random(1, 9999), false)

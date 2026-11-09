@@ -35,9 +35,17 @@ engine = setmetatable({}, {__index = function(_, k)
     end
     if k == "tweak" and not TWEAKS[(...)] then error("engine.tweak: unknown key '" .. (...) .. "'", 2) end
     calls[k] = (calls[k] or 0) + 1
-    if k == "tweak" then TWV[(...)] = select(2, ...) end
+    if k == "tweak" then
+      TWV[(...)] = select(2, ...)
+      if TLOG then TLOG[#TLOG + 1] = {(...), select(2, ...), LOGKEY()} end
+    elseif k == "pad_type" and TLOG then TLOG[#TLOG + 1] = {"pad_type", (...), LOGKEY()}
+    elseif k == "arp" and TLOG then
+      local v = select(7, ...)
+      TLOG.arp_max = math.max(TLOG.arp_max or 0, v)
+    end
   end
 end})
+LOGKEY = function() return "?" end
 TWV = {}   -- last value sent per tweak key
 
 -- VIS.event calls are counted by kind (evcalls) so the sim can pair them with engine calls
@@ -295,6 +303,93 @@ do
   assert(n > 0, "busy fills never fired")
   params:set("fills", 1)
   print("fills off/busy ok, busy fills in 64 bars:", n)
+end
+
+
+-- timbre: SOUND params, auto picks, fixed wins, seeds keep their drums
+do
+  local S = getS()
+  local TB = include("lib/timbre")
+  local CC = include("lib/conductor")
+  local want = {
+    bass_type  = {"auto", "sub", "reese", "rubber"},
+    chord_type = {"auto", "dub", "felt", "organ", "glass", "rhodes"},
+    hat_type   = {"auto", "noise", "metal", "dust"},
+    pad_type   = {"auto", "wash", "choir", "strings", "drone"},
+  }
+  for id, opts in pairs(want) do
+    local d = P.defs[id]
+    assert(d and d.v == 1, id .. " missing or not default auto")
+    assert(table.concat(d.opts, ",") == table.concat(opts, ","), id .. " options")
+  end
+  -- VOICE_NAMES: old psets map (soft stays 5), four new voices appended
+  local lo = P.defs.lane1_voice.opts
+  assert(#lo == 9 and lo[5] == "soft" and lo[9] == "marimba", "VOICE_NAMES")
+
+  local dump
+  dump = function(t)
+    if type(t) ~= "table" then return tostring(t) end
+    local ks, out = {}, {}
+    for k in pairs(t) do ks[#ks + 1] = k end
+    table.sort(ks, function(a, b) return tostring(a) < tostring(b) end)
+    for _, k in ipairs(ks) do out[#out + 1] = tostring(k) .. "=" .. dump(t[k]) end
+    return "{" .. table.concat(out, ";") .. "}"
+  end
+  local function drums()
+    CC.new_track(S, 4218)
+    return dump(S.pat.kick) .. dump(S.pat.clap)
+  end
+  local real = drums()
+  local roll = TB.roll
+  TB.roll = function() end
+  local stubbed = drums()
+  TB.roll = roll
+  assert(real == stubbed, "timbre changed the drum patterns of seed 4218")
+  print("seed 4218: drums identical with timbre rolled or stubbed")
+
+  -- 256 bars, everything on auto
+  CC.new_track(S, 4218)
+  for id in pairs(want) do params:set(id, 1) end   -- clears the send caches: first value is logged
+  TLOG = {}
+  LOGKEY = function() return tostring(S.seed) .. ":" .. ((S.track_bar - 1) // S.phrase_len) end
+  for i = 1, 16 * 256 do tick_all() end
+  local log = TLOG; TLOG = nil
+  local vals, last, perphrase = {}, {}, {}
+  for _, e in ipairs(log) do
+    local k, v, key = e[1], e[2], e[3]
+    local part = k:match("^(%w+)_type$")
+    if part then
+      vals[part] = vals[part] or {}
+      vals[part][v] = (vals[part][v] or 0) + 1
+      assert(v >= 1 and v <= (k == "chord_type" and 5 or k == "pad_type" and 4 or 3), k .. " out of range")
+      assert(k ~= "pad_type" or v ~= last[k], "pad_type resent unchanged")
+      if last[k] ~= nil and last[k] ~= v then
+        perphrase[k .. key] = (perphrase[k .. key] or 0) + 1
+        assert(perphrase[k .. key] <= 1, k .. " changed twice in a phrase (" .. key .. ")")
+      end
+      last[k] = v
+    end
+  end
+  local function nd(p) local n = 0; for _ in pairs(vals[p] or {}) do n = n + 1 end; return n end
+  local nchg = 0; for _ in pairs(perphrase) do nchg = nchg + 1 end
+  print(string.format("auto picks over 256 bars: distinct bass %d chord %d hat %d pad %d; changes %d; max arp voice %d",
+    nd("bass"), nd("chord"), nd("hat"), nd("pad"), nchg, log.arp_max or 0))
+  assert(nd("bass") >= 2, "bass auto never varied")
+  assert((log.arp_max or 0) >= 5, "no arp voice >= 5 in 256 bars")
+
+  -- a fixed type wins
+  TLOG = {}
+  LOGKEY = function() return "fixed" end
+  params:set("bass_type", 3)
+  for i = 1, 16 * 40 do tick_all() end
+  local nb = 0
+  for _, e in ipairs(TLOG) do
+    if e[1] == "bass_type" then nb = nb + 1; assert(e[2] == 2, "fixed bass_type 3 sent " .. e[2]) end
+  end
+  assert(nb >= 1 and TWV.bass_type == 2, "fixed bass type never sent")
+  params:set("bass_type", 1)
+  TLOG = nil
+  print("timbre ok")
 end
 
 -- poke the performance controls mid-run

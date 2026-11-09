@@ -45,7 +45,7 @@ end
 local NAMES = {"gradient", "voices", "lanes", "phase", "echo", "fall", "pump", "arc",
   "motorway", "tape", "stack", "blocks", "beams", "window", "pylons", "dubplate",
   "radar", "subway", "harbour", "sodium", "lighthouse", "tramlines", "substation", "cooling",
-  "carpark", "laundrette", "signalbox"}
+  "carpark", "laundrette", "signalbox", "rooftop"}
 
 local CHORDS = {{50, 57, 60, 65}, {46, 53, 58, 62}, {48, 55, 58, 63}, {45, 52, 57, 60}}
 local LABELS = {"i", "VI", "VII", "v/i"}

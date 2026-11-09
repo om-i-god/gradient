@@ -133,7 +133,6 @@ return function(K)
     local fine, dense, R = K.detail ~= "classic", K.detail == "dense", K.react
     if R > 1 then R = 1 + (R - 1) * 0.5 end         -- the top of the range is eased: peak is already near the frame-change bound
     local function ev(l) return math.min(l * R, 13) end
-    local gap = 6
     local c = K.chord
     local playing = K.playing
     for i = 1, 4 do
@@ -156,14 +155,20 @@ return function(K)
     local function cx(k) return x0 - 2 * (k - 1) end
 
     local breathe = 1 - K.duck * (0.35 + 0.1 * (1 - K.kickless))
-    local base = (playing and (2.2 + K.energy * 1.8) or 2.2) * (0.8 + 0.4 * A[K.MID]) * (1 + 0.4 * A[K.AMP])
+    local base = (playing and (2.2 + K.energy * 1.8) or 2.2) * ((fine and playing) and 0.68 or 1) * (0.8 + 0.4 * A[K.MID]) * (1 + 0.4 * A[K.AMP])   -- fine: dimmer ambient ribbons, so the hits stand out
     local kk, cl, hh, pd = fade("kick", 0.25), fade("clap", 0.3), fade("hat", 0.25), K.env.pad
 
     -- the staff: dotted lines drifting with the scroll
     for _, n2 in ipairs(STAFF) do
-      K.dashes(1 + A[K.HI] * 1.6 + pd * 1.5, math.floor(vrow(n2)), 1, gap, -T * RATE, 0, HEAD)
+      K.dashes(1 + A[K.HI] * 1.6 + pd * 1.5, math.floor(vrow(n2)), 1, 6, -T * RATE, 0, HEAD)
       -- the hats catch on the staff near the playhead
-      if hh > 0.02 then K.dashes(fine and ev(7 * hh) or 5.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
+      if hh > 0.02 then K.dashes(fine and ev(6 * hh) or 5.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
+    end
+    -- dense: a fainter staff between the lines, drifting with the scroll
+    if dense and K.playing then
+      for n2 = 1, #STAFF - 1 do
+        K.dashes(1, math.floor(vrow((STAFF[n2] + STAFF[n2 + 1]) / 2)), 1, 12, -T * RATE * 0.5, 0, HEAD)
+      end
     end
     -- the kick throws a short glow back from the playhead
     if kk > 0.05 then
@@ -219,9 +224,9 @@ return function(K)
         local hit = math.max(col.s[i], (col.echo or 0) * 0.7)
         if k <= 16 then
           local w = 1 - k / 16
-          hit = math.max(hit, kk * (fine and 0.5 + 0.25 * R or 0.5) * w, ((i == 2 or i == 3) and cl * (fine and 1.15 or 0.9) * w or 0))
+          hit = math.max(hit, kk * (fine and 0.4 + 0.5 * R or 0.5) * w, ((i == 2 or i == 3) and cl * (fine and 1.15 or 0.9) * w or 0))
         end
-        local lv = (base + hit * ((fine and K.playing) and 4.7 + i * 0.4 or 7 + i * 0.6)) * fade * breathe
+        local lv = (base + hit * (7 + i * 0.6)) * fade * breathe
         if k > 6 and lv > 3 then lv = math.floor(lv / 2 + 0.5) * 2 end   -- older: coarser, longer runs
         local y = col.y[i]
         run(1, lv, x, y)

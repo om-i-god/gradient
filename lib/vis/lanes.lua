@@ -80,14 +80,15 @@ return function(K)
     if R > 1 then R = 1 + (R - 1) * 0.55 end        -- the top of the range is eased: peak bars are full already
     local sub = fine and K.playing                  -- sub-pixel glide while it plays
     local function ev(l) return math.min(l * R, 13) end
+    local tz = K.trail > 1 and K.trail ^ -0.4 or 1   -- long trails keep the extra marks, a little fainter
     local calm = 1.7 - 1.4 * K.energy               -- a lone note reads bigger in a sparse bar
     local put_s = sub and K.put_sub or put
     -- a tick glides across its pixel along whichever axis it is moving on:
     -- two lines, not four
-    local function tick_s(l, x0, y0, x1, y1, a)
+    local function tick_s(l, x0, y0, x1, y1, a, rx, ry)
       if not sub then return line(l, x0, y0, x1, y1) end
-      local th = a * TAU
-      if math.abs(math.sin(th)) >= math.abs(math.cos(th)) then   -- the ring runs sideways here
+      local th = a * TAU - math.pi / 2                     -- as pt(): the ring's tangent is (-sin, cos)
+      if math.abs(math.sin(th)) * rx >= math.abs(math.cos(th)) * ry then   -- the ring runs sideways here
         local fx = x0 - math.floor(x0)
         local dy = math.floor(y0 + 0.5) - y0
         if fx == 0 then return line(l, x0, y0 + dy, x1, y1 + dy) end
@@ -160,18 +161,22 @@ return function(K)
           local x0, y0 = pt(rx - 1, ry - 1, a, cx, cy)
           local out = live and 3 or 1.5
           local x1, y1 = pt(rx + out, ry + out * 0.6, a, cx, cy)
+          if dense and sub and live then      -- dense: a hairline dot between this tick and the next
+            local mx, my = pt(rx, ry, a + 0.5 / len, cx, cy)
+            put(1 + g, mx, my, 1, 1)
+          end
           local lv = (live and 2 + g * 2 or 1) + f * (fine and ev(8.5) or 8)
           lv = lv + hi * (1 + i * 0.5) * (fine and 1.6 or 1) * math.max(0, math.sin(T * 4 + s * 1.7 + i))
-          tick_s(lv, x0, y0, x1, y1, a)
+          tick_s(lv, x0, y0, x1, y1, a, rx, ry)
           -- a landed note blooms round its tick
           if f > 0.1 then
             local bx, by = math.floor(x1 + 0.5), math.floor(y1 + 0.5)
             if fine then
               -- a short arc of the ring lights either side of the tick
-              local lw = ev(3.6 * (f ^ 0.45) * calm)
-              local px_, py_ = pt(rx + 1.6, ry + 1.2, a - 9 * 0.012, cx, cy)
+              local lw = ev(3.6 * (f ^ 0.45) * calm * tz)
+              local px_, py_ = pt(rx + 1.6, ry + 1.2, a - 9 * 0.012, cx, cy)   -- the arc runs -9..+9 steps of 0.012 turn about the tick
               for q = 1, 4 do
-                local qx, qy = pt(rx + 1.6, ry + 1.2, a + (q * 4.5 - 13.5) * 0.012, cx, cy)
+                local qx, qy = pt(rx + 1.6, ry + 1.2, a + (q * 4.5 - 9) * 0.012, cx, cy)
                 line(lw * ((q == 1 or q == 4) and 0.5 or 1), px_, py_, qx, qy)
                 px_, py_ = qx, qy
               end
@@ -265,7 +270,14 @@ return function(K)
       local r = 1 + (1 - kk) * 26
       for k = 0, 27 do
         local th = k / 28 * TAU
+        if fine then
+          put(ev(tz * 5.5 * kk), cx + math.cos(th) * r * 1.5, cy + math.sin(th) * r * 0.75, 1, 1)
+          if k % 2 == 0 then   -- and a fainter echo of the ring just inside it
+            put(ev(tz * 2.5 * kk), cx + math.cos(th) * (r - 2.5) * 1.5, cy + math.sin(th) * (r - 2.5) * 0.75, 1, 1)
+          end
+        else
         put(4.5 * kk, cx + math.cos(th) * r * 1.5, cy + math.sin(th) * r * 0.75, 1, 1)
+        end
       end
     end
     -- hats glint round the outer ring
@@ -274,7 +286,6 @@ return function(K)
         local x, y = pt(grx, gry, K.hash(k, hn) + grot, cx, cy)
         if fine then
           put(ev(7.5 * hh), x, y, 1, 1)
-          if k % 3 == 0 then put(ev(3 * hh), math.floor(x) - 1, math.floor(y), 3, 1) end
         else
         put(5 * hh, x, y, 1, 1)
         end
@@ -311,7 +322,12 @@ return function(K)
     if bh > 0.05 then
       for k = 0, 23 do
         local th = k / 24 * TAU - T * 0.3
+        if fine then
+          put(ev(tz * 7 * bh), cx + math.cos(th) * (rb + 4) * 1.4, cy + math.sin(th) * (rb + 4) * 0.8, 1, 1)
+          if k % 2 == 0 then put(ev(tz * 4 * bh), cx + math.cos(th) * (rb + 6.5) * 1.4, cy + math.sin(th) * (rb + 6.5) * 0.8, 1, 1) end
+        else
         put(4 * bh, cx + math.cos(th) * (rb + 4) * 1.4, cy + math.sin(th) * (rb + 4) * 0.8, 1, 1)
+        end
       end
     end
     local nb = 16

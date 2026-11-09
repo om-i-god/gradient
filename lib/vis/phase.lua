@@ -244,7 +244,7 @@ return function(K)
       if c % 2 == 0 or t ~= city[c - 1] then put(2 + bs, c * 2, t, 2, 1) end
     end
     for b = 0, 13 do
-      if K.hash(b, 9) > 0.45 then
+      if K.hash(b, 9) > ((dense and K.playing) and 0.25 or 0.45) then
         local x = b * 9 + 2 + math.floor(K.hash(b, 10) * 5)
         local y = K.at(city, x) + 2
         if y < GROUND - 1 then put(1.5 + 1.5 * K.hash(b, 11) * (0.6 + 0.4 * math.sin(T * 0.2 + b)), x, y, 1, 1) end

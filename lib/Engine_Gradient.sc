@@ -19,10 +19,10 @@
 // so every compound expression below is fully parenthesized.
 //
 // commands
-//   kick  amp tune decay click       (kick_type 1 sub 2 dusty 3 boom 4 knock)
-//   hat   amp decay tone pan         (hat_type 1 noise 2 metal 3 dust)
+//   kick  amp tune decay click       (kick_type 1 sub 2 dusty 3 boom 4 knock 5 deep 6 tight)
+//   hat   amp decay tone pan         (hat_type 1 noise 2 metal 3 dust 4 tape)
 //   rim   amp freq pan
-//   bass  hz amp dur                 (bass_type 1 sub 2 reese 3 rubber)
+//   bass  hz amp dur                 (bass_type 1 sub 2 reese 3 rubber 4 fm sub 5 tape)
 //   bass_glide hz amp dur from glide   (slides in from `from` Hz over `glide` s)
 //   tom   amp hz decay pan
 //   shaker amp decay pan
@@ -34,15 +34,19 @@
 //   glitch mode slice dur mix        -- the glitch insert on the whole mix (dur <= 1.5 s):
 //         mode 1 stutter (repeat `slice` s) 2 tape stop 3 reverse
 //              4 chop (gate at `slice`) 5 crush; for `dur` s, wet `mix`
-//   chord f1 f2 f3 f4 amp dur        (chord_type 1 dub 2 felt 3 organ 4 glass 5 rhodes)
+//   chord f1 f2 f3 f4 amp dur        (chord_type 1 dub 2 felt 3 organ 4 glass 5 rhodes
+//                                     6 choir 7 strings)
 //   arp   hz amp decay cutoff pan shape voice   (voice 1 classic 2 bell 3 pluck 4 soft
-//         5 glass 6 reed 7 kalimba 8 marimba)
+//         5 glass 6 reed 7 kalimba 8 marimba 9 steel 10 bowed)
 //   pump  (dummy f)
 //   wash_chord f1 f2 f3 f4
 //   tweak key val   -- see `st` defaults / fxMap below
+//                      (character 1 clean 2 warm 3 dusty: the master's colour)
 //   listen on       -- 1 runs the input key tracker, 0 pauses it
 //   verb_type n     -- 1 hall 2 plate 3 spring (swaps the reverb synth in place)
-//   pad_type n      -- 1 wash 2 choir 3 strings 4 drone (crossfades the pad: mostly done in about 2 s, settled in about 6 s)
+//   echo_type n     -- 1 dub 2 tape 3 ping-pong 4 space (crossfades the dub echo over
+//                      about 2.5 s; the lead echo stays as it is)
+//   pad_type n      -- 1 wash 2 choir 3 strings 4 drone 5 glass 6 tape loop (crossfades the pad: mostly done in about 2 s, settled in about 6 s)
 //   bed path        -- load a sound file as the looping field-recording bed
 //
 // polls
@@ -59,6 +63,7 @@ Engine_Gradient : CroneEngine {
   var bedBuf;
   var st, fx, fxMap, fxVals;
   var washChord, padFading, padDef, padPending, padDue, padLastSwap, padTimer;
+  var echoFading, echoDef, echoPending, echoDue, echoLastSwap, echoTimer;
 
   *new { arg context, doneCallback;
     ^super.new(context, doneCallback);
@@ -149,6 +154,32 @@ Engine_Gradient : CroneEngine {
       Out.ar(out, sig ! 2);
     }).add;
 
+    // deep: a long, low sub that settles a tone under the tune, a slow soft
+    // pitch fall and a felt beater instead of a click
+    SynthDef(\grad_kick_deep, {
+      arg out, amp=0.8, tune=33, decay=0.45, click=0.3;
+      var base = (tune - 2).midicps;
+      var penv = EnvGen.ar(Env([base * 3, base * 1.15, base], [0.02, 0.18], [-4, -2]));
+      var aenv = EnvGen.ar(Env.perc(0.004, decay * 1.6, 1, -4), doneAction: 2);
+      var body = (SinOsc.ar(penv, 0.5pi) + (SinOsc.ar(penv * 2) * 0.08)) * aenv;
+      var felt = LPF.ar(WhiteNoise.ar, 900) * EnvGen.ar(Env.perc(0.001, 0.015)) * click;
+      var sig  = LPF.ar(((body * 1.5) + felt).tanh, 2500) * amp;
+      Out.ar(out, sig ! 2);
+    }).add;
+
+    // tight: short and punchy; a fast pitch drop, a quickly closed body and
+    // a small high tick
+    SynthDef(\grad_kick_tight, {
+      arg out, amp=0.8, tune=33, decay=0.45, click=0.3;
+      var base = (tune + 3).midicps;
+      var penv = EnvGen.ar(Env([base * 7, base * 1.3, base], [0.006, 0.035], [-6, -3]));
+      var aenv = EnvGen.ar(Env.perc(0.001, decay * 0.55, 1, -7), doneAction: 2);
+      var body = SinOsc.ar(penv, 0.5pi) * aenv;
+      var tick = HPF.ar(BPF.ar(WhiteNoise.ar, 4500, 0.7), 2000) * EnvGen.ar(Env.perc(0.0003, 0.004)) * (click * 2);
+      var sig  = ((body * 1.7) + tick).tanh * amp;
+      Out.ar(out, sig ! 2);
+    }).add;
+
     SynthDef(\grad_hat, {
       arg out, echoOut, verbOut, amp=0.3, decay=0.05, tone=8000, pan=0, echo=0, verb=0.1;
       var env = EnvGen.ar(Env.perc(0.001, decay, 1, -6), doneAction: 2);
@@ -184,6 +215,21 @@ Engine_Gradient : CroneEngine {
       var crk = Decay2.ar(Dust.ar(90), 0.0003, 0.002) * BPF.ar(WhiteNoise.ar, f * 1.3, 0.5) * 3;
       var sig = LPF.ar(hs + crk, (f * 1.6).clip(2000, 15000));
       sig = Pan2.ar(sig * env * amp * 4, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // tape: the noise hat bounced to a worn cassette; a softer transient,
+    // saturated and band-limited, a little flutter on the tone
+    SynthDef(\grad_hat_tape, {
+      arg out, echoOut, verbOut, amp=0.3, decay=0.05, tone=8000, pan=0, echo=0, verb=0.1;
+      var env = EnvGen.ar(Env([0, 1, 0], [0.002, (decay * 1.4) + 0.01], [1, -5]), doneAction: 2);
+      var f   = (tone * 0.8 * (1 + (LFNoise2.kr(7) * 0.04))).clip(1000, 12000);
+      var sig = RHPF.ar(WhiteNoise.ar, f, 0.5);
+      sig = LPF.ar((sig * 2).tanh, 9000);
+      sig = HPF.ar(sig, 1500);
+      sig = Pan2.ar(sig * env * amp * 1.6, pan);
       Out.ar(out, sig);
       Out.ar(echoOut, sig * echo);
       Out.ar(verbOut, sig * verb);
@@ -411,6 +457,38 @@ Engine_Gradient : CroneEngine {
       Out.ar(out, sig ! 2);
     }).add;
 
+    // fm sub: a sine sub with a 2:1 FM overtone that blooms and settles on
+    // each note, so it speaks on small speakers and keeps its weight
+    SynthDef(\grad_bass_fmsub, {
+      arg out, freq=55, amp=0.5, dur=0.3, cutoff=260, drive=0.3, from=0, glide=0.05;
+      var env  = EnvGen.ar(Env.linen(0.004, dur, 0.08, 1, -3), doneAction: 2);
+      var f    = Select.kr(from > 0, [freq,
+        EnvGen.kr(Env([from.max(20), freq], [glide.max(0.001)], \exp))]);
+      var ienv = EnvGen.ar(Env([0, 1, 0.3], [0.01, dur.max(0.05)], [2, -3]));
+      var mod  = SinOsc.ar(f * 2) * f * (0.2 + (ienv * 0.9)) * (0.5 + drive);
+      var sig  = (SinOsc.ar(f + mod) * 0.6) + (SinOsc.ar(f) * 0.6);
+      sig = LPF.ar(sig, (cutoff * 3).clip(80, 3000));
+      sig = (sig * (1 + (drive * 2))).tanh * env * amp;
+      Out.ar(out, sig ! 2);
+    }).add;
+
+    // tape: the sub bass through a tape machine; slow wow on the pitch, a
+    // soft saturated knee, a head bump and the top rolled off
+    SynthDef(\grad_bass_tape, {
+      arg out, freq=55, amp=0.5, dur=0.3, cutoff=260, drive=0.3, from=0, glide=0.05;
+      var env = EnvGen.ar(Env.linen(0.006, dur, 0.09, 1, -3), doneAction: 2);
+      var f   = Select.kr(from > 0, [freq,
+        EnvGen.kr(Env([from.max(20), freq], [glide.max(0.001)], \exp))]);
+      var wow = 1 + (LFNoise2.kr(0.7) * 0.0025) + (SinOsc.kr(0.5) * 0.0015);
+      var fw  = f * wow;
+      var sig = SinOsc.ar(fw) + (LFTri.ar(fw * 2) * 0.18) + (Saw.ar(fw) * 0.1);
+      sig = RLPF.ar(sig, (cutoff * 1.2).clip(40, 4000), 0.8);
+      sig = (sig * (1.4 + (drive * 3))).tanh;
+      sig = sig + (BPF.ar(sig, 90, 1) * 0.3);
+      sig = LPF.ar(sig, 2200) * env * amp * 0.85;
+      Out.ar(out, sig ! 2);
+    }).add;
+
     // dub chord stab: detuned saw pairs (L/R) through a resonant LPF with a
     // short filter blip; the long life comes from the echo send
     SynthDef(\grad_chord, {
@@ -504,6 +582,52 @@ Engine_Gradient : CroneEngine {
       }) * 0.14;
       sig = LPF.ar(sig, (cutoff * 3).clip(800, 10000));
       sig = (sig ! 2) * trem * env * amp;
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // choir: a detuned saw pair per note, each with its own vibrato, sung
+    // through formants that close from ah towards oo as the stab falls
+    SynthDef(\grad_chord_choir, {
+      arg out, echoOut, verbOut, f1=220, f2=261, f3=329, f4=392,
+          amp=0.3, dur=0.2, cutoff=1400, res=0.35, envAmt=1.6, detune=0.18,
+          echo=0.55, verb=0.35;
+      var len = (dur * 2.5) + 0.4;
+      var env = EnvGen.ar(Env([0, 1, 0], [0.06, len], [2, -4]), doneAction: 2);
+      var v   = EnvGen.kr(Env([0, 1], [len], [-2]));
+      var d   = (detune * 0.008) + 0.001;
+      var src = Mix([f1, f2, f3, f4].collect { |f, i|
+        var vib = 1 + (SinOsc.kr(4.7 + (i * 0.4), i) * 0.0025);
+        LFSaw.ar(f * vib * [1 - d, 1 + d])
+      }) * 0.25;
+      var sig = (BPF.ar(src, v.linlin(0, 1, 750, 350), 0.14) * 1.0)
+                + (BPF.ar(src, v.linlin(0, 1, 1150, 700), 0.12) * 0.6)
+                + (BPF.ar(src, 2600, 0.1) * 0.2);
+      sig = LPF.ar(sig, (cutoff * 3).clip(800, 9000));
+      sig = sig * env * amp * 2.6;
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // strings: a short bowed-section stab; saw pairs swell in under a
+    // gentle low-pass and a two-tap chorus spreads them left and right
+    SynthDef(\grad_chord_strings, {
+      arg out, echoOut, verbOut, f1=220, f2=261, f3=329, f4=392,
+          amp=0.3, dur=0.2, cutoff=1400, res=0.35, envAmt=1.6, detune=0.18,
+          echo=0.55, verb=0.35;
+      var len  = (dur * 2) + 0.3;
+      var env  = EnvGen.ar(Env([0, 1, 0.7, 0], [0.03, dur * 0.6, len], [2, -1, -4]), doneAction: 2);
+      var fenv = EnvGen.ar(Env.perc(0.03, dur, 1, -3));
+      var d    = (detune * 0.008) + 0.001;
+      var src  = Mix([f1, f2, f3, f4].collect { |f| Saw.ar(f * [1 - d, 1 + d]) }) * 0.15;
+      var mono, sig;
+      src  = LPF.ar(src, (cutoff * 1.2 * (1 + (fenv * envAmt * 0.3))).clip(200, 8000));
+      mono = HPF.ar(src[0] + src[1], 100);
+      sig  = [DelayC.ar(mono, 0.03, 0.011 + (SinOsc.kr(0.7) * 0.003)),
+              DelayC.ar(mono, 0.03, 0.014 + (SinOsc.kr(0.53, 1) * 0.003))];
+      sig  = (sig + (mono * 0.5)) * 0.85 * env * amp;
       Out.ar(out, sig);
       Out.ar(echoOut, sig * echo);
       Out.ar(verbOut, sig * verb);
@@ -642,6 +766,45 @@ Engine_Gradient : CroneEngine {
       Out.ar(leadOut, sig * lead);
     }).add;
 
+    // steel: a steel-pan note; three tuned modes (the octave and twelfth a
+    // little stretched), the upper ones dying first, a brief ping on top
+    SynthDef(\grad_arp_steel, {
+      arg out, echoOut, verbOut, leadOut, freq=440, amp=0.2, decay=0.25, cutoff=3000,
+          shape=0.5, pan=0, echo=0.2, verb=0.4, lead=0.3;
+      var len  = (decay * 2.5) + 0.2;
+      var env  = EnvGen.ar(Env.linen(0, len, 0.05), doneAction: 2);
+      var amps = [1, shape.linlin(0, 1, 0.3, 0.7), 0.25];
+      var decs = [len * 0.5, len * 0.25, len * 0.1];
+      var sig  = Mix([1, 2.01, 2.99].collect { |r, i|
+        SinOsc.ar(freq * r) * EnvGen.ar(Env.perc(0.002, decs[i], 1, -5)) * amps[i]
+      });
+      sig = sig + (SinOsc.ar(freq * 4.02) * EnvGen.ar(Env.perc(0.0005, 0.02)) * 0.15);
+      sig = LPF.ar(sig, (cutoff * 3).clip(400, 16000));
+      sig = Pan2.ar(sig * env * amp * 1.0, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+      Out.ar(leadOut, sig * lead);
+    }).add;
+
+    // bowed: a bowed string; a saw with a slow bow-in, delayed vibrato, a
+    // little bow noise and two body resonances
+    SynthDef(\grad_arp_bowed, {
+      arg out, echoOut, verbOut, leadOut, freq=440, amp=0.2, decay=0.25, cutoff=3000,
+          shape=0.5, pan=0, echo=0.2, verb=0.4, lead=0.3;
+      var len = (decay * 2) + 0.25;
+      var env = EnvGen.ar(Env([0, 1, 0.8, 0], [0.06, decay, len], [2, -1, -4]), doneAction: 2);
+      var vib = 1 + (SinOsc.kr(5.4) * 0.004 * EnvGen.kr(Env([0, 0, 1], [0.1, 0.25])));
+      var sig = Saw.ar(freq * vib) + (BPF.ar(WhiteNoise.ar, freq * 2, 0.3) * 0.15 * shape);
+      sig = LPF.ar(sig, (cutoff * 0.9).clip(300, 8000));
+      sig = (sig * 0.6) + (BPF.ar(sig, 450, 0.8) * 0.5) + (BPF.ar(sig, 1600, 1) * 0.3);
+      sig = Pan2.ar(sig * env * amp * 3.0, pan);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+      Out.ar(leadOut, sig * lead);
+    }).add;
+
     // persistent pad under the chords; glides between voicings, swells in
     // the kickless stretches
     SynthDef(\grad_wash, {
@@ -729,6 +892,46 @@ Engine_Gradient : CroneEngine {
       Out.ar(verbOut, sig * verb);
     }).add;
 
+    // glass: sine partials on each note, the octave and twelfth shimmering
+    // in and out on slow independent drifts, like wine glasses held ringing
+    SynthDef(\grad_pad_glass, {
+      arg out, echoOut, verbOut, f1=110, f2=130, f3=165, f4=196,
+          amp=0, cutoff=700, echo=0.1, verb=0.5;
+      var freqs = [f1, f2, f3, f4].collect { |f| Lag.kr(f, 3) };
+      var sig = Mix(freqs.collect { |f, i|
+        var sh  = LFNoise2.kr(0.11 + (i * 0.027)).range(0, 1);
+        var sh2 = LFNoise2.kr(0.07 + (i * 0.031)).range(0, 1);
+        var p   = SinOsc.ar(f) + (SinOsc.ar(f * 2.003) * sh * 0.5) + (SinOsc.ar(f * 3.004) * sh2 * 0.18);
+        Pan2.ar(p, (i - 1.5) * 0.4)
+      }) * 0.05;
+      sig = LPF.ar(sig, (Lag.kr(cutoff, 4) * 6).clip(400, 9000));
+      sig = sig * Lag.kr(amp, 6);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
+    // tape loop: the chord as a worn loop; saws under a dark low-pass with
+    // shared wow and flutter on the pitch, a soft dip each time the splice
+    // comes round (every eight seconds) and a breath of hiss
+    SynthDef(\grad_pad_tapeloop, {
+      arg out, echoOut, verbOut, f1=110, f2=130, f3=165, f4=196,
+          amp=0, cutoff=700, echo=0.1, verb=0.5;
+      var freqs = [f1, f2, f3, f4].collect { |f| Lag.kr(f, 3) };
+      var wow = 1 + (LFNoise2.kr(0.3) * 0.003) + (SinOsc.kr(0.13) * 0.002) + (LFNoise1.kr(9) * 0.0006);
+      var dip = 1 - (Lag.kr(LFPulse.kr(0.125, 0, 0.04), 0.1) * 0.35);
+      var sig = Mix(freqs.collect { |f, i|
+        Saw.ar(f * wow * [0.998 + (i * 0.0004), 1.002 - (i * 0.0004)])
+      }) * 0.1;
+      sig = LPF.ar(sig, (Lag.kr(cutoff, 4) * 0.9).clip(80, 5000));
+      sig = (sig * 1.5).tanh * 0.7 * dip;
+      sig = sig + (HPF.ar({ PinkNoise.ar } ! 2, 4000) * 0.008);
+      sig = sig * Lag.kr(amp, 6);
+      Out.ar(out, sig);
+      Out.ar(echoOut, sig * echo);
+      Out.ar(verbOut, sig * verb);
+    }).add;
+
     // hiss + vinyl crackle bed
     SynthDef(\grad_noise, {
       arg out, verbOut, amp=0, tone=2000, crackle=0.3, verb=0.4;
@@ -760,11 +963,14 @@ Engine_Gradient : CroneEngine {
     // ------------------------------------------------------------------- fx
 
     // tape-ish ping-pong dub echo: filters + saturation inside the loop, wow
-    // on the delay line, lagged time so tempo changes slide like tape
+    // on the delay line, lagged time so tempo changes slide like tape.
+    // xin / xout are echo_type's crossfade (input and output gains, both 1
+    // unless a swap is fading this echo in or out); every echo type has them
     SynthDef(\grad_echo, {
       arg in, out, verbOut, time=0.375, fb=0.55, lpf=2500, hpf=300,
-          wow=0.3, sat=0.4, pp=0.7, verb=0.3;
-      var input = In.ar(in, 2);
+          wow=0.3, sat=0.4, pp=0.7, verb=0.3, xin=1, xout=1;
+      var input = In.ar(in, 2) * Lag.kr(xin, 0.1);
+      var xo    = Lag.kr(xout, 2.5);
       var t     = Lag.kr(time, 0.8);
       var mod   = (LFNoise2.kr(0.4) * 0.002 * wow) + (SinOsc.kr(0.17) * 0.0015 * wow);
       var fbk   = LocalIn.ar(2);
@@ -776,8 +982,90 @@ Engine_Gradient : CroneEngine {
       sig = (sig * (1 + (sat * 2))).tanh / (1 + (sat * 0.8));
       del = DelayC.ar(sig, 2.5, (t + mod).clip(0.01, 2.4));
       LocalOut.ar([del[1], del[0]]);
-      Out.ar(out, del);
-      Out.ar(verbOut, del * verb);
+      Out.ar(out, del * xo);
+      Out.ar(verbOut, (del * verb) * xo);
+    }).add;
+
+    // the other echoes share grad_echo's args; echo_type crossfades them
+
+    // tape: a single-head tape echo; both sides share the repeat, the right
+    // head a hair later so the repeats widen as they go, with deeper wow and
+    // flutter, more saturation and a darker top
+    SynthDef(\grad_echo_tape, {
+      arg in, out, verbOut, time=0.375, fb=0.55, lpf=2500, hpf=300,
+          wow=0.3, sat=0.4, pp=0.7, verb=0.3, xin=1, xout=1;
+      var input = In.ar(in, 2) * Lag.kr(xin, 0.1);
+      var xo    = Lag.kr(xout, 2.5);
+      var t     = Lag.kr(time, 1.2);
+      var w     = wow + 0.2;
+      var mod   = (LFNoise2.kr(0.6) * 0.004 * w) + (SinOsc.kr(0.23) * 0.003 * w) + (LFNoise1.kr(11) * 0.0003);
+      var fbk   = LocalIn.ar(2);
+      var m     = Mix(input) * 0.6;
+      var sig, del;
+      sig = [m, m] + (fbk * Lag.kr(fb, 0.2).clip(0, 1.02));
+      sig = LPF.ar(sig, (Lag.kr(lpf, 0.3) * 0.75).clip(200, 12000));
+      sig = HPF.ar(sig, Lag.kr(hpf, 0.3).clip(20, 4000));
+      sig = (sig * (1.5 + (sat * 2.5))).tanh / (1.2 + sat);
+      del = DelayC.ar(sig, 2.5, ((t + mod) * [1, 1.012]).clip(0.01, 2.4));
+      LocalOut.ar(del);
+      del = del * 1.6;
+      Out.ar(out, del * xo);
+      Out.ar(verbOut, (del * verb) * xo);
+    }).add;
+
+    // ping-pong: a clean, bright digital ping-pong; the input enters on the
+    // left and every repeat crosses over, with barely any wow or grit
+    SynthDef(\grad_echo_pingpong, {
+      arg in, out, verbOut, time=0.375, fb=0.55, lpf=2500, hpf=300,
+          wow=0.3, sat=0.4, pp=0.7, verb=0.3, xin=1, xout=1;
+      var input = In.ar(in, 2) * Lag.kr(xin, 0.1);
+      var xo    = Lag.kr(xout, 2.5);
+      var t     = Lag.kr(time, 0.8);
+      var mod   = SinOsc.kr(0.17) * 0.0003 * wow;
+      var fbk   = LocalIn.ar(2);
+      var sig, del;
+      sig = [Mix(input), DC.ar(0)] + (fbk * Lag.kr(fb, 0.2).clip(0, 1.0));
+      sig = LPF.ar(sig, (Lag.kr(lpf, 0.3) * 1.6).clip(400, 16000));
+      sig = HPF.ar(sig, (Lag.kr(hpf, 0.3) * 0.7).clip(20, 4000));
+      sig = (sig * (1 + (sat * 0.6))).tanh / (1 + (sat * 0.3));
+      del = DelayC.ar(sig, 2.5, (t + mod).clip(0.01, 2.4));
+      LocalOut.ar([del[1], del[0]]);
+      del = del * 1.35;
+      Out.ar(out, del * xo);
+      Out.ar(verbOut, (del * verb) * xo);
+    }).add;
+
+    // space: a three-head tape echo (heads at a third, two thirds and the
+    // full time, one tape loop read three ways) with a little spring-like
+    // diffusion in the loop, so the repeats smear into a wash as they go
+    SynthDef(\grad_echo_space, {
+      arg in, out, verbOut, time=0.375, fb=0.55, lpf=2500, hpf=300,
+          wow=0.3, sat=0.4, pp=0.7, verb=0.3, xin=1, xout=1;
+      var frames = 131072;
+      var input = In.ar(in, 2) * Lag.kr(xin, 0.1);
+      var xo    = Lag.kr(xout, 2.5);
+      var t     = Lag.kr(time, 1.0);
+      var mod   = (LFNoise2.kr(0.5) * 0.003 * wow) + (SinOsc.kr(0.19) * 0.002 * wow);
+      var fbk   = LocalIn.ar(2);
+      var buf   = LocalBuf(frames, 2).clear;
+      var wp    = Phasor.ar(0, 1, 0, frames);
+      var inj   = XFade2.ar(input, [Mix(input), DC.ar(0)], (pp * 2) - 1);
+      var tap   = { |k| BufRd.ar(2, buf, (wp - (((t * k) + mod).clip(0.01, 2.4) * SampleRate.ir)).wrap(0, frames), 1, 4) };
+      var sig, h1, h2, h3, diff;
+      diff = AllpassN.ar(fbk, 0.03, [0.0123, 0.0171], 0.3);
+      diff = AllpassN.ar(diff, 0.03, [0.0089, 0.0067], 0.2);
+      sig = inj + (diff * Lag.kr(fb, 0.2).clip(0, 1.0));
+      sig = LPF.ar(sig, (Lag.kr(lpf, 0.3) * 0.9).clip(200, 12000));
+      sig = HPF.ar(sig, Lag.kr(hpf, 0.3).clip(20, 4000));
+      sig = (sig * (1 + (sat * 2))).tanh / (1 + (sat * 0.8));
+      BufWr.ar(sig, buf, wp);
+      h1 = tap.(1 / 3);
+      h2 = tap.(2 / 3);
+      h3 = tap.(1);
+      LocalOut.ar((h3 * 0.7) + (h2 * 0.3));
+      sig = ((h1 * 0.35) + (h2 * 0.5) + (h3 * 0.75)) * 1.3;
+      Out.ar(out, sig * xo);
+      Out.ar(verbOut, (sig * verb) * xo);
     }).add;
 
     SynthDef(\grad_verb, {
@@ -867,17 +1155,32 @@ Engine_Gradient : CroneEngine {
 
     SynthDef(\grad_master, {
       arg dryIn, pumpIn, out, ampOut, t_pump=0, pumpDepth=0.6, pumpRel=0.25, level=0.8, drive=0.2,
-          pumpLpf=20000;
+          pumpLpf=20000, character=1;
       // Sanitize: a NaN or inf from any voice becomes 0 here, so it can't
       // stick in the limiter or the Amplitude followers (they never recover)
       var d   = Sanitize.ar(In.ar(dryIn, 2));
-      var mono, toVis;
+      var mono, toVis, ch, warm, dusty, blend;
       // pumpLpf: the fill's filter dip, on everything but kick and hats
       var p   = LPF.ar(Sanitize.ar(In.ar(pumpIn, 2)), Lag.kr(pumpLpf, 0.12).clip(80, 20000));
       var env = EnvGen.kr(Env.perc(0.005, pumpRel, 1, -3), t_pump);
       var sig = d + (p * (1 - (env * pumpDepth)));
       sig = HPF.ar(sig, 28);
       sig = (sig * (1 + (drive * 2))).tanh / (1 + (drive * 0.6));
+      // character: 1 clean, 2 warm, 3 dusty, crossfaded over about half a
+      // second. clean is the master exactly as it was: the Select passes
+      // the untouched signal whenever the lagged mode sits at 1
+      //   warm   a low shelf up, the top shelved down, a soft tape knee
+      //   dusty  band-limited, a slow wow and a little flutter, a mid
+      //          bump and a harder knee, like an old cassette dub
+      ch    = Lag.kr(character.clip(1, 3), 0.6);
+      warm  = BHiShelf.ar(BLowShelf.ar(sig, 120, 1, 2.5), 6000, 1, -3);
+      warm  = (warm * 1.3).tanh / 1.15;
+      dusty = DelayC.ar(HPF.ar(sig, 35), 0.02,
+        0.004 + (LFNoise2.kr(0.5) * 0.0012) + (SinOsc.kr(6.3) * 0.00012));
+      dusty = BPeakEQ.ar(LPF.ar(dusty, 5000), 1200, 1, 2);
+      dusty = (dusty * 1.6).tanh / 1.25;
+      blend = (sig * (2 - ch).max(0)) + (warm * (1 - (ch - 2).abs).max(0)) + (dusty * (ch - 2).max(0));
+      sig = Select.ar(ch > 1.0005, [sig, blend]);
       sig = Limiter.ar(sig * level, 0.95, 0.01);
       // the visuals' ears: three cheap filters and four Amplitude followers
       // on the mono sum, mapped from dB to 0..1
@@ -909,6 +1212,10 @@ Engine_Gradient : CroneEngine {
     padDef = \grad_wash;
     padLastSwap = -100;
     padTimer = false;
+    echoFading = List.new;
+    echoDef = \grad_echo;
+    echoLastSwap = -100;
+    echoTimer = false;
     washSynth = Synth(\grad_wash, [
       \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index
     ], voiceGroup);
@@ -965,6 +1272,7 @@ Engine_Gradient : CroneEngine {
       \pump_depth -> [\master, \pumpDepth], \pump_rel -> [\master, \pumpRel],
       \pump_lpf -> [\master, \pumpLpf],
       \level -> [\master, \level],    \drive -> [\master, \drive],
+      \character -> [\master, \character],
       \wash_amp -> [\wash, \amp],     \wash_cutoff -> [\wash, \cutoff],
       \wash_echo -> [\wash, \echo],   \wash_verb -> [\wash, \verb],
       \noise_amp -> [\noise, \amp],   \noise_tone -> [\noise, \tone],
@@ -976,14 +1284,15 @@ Engine_Gradient : CroneEngine {
     // ------------------------------------------------------------- commands
 
     this.addCommand(\kick, "ffff", { |msg|
-      Synth([\grad_kick, \grad_kick_dusty, \grad_kick_boom, \grad_kick_knock].clipAt(st[\kick_type].asInteger - 1), [
+      Synth([\grad_kick, \grad_kick_dusty, \grad_kick_boom, \grad_kick_knock,
+        \grad_kick_deep, \grad_kick_tight].clipAt(st[\kick_type].asInteger - 1), [
         \out, dryBus.index, \amp, msg[1] * st[\kick_lvl],
         \tune, msg[2], \decay, msg[3], \click, msg[4]
       ], voiceGroup);
     });
 
     this.addCommand(\hat, "ffff", { |msg|
-      Synth([\grad_hat, \grad_hat_metal, \grad_hat_dust].clipAt(st[\hat_type].asInteger - 1), [
+      Synth([\grad_hat, \grad_hat_metal, \grad_hat_dust, \grad_hat_tape].clipAt(st[\hat_type].asInteger - 1), [
         \out, dryBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
         \amp, msg[1] * st[\hat_lvl], \decay, msg[2], \tone, msg[3], \pan, msg[4],
         \echo, st[\hat_echo], \verb, st[\hat_verb]
@@ -999,14 +1308,16 @@ Engine_Gradient : CroneEngine {
     });
 
     this.addCommand(\bass, "fff", { |msg|
-      Synth([\grad_bass, \grad_bass_reese, \grad_bass_rubber].clipAt(st[\bass_type].asInteger - 1), [
+      Synth([\grad_bass, \grad_bass_reese, \grad_bass_rubber,
+        \grad_bass_fmsub, \grad_bass_tape].clipAt(st[\bass_type].asInteger - 1), [
         \out, pumpBus.index, \freq, msg[1], \amp, msg[2] * st[\bass_lvl], \dur, msg[3],
         \cutoff, st[\bass_cutoff], \drive, st[\bass_drive]
       ], voiceGroup);
     });
 
     this.addCommand(\bass_glide, "fffff", { |msg|
-      Synth([\grad_bass, \grad_bass_reese, \grad_bass_rubber].clipAt(st[\bass_type].asInteger - 1), [
+      Synth([\grad_bass, \grad_bass_reese, \grad_bass_rubber,
+        \grad_bass_fmsub, \grad_bass_tape].clipAt(st[\bass_type].asInteger - 1), [
         \out, pumpBus.index, \freq, msg[1], \amp, msg[2] * st[\bass_lvl], \dur, msg[3],
         \from, msg[4], \glide, msg[5],
         \cutoff, st[\bass_cutoff], \drive, st[\bass_drive]
@@ -1074,7 +1385,7 @@ Engine_Gradient : CroneEngine {
 
     this.addCommand(\chord, "ffffff", { |msg|
       Synth([\grad_chord, \grad_chord_felt, \grad_chord_organ, \grad_chord_glass,
-        \grad_chord_rhodes].clipAt(st[\chord_type].asInteger - 1), [
+        \grad_chord_rhodes, \grad_chord_choir, \grad_chord_strings].clipAt(st[\chord_type].asInteger - 1), [
         \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
         \f1, msg[1], \f2, msg[2], \f3, msg[3], \f4, msg[4],
         \amp, msg[5] * st[\chord_lvl], \dur, msg[6],
@@ -1086,7 +1397,8 @@ Engine_Gradient : CroneEngine {
 
     this.addCommand(\arp, "fffffff", { |msg|
       var def = [\grad_arp, \grad_arp_bell, \grad_arp_pluck, \grad_arp_soft,
-        \grad_arp_glass, \grad_arp_reed, \grad_arp_kalimba, \grad_arp_marimba].clipAt(msg[7].asInteger - 1);
+        \grad_arp_glass, \grad_arp_reed, \grad_arp_kalimba, \grad_arp_marimba,
+        \grad_arp_steel, \grad_arp_bowed].clipAt(msg[7].asInteger - 1);
       Synth(def, [
         \out, pumpBus.index, \echoOut, echoBus.index, \verbOut, verbBus.index,
         \leadOut, leadBus.index,
@@ -1112,7 +1424,8 @@ Engine_Gradient : CroneEngine {
     // early has already faded by 20 dB or more (no click)
     this.addCommand(\pad_type, "f", { |msg|
       var now = SystemClock.seconds;
-      padPending = [\grad_wash, \grad_pad_choir, \grad_pad_strings, \grad_pad_drone].clipAt(msg[1].asInteger - 1);
+      padPending = [\grad_wash, \grad_pad_choir, \grad_pad_strings, \grad_pad_drone,
+        \grad_pad_glass, \grad_pad_tapeloop].clipAt(msg[1].asInteger - 1);
       padDue = (now + 0.25).max(padLastSwap + 2);
       if(padTimer.not, {
         padTimer = true;
@@ -1135,6 +1448,29 @@ Engine_Gradient : CroneEngine {
       var args = [\in, verbBus.index, \out, pumpBus.index];
       vals.keysValuesDo { |k, v| args = args ++ [k, v] };
       fx[\verb] = Synth.replace(fx[\verb], def, args);
+    });
+
+    // swap the dub echo (1 dub 2 tape 3 ping-pong 4 space); see swapEcho
+    // below. coalesced like pad_type: the swap lands 0.25 s after the last
+    // request and never sooner than 2 s after the previous one. the lead
+    // echo is never swapped
+    this.addCommand(\echo_type, "f", { |msg|
+      var now = SystemClock.seconds;
+      echoPending = [\grad_echo, \grad_echo_tape, \grad_echo_pingpong,
+        \grad_echo_space].clipAt(msg[1].asInteger - 1);
+      echoDue = (now + 0.25).max(echoLastSwap + 2);
+      if(echoTimer.not, {
+        echoTimer = true;
+        SystemClock.sched(echoDue - now, {
+          var wait = echoDue - SystemClock.seconds;
+          if(wait > 0.001, { wait }, {
+            echoTimer = false;
+            if(echoPending.notNil and: { echoPending != echoDef }, { this.swapEcho(echoPending) });
+            echoPending = nil;
+            nil
+          })
+        });
+      });
     });
 
     // load a sound file as the bed; the bed synth is rebuilt to match its
@@ -1213,10 +1549,41 @@ Engine_Gradient : CroneEngine {
     });
   }
 
+  // the echo crossfade: the new echo starts after the old one with the
+  // remembered settings and its input faded in over about 0.1 s; the old
+  // one stops taking input at once (its repeats carry on) and its output
+  // lags down (Lag.kr 2.5: 60 dB in 2.5 s), and it is freed after 3 s. a
+  // swap that lands while one is still fading frees that one at once, so
+  // at most two dub echoes ever coexist
+  swapEcho { arg def;
+    var vals = fxVals[\echo] ? IdentityDictionary.new;
+    var old = echoSynth, nu;
+    var args = [\in, echoBus.index, \out, pumpBus.index, \verbOut, verbBus.index];
+    if(old.isNil, { ^this });
+    vals.keysValuesDo { |k, v| args = args ++ [k, v] };
+    args = args ++ [\xin, 0];
+    echoFading.do { |n| n.free };
+    echoFading = List[old];
+    nu = Synth.after(old, def, args);
+    nu.set(\xin, 1);
+    old.set(\xin, 0, \xout, 0);
+    echoSynth = nu;
+    fx[\echo] = nu;
+    echoDef = def;
+    echoLastSwap = SystemClock.seconds;
+    SystemClock.sched(3, {
+      if(echoFading.includes(old), { old.free; echoFading.remove(old) });
+      nil
+    });
+  }
+
   free {
     // disarm any pending swap or crossfade free: the group takes the nodes
     padFading = List.new;
     padPending = nil;
+    echoFading = List.new;
+    echoPending = nil;
+    echoSynth = nil;
     washSynth = nil;
     voiceGroup.free;
     fxGroup.free;

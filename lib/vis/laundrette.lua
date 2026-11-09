@@ -6,8 +6,8 @@
 -- and the pump; the kick thumps the loads, the bass shakes the machines
 -- on their feet, hats glint in the suds, ticks are the timer LEDs, stabs
 -- light a door's porthole (note = which), arps are the panel lights over
--- the doors (note = which machine). the clap is a dryer's tumble knock and
--- perc a smaller one (voice = which dryer). the pad steams the window, the
+-- the doors (note = which machine). the clap is a dryer's tumble knock,
+-- perc a coin dropping through the change machine (voice = which chute). the pad steams the window, the
 -- pump breathes the light. mids lift the machines, highs glint on the
 -- glass, lows hum along the floor, the level lights the sign
 return function(K)
@@ -34,14 +34,14 @@ return function(K)
   -- a hit eases in over a frame or so: big areas never jump
   local function rise(t) return math.min(1, 0.4 + (K.NOW - t) / 0.08) end
 
-  local pump_t, clap_t = -99, -99
+  local kick_t, pump_t, clap_t = -99, -99, -99
   local rot = 0                          -- the drums' turn, radians
   local doors = {}                       -- per machine: the stab's porthole light
   local panels = {}                      -- per machine: the arp's panel light
   for i = 1, #MACH do doors[i], panels[i] = -99, 0 end
-  local knocks = {}
-  for i = 1, 3 do knocks[i] = {t = -99, m = 1} end
-  local kni = 0
+  local coins = {}
+  for i = 1, 3 do coins[i] = {t = -99, v = 1} end
+  local cni = 0
   local tick_k = 1
   local pdz = 0
   -- hits pile up and drain: each one adds, so it shows whenever it lands
@@ -49,23 +49,23 @@ return function(K)
   local function add(k, v) acc[k] = math.min(1.6, acc[k] + v) end
 
   function M.init()
-    pump_t, clap_t = -99, -99
+    kick_t, pump_t, clap_t = -99, -99, -99
     rot, tick_k, pdz = 0, 1, 0
     for i = 1, #MACH do doors[i], panels[i] = -99, 0 end
-    for i = 1, 3 do knocks[i].t = -99 end
+    for i = 1, 3 do coins[i].t = -99 end
     for k in pairs(acc) do acc[k] = 0 end
   end
   M.clear = M.init
 
-  function M.kick() add("kick", 0.5) end
+  function M.kick() kick_t = K.NOW; add("kick", 0.5) end
   function M.pump() pump_t = K.NOW; add("pump", 0.4) end
   function M.bass() add("bass", 0.45) end
   function M.hat() add("hat", 0.6) end
   function M.clap() clap_t = K.NOW end
   function M.perc(voice)
     voice = clamp(math.floor(K.num(voice, 1)), 1, 3)
-    kni = kni % #knocks + 1
-    knocks[kni].t, knocks[kni].m = K.NOW, voice % 2 + 1
+    cni = cni % #coins + 1
+    coins[cni].t, coins[cni].v = K.NOW, voice
   end
   function M.tick(kind)
     tick_k = clamp(math.floor(K.num(kind, 1)), 1, 4)
@@ -116,7 +116,7 @@ return function(K)
     for k, v in pairs(acc) do acc[k] = v < 0.01 and 0 or v * dk end
     local pk = math.exp(-DT / (0.5 * TR()))
     for i = 1, #MACH do panels[i] = panels[i] < 0.01 and 0 or panels[i] * pk end
-    local kk, bt, ap, hf, tf = acc.kick, acc.bass, acc.pump, acc.hat, acc.tick
+    local kk, bt, ap, hf, tf = acc.kick * rise(kick_t), acc.bass, acc.pump, acc.hat, acc.tick
     -- the drums: slow at rest, faster with the energy, a surge on the pump
     rot = (rot + DTS * (0.7 + 2.6 * e + 2.4 * pf)) % K.TAU
 
@@ -190,23 +190,19 @@ return function(K)
       end
     end
 
-    -- the clap: a dryer's tumble knock, the stacked pair shaking
-    local cf = fade(clap_t, 0.3)
-    for q = 1, #knocks + 1 do
-      local f, m
-      if q <= #knocks then f, m = fade(knocks[q].t, 0.45), MACH[knocks[q].m]
-      else f, m = cf * 1.4, MACH[(math.floor(clap_t * 4) % 2) + 1] end
-      if f > 0 then
-        local x, y, w, h = m[1], m[2], m[3], m[4]
-        line(E(5 * f), x, y, x + w, y); line(E(4 * f), x, y, x, y + h - 1); line(E(4 * f), x + w, y, x + w, y + h - 1)
-        for k = 0, 2 do
-          local ky = y + 4 + k * 5
-          line(E(4.5 * f), x - 2, ky, x - 4, ky - 1)
-          line(E(4.5 * f), x + w + 2, ky, x + w + 4, ky - 1)
-        end
-        put(E(3 * f), x + 1, y + h - 1, w - 1, 1)
-        ring(E(5.5 * f), x + w / 2, m[5], m[6])
+    -- the clap: a dryer's tumble knock, one of the stacked pair shaking
+    local f = fade(clap_t, 0.3) * 1.4
+    if f > 0 then
+      local m = MACH[(math.floor(clap_t * 4) % 2) + 1]
+      local x, y, w, h = m[1], m[2], m[3], m[4]
+      line(E(5 * f), x, y, x + w, y); line(E(4 * f), x, y, x, y + h - 1); line(E(4 * f), x + w, y, x + w, y + h - 1)
+      for k = 0, 2 do
+        local ky = y + 4 + k * 5
+        line(E(4.5 * f), x - 2, ky, x - 4, ky - 1)
+        line(E(4.5 * f), x + w + 2, ky, x + w + 4, ky - 1)
       end
+      put(E(3 * f), x + 1, y + h - 1, w - 1, 1)
+      ring(E(5.5 * f), x + w / 2, m[5], m[6])
     end
 
     -- the change machine: a lit display and the coin tray
@@ -214,6 +210,22 @@ return function(K)
     put(3.4 + E(1.6 * ap), CX0 + 3, 23, 8, 3)
     put(1.6, CX0 + 4, 30, 6, 1)
     put(2, CX0 + 5, 40, 4, 2)
+    -- perc: a coin drops down a chute, the display counts it, the tray rings
+    for i = 1, #coins do
+      local c = coins[i]
+      local f = fade(c.t, 0.45)
+      if f > 0 then
+        local a = K.NOW - c.t
+        local cx = CX0 + 3 + c.v * 2
+        local cy = 30 + math.min(1, a / 0.25) * 10
+        put(E(9 * f), cx, cy, 2, 1)
+        put(E(3 * f), cx, cy - 3, 2, 3)
+        put(E(4.5 * f), CX0 + 2, 22, 10, 5)
+        put(E(4 * f), CX0 + 3, 29, 8, 2)
+        put(E(5 * f) * math.min(1, a / 0.25), CX0 + 2, 39, 10, 4)
+        line(E(3.6 * f), CX0, 21, CX0, FLOOR - 1); line(E(3.6 * f), CX1, 21, CX1, FLOOR - 1)
+      end
+    end
 
     -- the bench in front of the machines
     line(2, 34, 52, 92, 52); line(1.4, 34, 53, 92, 53)

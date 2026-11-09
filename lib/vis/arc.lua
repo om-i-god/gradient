@@ -262,7 +262,8 @@ return function(K)
     -- the live edge: a now-line and the lamp on the newest land
     local lt = top[X_NOW // 2 - 1] or GROUND - 2
     if lt > GROUND then lt = GROUND - 2 end
-    for y = 2, math.floor(lt) - 3, 3 do put(1 + 5 * kk, X_NOW, y, 1, 2) end
+    for y = 2, math.floor(lt) - 3, 3 do put(1 + 5 * kk, X_NOW, y, 1, 1)
+      if kk > 0.03 then put(3 * kk, X_NOW, y + 1, 1, 1) end end
     lamp = follow(lamp, math.max(kick * (1 - K.kickless), K.duck * 0.4), 0.03, DT)
     put(5 + lamp * 7, X_NOW - 1, lt - 2, 2, 2)
     -- the kick sends a ring out from the lamp

@@ -60,16 +60,39 @@ return function(K)
 
   local pump_t = -99                     -- when the last pump came (real time)
 
+  -- the other parts leave a mark (K.NOW of the hit) that fades on its own
+  local hit, percs, flashes = {}, {}, {}
+  local pdz, bz = 0, 0                   -- the pad and the bass hit, eased in
+  local function mark(k) hit[k] = K.NOW end
+  local function fade(k, tau)
+    local t = hit[k]
+    if not t then return 0 end
+    local v = math.exp(-(K.NOW - t) / tau)
+    if v < 0.02 then hit[k] = nil; return 0 end
+    return v
+  end
+  function M.hat() mark("hat") end
+  function M.clap() mark("clap") end
+  function M.bass() mark("bass") end
+  function M.tick() mark("tick") end
+  function M.perc(voice, note)
+    percs[#percs + 1] = {t = K.NOW, b = BLK[(math.floor(K.num(note, 60)) + 3 * clamp(math.floor(K.num(voice, 1)), 1, 4)) % #BLK + 1]}
+    while #percs > 4 do table.remove(percs, 1) end
+  end
+
   function M.pump() pump_t = K.NOW end
 
   function M.init()
     pump_t = -99
     for j = 1, NMAX do sq[j], sqs[j] = 1, 1 end
     lv_sky, lv_gnd, flare, lo, lights = {0, 0, 0, 0}, 0, 0, 0, {}
+    hit, percs, flashes, pdz, bz = {}, {}, {}, 0, 0
   end
 
   function M.arp(lane, note)
     lane = clamp(math.floor(K.num(lane, 1)), 1, 4)
+    flashes[#flashes + 1] = {t = K.NOW, x = 64 + (K.px(note) - 64) / 64 * 6, lane = lane}
+    while #flashes > 4 do table.remove(flashes, 1) end
     local fb, et = K.echo_fb, K.echo_t * K.SP
     local a = 1
     for k = 0, 3 do
@@ -107,11 +130,15 @@ return function(K)
     lo = K.follow(lo, A[K.LO], 0.5, DT)
     flare = K.follow(flare, K.env.kick, 0.03, DT)
     local hi = A[K.HI]
+    pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    local cl, hh, bh, tk = fade("clap", 0.3), fade("hat", 0.25), fade("bass", 0.4), fade("tick", 0.4)
+    bz = K.follow(bz, bh, 0.1, DT)
+    local pd, mid, amp = pdz, A[K.MID], A[K.AMP]
 
     -- the city's glow, low on the sky and cut by the skyline
     K.gradient(HY - 26, HY - 1, function(y)
       local u = (HY - y) / 26
-      return (0.75 + 0.6 * e) * (1 - u) ^ 1.4 + 0.12
+      return (0.75 + 0.6 * e) * (1 + 0.3 * amp) * (1 - u) ^ 1.4 + 0.12 + 0.9 * pd * (1 - u)
     end, sky)
     -- the sky: ruled bands stopping at the skyline; each band belongs to a
     -- chord voice, lit when it is stabbed. far bands break into dashes
@@ -122,7 +149,7 @@ return function(K)
       local y = math.floor(HY - dist(j, n, sqs, 34) + 0.5)
       if y >= 0 then
         local v = (j - 1) % 4 + 1
-        local l = 1 + f * (0.4 + e * 0.7)
+        local l = 1 + f * (0.4 + e * 0.7) + cl * 1.2
         local cx = 64 + clamp((c[v] - mean) * 4, -50, 50) + math.sin(T * 0.21 + v * 1.9) * 12
         local hw = 12 + 8 * f
         local sl = lv_sky[v] * (1.5 + 2 * f)
@@ -149,18 +176,49 @@ return function(K)
     for i = 0, 9 do
       local x, y = math.floor(K.hash(i, 31) * 126), 1 + math.floor(K.hash(i, 32) * 12)
       local tw = 0.5 + 0.5 * math.sin(T * (0.7 + K.hash(i, 33)) + i * 2.3)
-      put(1 + tw * (0.6 + hi * 3), x, y, 1, 1)
+      put(1 + tw * (0.6 + hi * 3) + hh * 4, x, y, 1, 1)
     end
 
     -- the skyline: dark masses with their windows; the mast's red light
     for i, wn in ipairs(WIN) do
       local v = math.sin(T * 0.23 + wn[3])
-      if v > -0.4 then put(1.5 + v + e * 1.2 + hi * 1.5, wn[1], wn[2], 1, 1) end
+      if v > -0.4 then put((1.5 + v + e * 1.2 + hi * 1.5) * (1 + 0.4 * amp) + hh * 4, wn[1], wn[2], 1, 1) end
     end
     put(1 + 7 * (0.5 + 0.5 * math.sin(T * 2.2)) ^ 4, MAST, HY - 25, 1, 1)
+    -- a tick runs a flicker down the mast
+    if tk > 0.03 then
+      line(6 * tk, MAST, HY - 25, MAST, HY - 2)
+      put(8 * tk, MAST - 1, HY - 26, 3, 1)
+    end
+    -- a perc fires a beacon on a rooftop, picked by its note
+    for i = #percs, 1, -1 do
+      local p = percs[i]
+      local f = math.exp(-(K.NOW - p.t) / 0.5)
+      if f < 0.03 then table.remove(percs, i)
+      else
+        local bx, by = p.b.x + p.b.w // 2, HY - p.b.h - 1
+        put(7 * f, bx - 1, by - 1, 3, 3)
+        put(4 * f, bx - 4, by, 9, 1)
+        put(4 * f, bx, by - 5, 1, 9)
+      end
+    end
+    -- an arp note flashes where its light enters the field
+    for i = #flashes, 1, -1 do
+      local fl = flashes[i]
+      local f = math.exp(-(K.NOW - fl.t) / 0.5)
+      if f < 0.03 then table.remove(flashes, i)
+      else
+        put(6 * f, fl.x - 10, HY + 1, 21, 1)
+        put(4 * f, fl.x - 2, HY - 12 - fl.lane * 4, 5, 12 + fl.lane * 4)
+        put(3 * f, fl.x - 14, HY + 2, 29, 1)
+      end
+    end
     -- haze lying along the horizon, thicker in kickless stretches
-    K.haze(0, HY - 6, 128, HY + 6, 0.2 + 0.2 * w + 0.1 * K.dub * K.throw, 1, T * 4)
+    K.haze(0, HY - 6, 128, HY + 6, 0.2 + 0.2 * w + 0.1 * K.dub * K.throw + 0.2 * mid + 0.15 * pd, 1, T * 4)
+    if mid > 0.05 then K.haze(0, 4, 128, HY - 6, 0.2 * mid, 1, -T * 2) end
 
+    -- hats glitter along the horizon
+    if hh > 0.03 then K.dashes(4 * hh, HY - 1, 2, 10, T * 30, 0, 128) end
     -- the horizon: flares with the kick (eased, never a slab)
     put(2 + flare * 7 + K.bar_pulse * 1.5, 0, HY, 128, 1)
 
@@ -168,7 +226,7 @@ return function(K)
     if w < 0.95 then
       for k = -6, 6 do
         local x1 = 64 + k * 26
-        line((1 + lo * 1.2 + flare * 1.5) * (1 - w), 64 + k * 3, HY + 1, 64 + k * 22, 63)
+        line((1 + lo * 1.2 + flare * 1.5 + bz * 4) * (1 - w), 64 + k * 3, HY + 1, 64 + k * 22, 63)
       end
     end
     -- the field's lines: dry, straight rules; wet, a swell of segments

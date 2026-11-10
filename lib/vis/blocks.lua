@@ -53,8 +53,8 @@ return function(K)
   local KS, HS, BS = {"kick0", "kick1"}, {"hat0", "hat1"}, {"bass0", "bass1"}
   local AK = {{"a10", "a11"}, {"a20", "a21"}, {"a30", "a31"}, {"a40", "a41"}}
   local aflr = {{0, 0}, {0, 0}, {0, 0}, {0, 0}}
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense over most of its range (0.45x at 0, 2.2x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(2.2, math.max(0.45, K.trail)) or K.trail end
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
@@ -136,12 +136,21 @@ return function(K)
     local kf0, kf1, hf0, hf1 = fade(KS[1], 0.3), fade(KS[2], 0.3), fade(HS[1], 0.25), fade(HS[2], 0.25)
 
     -- the sky: the city's glow low down, a few clouds catching it
-    K.gradient(32, BOT - 1, function(y) return (y - 32) / 18 * (0.45 + A[K.LO] * 0.5) end, SKYP)
+    if fp then
+      -- playing: the glow gathers low between the blocks, the low end and the energy feeding it
+      local gl = 1.4 * A[K.LO] + 0.9 * K.energy + 0.6 * pd
+      K.gradient(32, BOT - 1, function(y) local u = (y - 32) / 18; return u * (0.45 + A[K.LO] * 0.5) + u ^ 3 * gl end, SKYP)
+    else
+      K.gradient(32, BOT - 1, function(y) return (y - 32) / 18 * (0.45 + A[K.LO] * 0.5) end, SKYP)
+    end
     K.haze(0, 2, 128, 22, 0.08 + 0.1 * K.dub, 1, T * 2)
+    -- playing, the near towers' lit faces and roofs follow the glow
+    local glow_e = fp and (0.9 * K.energy + 0.8 * A[K.LO]) or 0
 
-    -- the far blocks: floor lines only, a few windows on
+    -- the far blocks: floor lines only, a few windows on (playing: every
+    -- other line, so they sit further back than the towers)
     for k, t in ipairs(FAR) do
-      for y = t[3], BOT - 1, FLH do put(1, t[1], y, t[2], 1) end
+      for y = t[3], BOT - 1, fp and FLH * 2 or FLH do put(1, t[1], y, t[2], 1) end
       for f = 0, 6 do
         local h = K.hash(f * 13 + k, 31)
         if h < 0.35 then
@@ -180,10 +189,22 @@ return function(K)
       local n, nc = nfl(t), ncol(t)
       local g = K.gain(S, "lane" .. ti)
       -- the edges and the floor slabs
-      put(2, x0, top, 1, BOT - top)
-      put(1.5, x0 + w - 1, top, 1, BOT - top)
-      put(2, x0, top - 1, w, 1)
-      for f = 0, n - 1 do put(1, x0 + 2, BOT - FLH * (f + 1), w - 4, 1) end
+      if fp then
+        -- playing: the lit face and the shadowed one, the roof edge catching
+        -- the city glow (dense: the slabs' joints picked out)
+        put(2.6 + glow_e, x0, top, 1, BOT - top)
+        put(1, x0 + w - 1, top, 1, BOT - top)
+        put(2.4 + glow_e, x0, top - 1, w, 1)
+        for f = 0, n - 1 do
+          put(1, x0 + 2, BOT - FLH * (f + 1), w - 4, 1)
+          if dense then K.dashes(2, BOT - FLH * (f + 1), 1, 4, f * 2 + ti, x0 + 2, x0 + w - 2) end
+        end
+      else
+        put(2, x0, top, 1, BOT - top)
+        put(1.5, x0 + w - 1, top, 1, BOT - top)
+        put(2, x0, top - 1, w, 1)
+        for f = 0, n - 1 do put(1, x0 + 2, BOT - FLH * (f + 1), w - 4, 1) end
+      end
       -- lived-in floors: some of their windows on, merged into runs
       for f = 0, n - 1 do                                    -- a stab lights the slab of each lived-in floor
         local sv = slab[ti * 100 + f]
@@ -195,7 +216,11 @@ return function(K)
           local y = wy(f)
           for cc = 0, nc - 1 do
             if K.hash(ti * 997 + f * 31 + cc, 7) < 0.5 then
-              put((1.3 + v * 3) * breathe * (1 + 0.5 * mid + (fp and 0.6 * pd or 0)), wx(t, cc), y, 2, 2)
+              if fp then              -- playing: warmer and deeper, the stab lifting them hard; kickless, the city half asleep
+                put((1.3 + v * 4.4) * breathe * (1 + 0.5 * mid + 0.6 * pd) * (1 - 0.3 * K.kickless), wx(t, cc), y, 2, 2)
+              else
+                put((1.3 + v * 3) * breathe * (1 + 0.5 * mid), wx(t, cc), y, 2, 2)
+              end
             end
           end
         end
@@ -212,6 +237,10 @@ return function(K)
         else
           local l = (3 + 7 * wi.pk * (0.6 + 0.4 * g)) * math.exp(-u) * breathe
           put(math.min(fine and l * RT or l, 13), wx(t, wi.c), wy(wi.f), 2, 2)
+          if fp and u < 0.8 and l > 4 then      -- playing: a fresh window spills light on its sill and lintel
+            put(l * 0.35 * (1 - u), wx(t, wi.c) - 1, wy(wi.f) - 1, 4, 1)
+            put(l * 0.25 * (1 - u), wx(t, wi.c) - 1, wy(wi.f) + 2, 4, 1)
+          end
         end
       end
       -- two tellies on: their light flickers with the highs
@@ -228,7 +257,7 @@ return function(K)
       end
       -- a red light on the roof, pulsing slowly
       local r = 0.5 + 0.5 * math.sin(T * 1.3 + ti * 1.9)
-      put(1 + r * 4, x0 + math.floor(w / 2), top - 2, 1, 1)
+      put(1 + r * (fp and 4 + 4 * K.energy or 4), x0 + math.floor(w / 2), top - 2, 1, 1)
       -- a kick catches the towers' edges, odd and even in turn; a tick flares the roof lamp
       if (ti % 2 == 1 and kf0 or kf1) > 0.03 then
         local kv = ti % 2 == 1 and kf0 or kf1
@@ -323,6 +352,8 @@ return function(K)
     end
     local v = 128 / (K.beat_sec * 7)
     if not K.playing then v = 30 end
+    if fp then v = v * (1 - 0.4 * K.kickless) end     -- kickless, the late trains crawl
+    local cv = math.max(vk[1], vk[2], vk[3], vk[4])
     for k = #trains, 1, -1 do
       local tr = trains[k]
       tr.x = tr.x + tr.dir * v * DTS
@@ -338,10 +369,14 @@ return function(K)
           psub(1.5, cx, yb + 4, 16, 1)           -- the floor
           put(2, cx, yb + 1, 1, 3)
           put(2, cx + 15, yb + 1, 1, 3)
-          K.dashes(5 * breathe, yb + 2, 2, 3, 1, cx + 2, cx + 14)
+          if fp then K.dashes(E((4 + 6 * cv) * breathe), yb + 2, 2, 3, 1, cx + 2, cx + 14)   -- playing: the chord lights the carriages
+          else K.dashes(5 * breathe, yb + 2, 2, 3, 1, cx + 2, cx + 14) end
         end
         local hx = tr.dir > 0 and tr.x or tr.x - 1
         put(9, hx, yb + 2, 1, 2)                 -- the headlight
+        if fp then                               -- and its beam down the track ahead
+          for s = 1, 3 do put(9 / (s + 1), hx + tr.dir * (1 + (s - 1) * 4) - (tr.dir < 0 and 3 or 0), yb + 3, 4, 1) end
+        end
       end
     end
   end

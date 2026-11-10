@@ -37,8 +37,8 @@ return function(K)
   local an = 0
   local kn, bn = 0, 0                     -- kicks and bass notes so far: they alternate sides
   local KS, BS = {"kick0", "kick1"}, {"bass0", "bass1"}
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense over most of its range (0.45x at 0, 2.2x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(2.2, math.max(0.45, K.trail)) or K.trail end
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
@@ -169,6 +169,31 @@ return function(K)
     -- the skyline: a dark mass, its roofs catching the glow, and a few
     -- windows in it
     K.mass(1, SKY, HY)
+    -- fine, playing: the city's glow pools over the vanishing point, the
+    -- heart of the scene. the low end and each kick swell it, the mids widen
+    -- it, the energy lifts it; kickless it spreads wide and thin into the fog
+    if fp then
+      local kv = math.max(kk, kk1)
+      local cg = math.min(12, (0.7 + lo * 2.5 + mid * 1.5 + K.energy * 2.4 + kv * 3.6 * RX) * (1 - K.kickless * 0.4) * (1 - sod * 0.25))
+      local rx, ry = 16 + mid * 6 + K.energy * 5 + K.kickless * 16, 5 + K.energy * 2.5 + kv * 1.2
+      for y = HY - math.ceil(ry), HY - 1 do
+        local u = (HY - y) / ry
+        if u < 1 then
+          local hw = rx * math.sqrt(1 - u * u)
+          if y % 2 == 0 then K.row_above(cg * 0.45 * (1 - u), y, SKY, math.max(0, math.floor(VX - hw)), math.min(128, math.floor(VX + hw))) end
+          local hc = hw * (0.4 + 0.2 * kv)
+          if hc >= 1 then K.row_above(cg * (1 - u * 0.8), y, SKY, math.max(0, math.floor(VX - hc)), math.min(128, math.floor(VX + hc))) end
+        end
+      end
+      -- dense: shafts of the glow fanning up through it
+      if dense then
+        for k = -3, 3 do
+          local a = k * 0.32 + 0.05 * math.sin(T * 0.3 + k)
+          local len = ry * (0.7 + 0.25 * math.cos(k * 1.7 + T * 0.4))
+          line(cg * 0.75, VX + math.sin(a) * 3, HY - 1, VX + math.sin(a) * len * 2.6, HY - 1 - math.cos(a) * len * 0.8)
+        end
+      end
+    end
     -- a clap swells the roofs in the glow
     if cl > 0.03 then
       for c = 0, 63 do put(E(fine and 8 * cl or 6 * cl), c * 2, math.floor(SKY[c] + 0.5), 2, 1) end
@@ -264,6 +289,18 @@ return function(K)
         end
         local big = d < 4
         put(lamp * (0.55 + 0.45 * far), hx - (big and 1 or 0), top + 1, big and 2 or 1, big and 2 or 1)
+        -- dense: the head's reflection shivering on the wet road below it
+        if dense and fp and d < 5 then
+          for r = 1, math.floor(9 / d), 2 do
+            put(lamp * 0.35 * (1 - r * d / 10) * (0.7 + 0.3 * math.sin(T * 3 + r + k)), hx, math.floor(ybase) + r, 1, 1)
+          end
+        end
+        -- kickless, playing: the fog catches each near head in a soft halo
+        if fp and K.kickless > 0.1 and d < 6 then
+          local hl = lamp * 0.4 * K.kickless * far
+          put(hl, hx - 3, top + 1, 2, 1); put(hl, hx + 2, top + 1, 2, 1)
+          put(hl, hx - 1, top - 1, 2, 1); put(hl, hx - 1, top + 3, 2, 1)
+        end
         -- the cone of light down to the road
         if d < 3 then
           local y0, y1 = top + 3, math.floor(ybase) - 1
@@ -305,6 +342,8 @@ return function(K)
         local d = 46 / (y - HY)
         local x0, x1 = sx(-EDGE, d) + 1, math.min(128, sx(EDGE, d))
         put(l, x0, y, x1 - x0, 1)
+        -- dense: the aggregate of the tarmac glints in the wash
+        if dense and fp and y % 2 == 1 then K.dashes(l + 1, y, 1, 5, y * 3 + math.floor(T * 2) % 5, x0, x1) end
       end
     end
 
@@ -341,6 +380,7 @@ return function(K)
 
     -- the traffic
     local streak = 0.15 + K.throw * 1.4 + K.echo_fb * 0.3       -- world units of trail
+    if fp then streak = streak * TR() end                       -- playing, the trails setting stretches the exposure
     local any = K.playing and #cars > 0
     -- a little traffic of its own when the music leaves the road empty
     ambient = ambient + DTS * (any and 0.1 or 0.9)
@@ -413,7 +453,7 @@ return function(K)
     for i = 1, 4 do
       local x0 = xl + 3 + (i - 1) * (pw + 1)
       local lit = vk[i]
-      put(1.3 + lit * (fine and 1 or 0.7), x0, top + 1, pw, 7)               -- the panel
+      put(1.3 + lit * (fp and 4.5 or fine and 1 or 0.7), x0, top + 1, pw, 7)               -- the panel (playing: a stab floods it)
       if fine and lit > 0.03 then put(E(1 + lit * 8), x0, top + 8, pw, 1) end    -- its lower lip
       if af[i] > 0.03 then
         put(E(3 * af[i]), x0, top + 1, pw, 7)
@@ -423,7 +463,7 @@ return function(K)
       local h = K.hash(math.floor(K.num(K.chord[i], 60)) + sign_seed * 31, i)
       for r = 0, 1 do
         local w = 4 + math.floor(K.hash(r + i * 7, sign_seed + math.floor(h * 9)) * (pw - 11))
-        K.dashes(3 + lit * (fine and 7 or 6), top + 3 + r * 2, 3, 4, 0, x0 + 2, x0 + 2 + w)
+        K.dashes((fp and 2.2 or 3) + lit * (fp and 9 or fine and 7 or 6), top + 3 + r * 2, 3, 4, 0, x0 + 2, x0 + 2 + w)
       end
       -- an arrow down to its lane
       local ax = x0 + pw - 4
@@ -438,9 +478,9 @@ return function(K)
     end, hi * 45, 7)
     -- the pad lifts a haze over the sky, the mids thicken the air over the road
     if pd > 0.03 then K.haze(0, 0, 128, HY, pd * 0.5, 1, T * 2) end
-    if mid > 0.05 then K.haze(0, HY, 128, 40, mid * 0.3, 1, -T * 3) end
+    if mid > 0.05 and not fp then K.haze(0, HY, 128, 40, mid * 0.3, 1, -T * 3) end
     -- fog over the road: kickless and dub
-    K.haze(0, HY - 6, 128, 50, fp and fog * 0.5 or fog, 1, T * 4)
+    K.haze(0, HY - 6, 128, 50, fp and fog * 0.35 or fog, 1, T * 4)
   end
 
   M.init()

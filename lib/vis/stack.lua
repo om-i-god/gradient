@@ -48,9 +48,10 @@ return function(K)
   end
 
   -- a cabinet's outline, from fills
-  local function box(l, x, y, w, h)
-    put(l, x, y, w, 1)
-    put(l, x, y + h - 1, w, 1)
+  -- lit (fine, playing): the top edge catches the bulbs, the bottom falls into shadow
+  local function box(l, x, y, w, h, lit)
+    put(lit and l + 1 + lit or l, x, y, w, 1)
+    put(lit and l * 0.7 or l, x, y + h - 1, w, 1)
     put(l, x, y + 1, 1, h - 2)
     put(l, x + w - 1, y + 1, 1, h - 2)
   end
@@ -70,8 +71,8 @@ return function(K)
   local pn, hn, bn, an = 0, 0, 0, 0
   local PS, HS, BS, AS = {"pump0", "pump1"}, {"hat0", "hat1"}, {"bass0", "bass1"}, {"arp0", "arp1"}
   local alane = {1, 1}
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense over most of its range (0.45x at 0, 2.2x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(2.2, math.max(0.45, K.trail)) or K.trail end
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
@@ -146,6 +147,8 @@ return function(K)
     pdz = follow(pdz, K.env.pad, 0.25, DT)
     local pd, cl, tkk = pdz, fade("clap", 0.3), fade("tick", 0.4)
 
+    -- playing, the cabinets' top edges catch the light of the bulbs (the energy, the bar)
+    local bl = fp and K.energy * 0.8 + K.bar_pulse * 0.6 or nil
     -- the floor glow the kick throws, and the crowd against it
     local g = math.max(env.kick * (1 - kl) * 0.9, K.duck * 0.35, A[K.LO] * 0.55, 0.15)
     glow = follow(glow, g, g > glow and 0.04 or 0.18, DT)
@@ -167,10 +170,37 @@ return function(K)
       return (1.3 + glow * (fp and 4.3 or 4)) * math.exp(-d / ((3.5 + glow * 3) * (fp and 0.82 or 1)))
     end, prof)
     put(2 + glow * 3 + K.bar_pulse, 0, FLOOR, 128, 1)
+    if fp then
+      -- dense: the bins' light spilling along the stage lip under each stack
+      if dense then
+        for si = 1, 2 do K.dashes(3 + glow * 5 + ex * 3, FLOOR, 2, 5, T * 6 * (si * 2 - 3), STACKS[si], STACKS[si] + 40) end
+      end
+      -- playing: the stacks' light catches the tops of the heads, brighter as
+      -- the bins push (dense: some heads caught brighter than others)
+      for c = 0, 63 do
+        local y = math.floor(prof[c] + 0.5)
+        if y < 63 then
+          put(1 + glow * 2.6 + ex * 1.6 + (dense and (c % 3 == 0 and 1.5 or -0.4) or 0), c * 2, y, 2, 1)
+        end
+      end
+      -- kickless: lighters held up over the crowd, swaying with the pads
+      if kl > 0.15 then
+        for hI = 2, NHEAD, 3 do
+          local h = heads[hI]
+          local sw = math.sin(T * 0.8 + h.ph * TAU)
+          local lv = kl * (5 + 3 * pd + 1.5 * (0.5 + 0.5 * math.sin(T * 5 + hI)))
+          local bx = h.x + kl * 1.5 * math.sin(T * 0.9 + h.ph * TAU)
+          local fx, fy = bx + 2 + sw * 1.5, h.y - 9 - 0.6 * math.abs(sw)
+          line(1.2 * kl, bx + 2, h.y + 1, fx, fy + 2)                  -- the raised arm
+          K.put_sub(lv, fx, fy, 1, 2)                                    -- the flame
+          put(lv * 0.3, fx - 1, fy - 1, 3, 1)
+        end
+      end
+    end
 
     -- the amp rack between the stacks: four meters, the desk lamp on top
     local rx = 54
-    box(2, rx, 30, 20, 22)
+    box(2, rx, 30, 20, 22, bl)
     local meters = {A[K.AMP], A[K.LO], mid, hi}
     for m = 1, 4 do
       local y = 33 + (m - 1) * 4
@@ -201,7 +231,7 @@ return function(K)
       -- bass bins: two scoops, one cone each
       for b = 0, 1 do
         local bx = x0 + b * 20
-        box(1.6, bx, 32, 20, 20)
+        box(1.6, bx, 32, 20, 20, bl)
         if pf > 0.03 then                                          -- a pump thumps the cabinets
           box(E(fine and 4.6 * pf or 4 * pf), bx, 32, 20, 20)
         end
@@ -209,15 +239,18 @@ return function(K)
         if bf > 0.03 then                                           -- a bass note lights the rims
           ring(E(fine and 7 * bf or 5 * bf), cx, cy, 8, 12)
         end
-        if dense and fp then                                        -- the grille slats
-          for gy = 36, 48, 12 do put(1 + vb * 1.2, bx + 2, gy, 3, 1); put(1 + vb * 1.2, bx + 15, gy, 3, 1) end
+        if dense and fp then                                        -- the grille slats, brightening the ring they sit on
+          for gy = 36, 48, 12 do put(2.5 + vb * 2.5 + ex * 3, cx - 6, gy == 36 and cy - 6 or cy + 5, 2, 1); put(2.5 + vb * 2.5 + ex * 3, cx + 4, gy == 36 and cy - 6 or cy + 5, 2, 1) end
         end
         ring(2 + ex * 1.5, cx, cy, 8, 12)
         ring(2.5 + ex * (fine and 5.6 or 5) + vb * (fine and 2.5 or 2), cx, cy, 3.9 + ex * 3, 12)
         disc(3.5 + ex * (fine and 7.6 or 7) + vb * (fine and 2.5 or 2), cx, cy, 1.2 + ex * 2.2)
+        -- playing: the surround flexes bright on the push, the bin's mouth
+        -- shadowed between (the cone stands out of its box)
+        if fp and ex > 0.05 then ring(E(2 + ex * 7), cx, cy, 6.2 + ex * 1.2, 12) end
       end
       -- the mid box: a cone per chord voice
-      box(1.6, x0, 21, 40, 11)
+      box(1.6, x0, 21, 40, 11, bl)
       for i = 1, 4 do
         local cx, cy = x0 + 5 + (i - 1) * 10, 26
         local v = vk[i]
@@ -243,7 +276,7 @@ return function(K)
       -- horns: a mouth, a flare, a throat; out_hi shimmers in them
       for j = 0, 1 do
         local hx = x0 + 2 + j * 19
-        box(2, hx, 11, 17, 9)
+        box(2, hx, 11, 17, 9, bl)
         box(1.5 + hi * 2, hx + 4, 13, 9, 5)
         line(1, hx + 1, 12, hx + 3, 13); line(1, hx + 15, 12, hx + 13, 13)
         line(1, hx + 1, 18, hx + 3, 17); line(1, hx + 15, 18, hx + 13, 17)
@@ -256,7 +289,7 @@ return function(K)
         if hi > 0.1 then K.dashes(hi * 3 * sh, 12 + (j + math.floor(T * 7)) % 2 * 6, 2, 5, T * 30 + j * 3, hx + 2, hx + 15) end
       end
       -- tweeters on top: one per arp lane
-      box(1.6, x0 + 2, 6, 36, 5)
+      box(1.6, x0 + 2, 6, 36, 5, bl)
       for i = 1, 4 do put(2.5 + lk[i] * 9, x0 + 5 + (i - 1) * 9, 8, 2, 1) end
       if af > 0.03 then                                              -- an arp note flares its tweeter
         put(E(6 * af), x0 + 4 + (alane[si] - 1) * 9, 7, 4, 3)
@@ -281,7 +314,7 @@ return function(K)
     if pd > 0.03 then K.haze(0, 0, 128, 44, pd * (fine and 0.46 or 0.4), 1, T * 2) end
 
     -- haze drifting through, thicker with dub and kickless stretches
-    local hz = (0.1 + 0.12 * K.dub * (0.5 + K.throw) + 0.18 * kl) * (fp and 0.25 or 1)
+    local hz = (0.1 + 0.12 * K.dub * (0.5 + K.throw) + 0.18 * kl) * (fp and 0.12 or 1)
     K.haze(0, 44, 128, FLOOR, hz, 1, T * (6 + 8 * K.throw))
     K.haze(44, 18, 84, 44, hz * 1.3, 1, T * (6 + 8 * K.throw) + 40)
     -- ticks run along the string of bulbs, every other one by their kind

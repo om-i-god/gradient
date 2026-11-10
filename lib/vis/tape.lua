@@ -32,13 +32,13 @@ return function(K)
   local kn, bn, an, hn = 0, 0, 0, 0              -- kicks, bass notes and arp notes so far: they take turns
   local HS = {"hat0", "hat1"}
   local KS, BS, AH = {"kick0", "kick1"}, {"bass0", "bass1"}, {"ah1", "ah2", "ah3", "ah4", "ah5"}
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense over most of its range (0.45x at 0, 2.2x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(2.2, math.max(0.45, K.trail)) or K.trail end
   local function mark(k) hit[k] = K.NOW end
-  local function fade(k, tau)
+  local function fade(k, tau, cap)          -- cap: the most the trails may stretch this one
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / (tau * TR()))
+    local v = math.exp(-(K.NOW - t) / (tau * (cap and math.min(cap, TR()) or TR())))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -79,20 +79,33 @@ return function(K)
   end
 
   -- a reel: the wound pack (alternate rows), its rim, three spokes, the hub
-  local function reel(cx, cy, rp, ang, light)
+  -- fx (fine, playing): {glow = the pack's own light, sc = where its sheen sits (0.35 = the
+  -- upper left), rim = the oxide edge catching the light, dense = its winding grain}
+  local function reel(cx, cy, rp, ang, light, fx)
     for dy = -rp, rp do
       local hw = math.floor(math.sqrt(rp * rp - dy * dy) + 0.5)
       if hw > 0 then
-        -- the pack's sheen: a lighter band across the upper left
-        local sh = math.max(0, 1 - math.abs(dy + rp * 0.35) / (rp * 0.5))
-        put(1.2 + light * 0.6 + sh * 1.3, cx - hw, cy + dy, 2 * hw, 1)
+        if fx then
+          -- playing: a deeper pack, its sheen wandering in kickless
+          -- stretches, its edge lit by the music
+          local sh = math.max(0, 1 - math.abs(dy + rp * fx.sc) / (rp * 0.45))
+          put(1 + light * 0.4 + sh * 2.2 + fx.glow, cx - hw, cy + dy, 2 * hw, 1)
+          put(1.5 + fx.rim + sh * 2, cx - hw, cy + dy, 1, 1); put(1.5 + fx.rim + sh * 2, cx + hw - 1, cy + dy, 1, 1)
+          if fx.dense and dy % 3 == 0 and hw > 4 then
+            K.dashes(2 + light * 0.6 + sh * 2.2 + fx.glow, cy + dy, 1, 4, ang * rp * 0.7 + dy * 2, cx - hw + 2, cx + hw - 2)
+          end
+        else
+          -- the pack's sheen: a lighter band across the upper left
+          local sh = math.max(0, 1 - math.abs(dy + rp * 0.35) / (rp * 0.5))
+          put(1.2 + light * 0.6 + sh * 1.3, cx - hw, cy + dy, 2 * hw, 1)
+        end
       end
     end
     put(3, cx - 1, cy - rp, 3, 1); put(3, cx - 1, cy + rp, 3, 1)
     local n = 14
     for k = 0, n - 1 do
       local a0, a1 = k / n * TAU, (k + 1) / n * TAU
-      line(2 + light, cx + math.cos(a0) * FL, cy + math.sin(a0) * FL, cx + math.cos(a1) * FL, cy + math.sin(a1) * FL)
+      line(fx and 1.3 + light * 0.7 + fx.rim * 0.5 or 2 + light, cx + math.cos(a0) * FL, cy + math.sin(a0) * FL, cx + math.cos(a1) * FL, cy + math.sin(a1) * FL)
     end
     for k = 0, 2 do
       local a = ang + k * TAU / 3
@@ -157,32 +170,40 @@ return function(K)
     -- the reels: the pack moves from left to right over a long slow cycle
     local u = 0.5 + 0.38 * math.sin(T * 0.013)
     local rpL, rpR = math.floor(6 + 10 * u + 0.5), math.floor(6 + 10 * (1 - u) + 0.5)
-    local spin = v * (1 + 1.6 * th) * (DTS / math.max(DT, 1e-6))
+    local spin = v * (1 + 1.6 * th) * (DTS / math.max(DT, 1e-6)) * (fp and 1 - 0.35 * kl or 1)   -- kickless, the reels idle
     if DT <= 0 then spin = 0 end
     angL = (angL + spin * DT / rpL * 0.6) % TAU
     angR = (angR + spin * DT / rpR * 0.6) % TAU
     tpos = tpos + spin * DT
     local light = (0.5 + 0.5 * A[K.MID]) * (1 - 0.7 * slack)
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
-    local kk0, kk1, hh, cl, tkk = fade(KS[1], 0.3), fade(KS[2], 0.3), fade(HS[1], 0.25), fade("clap", 0.3), fade("tick", 0.4)
-    local hh1 = fade(HS[2], 0.25)
-    local bh0, bh1, pd = fade(BS[1], 0.4), fade(BS[2], 0.4), pdz
+    local kk0, kk1, hh, cl, tkk = fade(KS[1], 0.3), fade(KS[2], 0.3), fade(HS[1], 0.25, 1), fade("clap", 0.3), fade("tick", 0.4, 1.3)
+    local hh1 = fade(HS[2], 0.25, 1)
+    local bh0, bh1, pd = fade(BS[1], 0.4, 1.3), fade(BS[2], 0.4, 1.3), pdz
 
     -- the desk: a dim wall above, the deck's panel edge, the brushed lower
     -- panel and the bass glowing under it
     local am = fp and A[K.AMP] or 0        -- the level brightens the deck's edges
-    line(2 + am * 1.2, 0, 40, 127, 40)
-    line(1.5 + am * 1.2, 0, 55, 127, 55)
-    K.gradient(61, 63, function(y) return 0.3 + bs * 2 * (y - 60) / 3 end)
+    line((fp and 1.4 or 2) + am * 1.2, 0, 40, 127, 40)
+    line((fp and 1.2 or 1.5) + am * 1.2, 0, 55, 127, 55)
+    K.gradient(fp and 62 or 61, 63, function(y) return 0.3 + bs * 2 * (y - 60) / 3 end)
     K.haze(0, 0, 128, 40, (0.2 * kl + 0.1 * th) * (fp and 0.4 or 1), 1, T * 2)
 
     -- the pad breathes a haze over the wall; the bass, in turns, glows a half of the panel
-    if pd > 0.03 then K.haze(0, 0, 128, 40, pd * 0.4, 1, T * 2) end
-    if bh0 > 0.03 then K.gradient(58, 62, function(y) return bh0 * 3 * (y - 57) / 5 end, nil, 0, 64) end
-    if bh1 > 0.03 then K.gradient(58, 62, function(y) return bh1 * 3 * (y - 57) / 5 end, nil, 64, 128) end
+    if pd > 0.03 then K.haze(0, 0, 128, 40, pd * (fp and 0.2 or 0.4), 1, T * 2) end
+    if bh0 > 0.03 then K.gradient(fp and 59 or 58, 62, function(y) return bh0 * 3 * (y - 57) / 5 end, nil, 0, 64) end
+    if bh1 > 0.03 then K.gradient(fp and 59 or 58, 62, function(y) return bh1 * 3 * (y - 57) / 5 end, nil, 64, 128) end
 
-    reel(LX, RY, rpL, -angL, light)
-    reel(RX, RY, rpR, -angR, light)
+    if fp then
+      -- playing: the packs carry the light of the room (the energy, the pad
+      -- breathing in them), their edges the low end
+      local g, rim = 0.7 * K.energy + 1.4 * pd, 1.6 * A[K.LO] + 1.2 * K.energy
+      reel(LX, RY, rpL, -angL, light, {glow = g, rim = rim, sc = 0.35 + 0.6 * kl * math.sin(T * 0.35), dense = dense})
+      reel(RX, RY, rpR, -angR, light, {glow = g, rim = rim, sc = 0.35 + 0.6 * kl * math.sin(T * 0.35 + 2), dense = dense})
+    else
+      reel(LX, RY, rpL, -angL, light)
+      reel(RX, RY, rpR, -angR, light)
+    end
     -- a kick catches a reel's flange, the two in turns; a clap swells both
     for r = 1, 2 do
       local kv = math.max(r == 1 and kk0 or kk1, cl)
@@ -205,7 +226,7 @@ return function(K)
       put((k >= 5 and 4 or 2) + am * 1.5, 64 + math.cos(a) * 10, 15 + math.sin(a) * 10, 1, 1)
     end
     local na = -2.4 + 1.65 * vu
-    line(8 + 3 * K.env.kick + am, 64, 15, 64 + math.cos(na) * 11, 15 + math.sin(na) * 11)
+    line(fp and E(9 + 4 * K.env.kick * RT + am) or 8 + 3 * K.env.kick + am, 64, 15, 64 + math.cos(na) * 11, 15 + math.sin(na) * 11)
     put(1.5 + rec * 9, 56, 19, 2, 2)                 -- the record lamp
     if fine and rec > 0.03 then                      -- the record head flares as the stab is written
       put(E(rec * 8), HR - 1, TY + 2, 8, 1); put(E(rec * 6), HR - 2, TY + 8, 10, 1); put(E(rec * 5), HR - 1, TY - 2, 8, 1)
@@ -228,8 +249,13 @@ return function(K)
     line(2.5, (bx + G2) / 2 + sl, (by + TY) / 2, bx, by)
     put(4, G1 - 2, TY - 1, 3, 4); put(4, G2, TY - 1, 3, 4)
     local fy = math.floor(math.sin(T * 7) * wob * 0.9 + 0.5)
-    put(2, G1, TY + fy, G2 - G1, 3)
+    put(fp and 2 + 1.6 * K.energy + bs or 2, G1, TY + fy, G2 - G1, 3)     -- playing, the tape glows with the energy and the bass
     K.dashes(3 + A[K.HI] * (fine and 5 or 3), TY + 1 + fy, 2, 7, tpos, G1, G2)
+    -- dense: the oxide's grain running with the tape, top and bottom edge
+    if dense and fp then
+      K.dashes(3.2 + 1.6 * K.energy + bs, TY + fy, 1, 5, tpos + 2, G1, G2)
+      K.dashes(4 + 2 * K.energy + bs, TY + fy + 2, 1, 9, tpos * 1.5 + 4, G1, G2)
+    end
 
     -- hats crackle along the tape; ticks light a rail of the head block
     if hh > 0.03 then K.dashes(E(5 * hh), TY - 4, 1, 3, T * 40, G1, G2) end
@@ -258,8 +284,26 @@ return function(K)
     local heads = {HE, HR, HP[1], HP[2], HP[3]}
     for k, x in ipairs(heads) do
       local g = k == 1 and 0 or hg[k - 1]
-      put(2.5 + g * 7, x, TY + 3, 6, 5)
-      put(4 + g * 8 + A[K.HI] * 3, x + 2, TY + 3, 2, 1)
+      if fp then
+        -- playing: the heads sit dark until the echo passes, then flare: the
+        -- gap glows white-hot and the light spills along the tape
+        put(1.6 + g * 6.5 * RT, x, TY + 3, 6, 5)
+        put(E(3 + g * 10 + A[K.HI] * 3), x + 2, TY + 3, 2, 1)
+        if g > 0.08 then
+          -- a beam of light off the head, up over the tape: each echo climbs it
+          local len = math.floor(5 + 11 * math.min(1, g))
+          local h2 = math.floor(len / 2)
+          put(E(g * 11), x + 2, TY - 3, 2, 2)
+          put(E(g * 6.5), x + 2, TY - 3 - h2, 2, h2)
+          put(E(g * 3), x + 2, TY - 3 - len, 2, len - h2)
+          put(E(g * 9), x + 1, TY + 4, 4, 1)
+          put(E(g * 6), x - 4, TY + 1 + fy, 14, 1)
+          put(E(g * 3.5), x - 9, TY + 1 + fy, 5, 1); put(E(g * 3.5), x + 10, TY + 1 + fy, 5, 1)
+        end
+      else
+        put(2.5 + g * 7, x, TY + 3, 6, 5)
+        put(4 + g * 8 + A[K.HI] * 3, x + 2, TY + 3, 2, 1)
+      end
     end
     for k = 1, 5 do                                  -- the arp walks along the heads
       local a = fade(AH[k], 0.3)
@@ -283,6 +327,14 @@ return function(K)
         if m.kind == "stab" then
           if fine then K.put_sub(math.min(E(m.lv), 13), m.x, TY + fy, 2, 3) else put(m.lv, m.x, TY + fy, 2, 3) end
           if fine and m.lv >= 9 then put(E(m.lv * 0.35), m.x - 1, TY + fy - 1, 4, 1); put(E(m.lv * 0.35), m.x - 1, TY + fy + 3, 4, 1) end
+          if fp then                        -- playing: a comet's tail on the oxide, as long as the trails setting
+            local L = math.floor((3 + 6 * TR()) * math.min(1, m.lv / 9) + 0.5)
+            if L >= 2 then
+              local h = math.floor(L / 2)
+              put(E(m.lv * 0.5), m.x - h, TY + fy + 1, h, 1)
+              put(E(m.lv * 0.25), m.x - L, TY + fy + 1, L - h, 1)
+            end
+          end
           if th > 0.05 then
             local w = math.min(14, v * 0.12 * th)
             put(m.lv * 0.3 * th, m.x - w, TY + fy, w, 3)

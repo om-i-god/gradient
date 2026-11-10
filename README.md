@@ -18,7 +18,7 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 - **set (endless):** energy swells and drains over 8–16 phrases (about 4–16 min, depending on phrase length) with a random walk on top. the troughs are kickless "drift" stretches. at some troughs the key moves by a 4th or 5th.
 - **track:** a fixed arc over the track length (default 8 min): intro → build → peak → breakdown (kickless) → return → outro. at the end it either stops or rolls straight into a new track with a new seed and a neighbouring key.
 
-**kickless.** the pump (ghost sidechain on every quarter) keeps running when the kick drops out, so pads, arps, echo and reverb tails still breathe on the beat. that happens in breakdowns, when you press drop, and sometimes on its own at mid energy (kick: auto). set **kick → never** for a fully kickless set. **bass** works the same way: auto sits it out in some kickless stretches, always keeps it in whenever the energy is high enough, never turns it off everywhere (engine, midi and crow), for when you bring your own low end. **hats** too: auto sometimes clears them for a drop, always keeps them in once the energy is there, never mutes them for good. the hats setting (and the hats mute) covers the shaker and toms as well.
+**kickless.** the pump (ghost sidechain on every quarter) keeps running when the kick drops out, so pads, arps, echo and reverb tails still breathe on the beat. that happens in breakdowns, when you press drop, and sometimes on its own at mid energy (kick: auto). out of the box kick, bass, hats, perc and clap are all on **never**, so gradient starts as pads, chords, arps, echo and beds; set any of them to **auto** to bring that part in and let the conductor arrange it. **bass** works the same way: auto sits it out in some kickless stretches, always keeps it in whenever the energy is high enough, never turns it off everywhere (engine, midi and crow), for when you bring your own low end. **hats** too: auto sometimes clears them for a drop, always keeps them in once the energy is there, never mutes them for good. the hats setting (and the hats mute) covers the shaker and toms as well.
 
 **drums.** each track picks a hat groove: **straight** (offbeats plus loose 16th ghosts), **rolling** (every 16th, leaning on the offbeat), **skip** (offbeats plus a euclidean ghost pattern) or **sparse** (just the offbeats). some grooves shuffle, sitting the off-16ths a little late, on top of the global swing. marked offbeats open up while the energy is building or near the top. on some phrases a **shaker** joins at higher energy, and **dub toms** tuned to the chord drop one or two hits a bar into the echo.
 
@@ -30,7 +30,7 @@ the bass, chords and arps can also go out over USB MIDI, per part: **internal**,
 - **ghost kicks:** quiet extra kicks before a beat, near the top, on some phrases. the pump stays on the quarters.
 - **kick types:** sub, dusty, **boom** (a long 808-ish sub) or **knock** (short and tight).
 
-**glitch.** two layers, set together by **glitch** (off / subtle / **normal** / heavy):
+**glitch.** two layers, set together by **glitch** (off / **subtle** / normal / heavy):
 
 - **ticks:** clicks, blips, crushed noise and zaps tuned to the chord, on a euclidean scatter, some ratcheted 2–3 times inside a 16th, into the dub echo. they come in mid-build and float on through kickless stretches.
 - **the glitch insert:** a processor on the whole mix after the echoes and reverb, before the master (so the pump still ducks the live pulse). **stutter** repeats a slice, **tape stop** winds the mix down, **reverse** plays the last moments backwards, **chop** gates the mix in 32nds, **crush** coarsens it. each bar may hold a small one somewhere (more near the top and in kickless stretches), and the stutter, tape stop and reverse also turn up as fills. **glitch depth** (LEVELS) sets how wet it is.
@@ -150,7 +150,7 @@ screen: key and mode top left, section top right (with `~` when kickless), energ
 
 ## params
 
-- **GRADIENT:** time signature (4/4, 3/4, 5/4, 7/4), feel (even or the two groupings), play mode, phrase length, track length (4–32 min), track end (stop / next track), kick (auto / always / never), bass (auto / always / never), hats (auto / always / never), fills (normal / busy / off), perc (auto / always / never), clap (auto / always / never), glitch (off / subtle / normal / heavy), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
+- **GRADIENT:** time signature (4/4, 3/4, 5/4, 7/4), feel (even or the two groupings), play mode, phrase length, track length (4–32 min), track end (stop / next track), kick, bass, hats, perc and clap (auto / always / never, all **never** by default), fills (normal / busy / off), glitch (off / **subtle** / normal / heavy), freeze material (stop mutations, arc still runs), seed, rebuild from seed, new random track
 - **LISTEN:** follow input key, input gate (dB), hold before move (s)
 - **KEY:** root, mode, harmony (simple / rich / drifting), chord voicing (m7, m9, quartal, add9, sus2, sus4, m11, cluster, 6/9, or auto by energy), bass octave
 - **MIX:** dub, tone, echo time (1/8, 3/16, 1/4, 3/8), swing, pump depth, level, drive, reverb size, reverb type (hall / plate / spring), echo wow

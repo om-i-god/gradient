@@ -50,8 +50,8 @@ local S = {
   energy = 0, nudge = 0, dub = 0.5,
   section = "-", progress = 0, total_bars = nil,
   root_pc = 9, mode = 1, voicing = 1, harmony = 3,
-  mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 1, bass_style = 1, hat_style = 1, fills = 1,
-  perc_style = 1, clap_style = 1, glitch_amt = 3,
+  mode_play = 1, track_minutes = 8, end_action = 2, kick_style = 3, bass_style = 3, hat_style = 3, fills = 1,
+  perc_style = 3, clap_style = 3, glitch_amt = 2,
   pat = {}, lanes = {}, gain = {}, want = {}, jitter = {},
   chord = {57, 60, 64, 67}, chord_degree = 1, pair = {1, 1}, harm_bars = 4,
   bass_pc = 0, bass_free = true, chord_root_pc = 0, chord_label = "i",
@@ -1022,19 +1022,19 @@ local function setup_params()
   params:set_action("track_minutes", function(v) S.track_minutes = v end)
   params:add_option("end_action", "track end", {"stop", "next track"}, 2)
   params:set_action("end_action", function(v) S.end_action = v end)
-  params:add_option("kick_style", "kick", {"auto", "always", "never"}, 1)
+  params:add_option("kick_style", "kick", {"auto", "always", "never"}, 3)
   params:set_action("kick_style", function(v) S.kick_style = v end)
-  params:add_option("bass_style", "bass", {"auto", "always", "never"}, 1)
+  params:add_option("bass_style", "bass", {"auto", "always", "never"}, 3)
   params:set_action("bass_style", function(v) S.bass_style = v end)
-  params:add_option("hat_style", "hats", {"auto", "always", "never"}, 1)
+  params:add_option("hat_style", "hats", {"auto", "always", "never"}, 3)
   params:set_action("hat_style", function(v) S.hat_style = v end)
   params:add_option("fills", "fills", {"normal", "busy", "off"}, 1)
   params:set_action("fills", function(v) S.fills = v end)
-  params:add_option("perc_style", "perc", {"auto", "always", "never"}, 1)
+  params:add_option("perc_style", "perc", {"auto", "always", "never"}, 3)
   params:set_action("perc_style", function(v) S.perc_style = v end)
-  params:add_option("clap_style", "clap", {"auto", "always", "never"}, 1)
+  params:add_option("clap_style", "clap", {"auto", "always", "never"}, 3)
   params:set_action("clap_style", function(v) S.clap_style = v end)
-  params:add_option("glitch_amt", "glitch", {"off", "subtle", "normal", "heavy"}, 3)
+  params:add_option("glitch_amt", "glitch", {"off", "subtle", "normal", "heavy"}, 2)
   params:set_action("glitch_amt", function(v) S.glitch_amt = v end)
   params:add_option("freeze", "freeze material", {"off", "on"}, 1)
   params:set_action("freeze", function(v) S.freeze = v == 2 end)

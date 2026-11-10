@@ -160,6 +160,14 @@ _menu = {mode = false}
 
 dofile("gradient.lua")
 init()
+-- shipped defaults: drums and bass off, glitch subtle
+for _, id in ipairs({"kick_style", "bass_style", "hat_style", "perc_style", "clap_style"}) do
+  assert(params:get(id) == 3, id .. " should default to never")
+end
+assert(params:get("glitch_amt") == 2, "glitch should default to subtle")
+-- the checks below exercise the full arrangement: put every part on auto
+for _, id in ipairs({"kick_style", "bass_style", "hat_style", "perc_style", "clap_style"}) do params:set(id, 1) end
+params:set("glitch_amt", 3)
 params:set("play_mode", PMODE)
 params:set("track_minutes", MINUTES)
 params:set("bass_out", 3)

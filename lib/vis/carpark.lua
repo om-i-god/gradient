@@ -29,9 +29,27 @@ return function(K)
   local CARS = {{1, 62}, {1, 84}, {2, 40}, {2, 66}, {2, 86}, {3, 44}, {3, 60}, {3, 82}, {4, 46}, {4, 70}}
   local TUBE_X = {16, 38, 60, 82}        -- strip lights under each slab, 6 long
   local FAIL_D, FAIL_X = 2, 60           -- the failing tube: under deck 2
+  -- fine / dense: the far town behind the roof, block tops picked once, and its windows
+  local TOWN = K.profile(function(x)
+    local b = x // 9
+    return 6 + math.floor(K.hash(b, 21) * 5.5) + ((x % 9 == 0) and 1 or 0)
+  end)
+  local TWIN = {}
+  for x = 1, 126, 3 do
+    if x < 100 or x > 118 then
+      for y = K.at(TOWN, x) + 2, 11, 3 do
+        local h = K.hash(x * 31 + y, 22)
+        if h > 0.55 then TWIN[#TWIN + 1] = {x, y, h} end
+      end
+    end
+  end
 
-  -- the fades follow the trails setting at half strength, held within 15% / 10%
-  local function TR() return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+  -- the fades follow the trails setting: at classic at half strength, held within
+  -- 15% / 10%; at fine and dense nearly in full (0.44x .. 2.2x), so the slider shows
+  local function TR()
+    if K.detail == "classic" then return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+    return math.min(2.2, math.max(0.4, K.trail ^ 0.9))
+  end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -126,18 +144,48 @@ return function(K)
     for i = 1, #CARS do brakes[i] = brakes[i] < 0.01 and 0 or brakes[i] * bk end
     local bt, ap = acc.bass, acc.pump
 
-    -- the sky over the town: a glow that rises with the level
-    K.haze(0, 0, 128, 10, 0.04 + 0.22 * amp, 1 + 1.4 * amp, T * 2)
-    if amp > 0.15 then K.dashes(math.min(2.6, amp * 2.6), 10, 3, 9, T * 3, 0, 128) end
+    local cls = K.detail == "classic"
+    -- fine / dense: the energy scales the music's marks (calm .. unmistakable),
+    -- and a kickless stretch turns the car park over to its night lighting
+    local ge = cls and 1 or (0.7 + 0.5 * e)
+    local kl = cls and 0 or K.kickless
+    local function G(l) return E(l * ge) end
 
-    -- the pad: sodium fog in the open sides of the decks
+    if cls then
+      -- the sky over the town: a glow that rises with the level
+      K.haze(0, 0, 128, 10, 0.04 + 0.22 * amp, 1 + 1.4 * amp, T * 2)
+      if amp > 0.15 then K.dashes(math.min(2.6, amp * 2.6), 10, 3, 9, T * 3, 0, 128) end
+    else
+      -- the far town behind the roof: a dark mass, its windows lit by the level,
+      -- and a thin glow over it
+      -- (roofline solid, the walls in every other row: a dark mass that costs half)
+      for b = 0, 14 do
+        local x0 = b * 9
+        if x0 < 100 or x0 > 110 then
+          local top = K.at(TOWN, x0 + 1)
+          local w = math.min(9, 128 - x0)
+          put(1 + 1.4 * amp, x0, top, w, 1)
+          for y = top + 2, 12, 2 do put(1, x0, y, w, 1) end
+        end
+      end
+      for i = 1, #TWIN do
+        local w = TWIN[i]
+        put(1.6 + 3.2 * amp * w[3] + (dense and fp and 1.4 * math.max(0, math.sin(T * 0.7 + i * 2.1)) or 0), w[1], w[2], 1, 1)
+      end
+      K.haze(0, 0, 128, 4, 0.03 + 0.16 * amp, 1 + 1.2 * amp, T * 2)
+    end
+
+    -- the pad: sodium fog in the open sides of the decks (fine / dense: and the
+    -- kickless night, breathing with the pump)
     for d = 1, 3 do
-      K.haze(X0 + 1, SLAB[d] + 4, X1, FLOORS[d + 1] - 1, 0.03 + 0.4 * pdz, 1.1 + 1.6 * pdz, T * (1.5 + d * 0.4))
+      K.haze(X0 + 1, SLAB[d] + 4, X1, FLOORS[d + 1] - 1, (cls and 0.03 or 0) + 0.4 * pdz + kl * (0.1 + 0.08 * ap),
+        1.1 + 1.6 * pdz + 1.4 * kl, T * (1.5 + d * 0.4))
     end
 
     -- the concrete: slabs, the roof parapet, the columns, the ground
-    -- (the pump breathes the ceilings' undersides)
-    local cl = 1.7 + 1.4 * mid
+    -- (the pump breathes the ceilings' undersides). fine / dense: a step down,
+    -- so the lights stand off it
+    local cl = cls and (1.7 + 1.4 * mid) or (1.5 + 1.1 * mid)
     local s1, s2 = cl + 0.5, 1.2 + 0.8 * mid + 1.4 * hi + E(1.6 * pf + 2.2 * ap)
     local cv = 1.2 + 0.7 * mid
     for d = 1, 3 do
@@ -172,13 +220,13 @@ return function(K)
     -- the lowest deck hums with the bass and the low band
     local hum = 0.3 * lo + 0.8 * bt
     if hum > 0.03 then
-      for r = 0, 2 do
+      for r = cls and 0 or 1, 2 do
         local y = SLAB[3] + 5 + r * 3
         local wob = math.sin(T * 6 + r * 1.7) * 2
         K.dashes(E(1 + 3.2 * hum), y, 3, 7, wob + r * 4 + T * 3, X0 + 2, X1)
       end
       put(E(3 * bt), X0, GY - 2, X1 - X0, 1)
-      put(E(2.5 * bt), X0, SLAB[3] + 2, X1 - X0, 1)
+      if cls then put(E(2.5 * bt), X0, SLAB[3] + 2, X1 - X0, 1) end
     end
     line(1 + 2.4 * lo + E(4 * bt), X0, GY - 1, X1, GY - 1)
 
@@ -189,7 +237,15 @@ return function(K)
       local fl = FLOORS[d + 1] - 1
       for i = 1, #TUBE_X do
         local x = TUBE_X[i]
-        local l = math.min(13, 4 + 1.2 * mid + E(7 * kk) + E(1.4 * pf + 2 * ap))
+        local l
+        if cls then
+          l = math.min(13, 4 + 1.2 * mid + E(7 * kk) + E(1.4 * pf + 2 * ap))
+        else
+          -- night power at rest, waking with the energy; a kickless stretch dims
+          -- them to every other tube, and the pump breathes those
+          local base = (2.6 + 2.4 * e + 1.2 * mid) * (1 - 0.45 * kl * ((i + d) % 2))
+          l = math.min(13, base + G(8 * kk) + E(1.4 * pf + 2 * ap) + kl * E(2.4 * pf) * ((i + d + 1) % 2))
+        end
         if d == FAIL_D and x == FAIL_X then
           -- the failing tube: dark but for a slow guttering, caught by the hats
           local g = 0.5 + 0.5 * math.sin(T * 0.9) * math.sin(T * 2.3)
@@ -209,8 +265,16 @@ return function(K)
         end
         put(l, x, y, 6, 1)
         if kk > 0.04 then
-          put(E(3.6 * kk), x - 2, y + 1, 10, 1)
-          put(E(3.2 * kk), x - 4, fl, 14, 1)
+          if cls then put(E(3.6 * kk), x - 2, y + 1, 10, 1) else put(G(4 * kk), x - 1, y + 1, 8, 1) end
+          put(cls and E(3.2 * kk) or G(4.6 * kk), x - 4, fl, 14, 1)
+          if not cls and kk > 0.12 then
+            -- fine / dense: the flare throws its light down through the bay
+            put(G(2.4 * kk), x - 2, y + math.floor((fl - y) * 0.55), 10, 1)
+          end
+        end
+        if not cls and kl > 0.05 and (i + d) % 2 == 0 then
+          -- the kickless night: the lit tubes' pools breathe on the pump
+          put(E(kl * (1.4 + 2.6 * pf)), x - 3, fl, 12, 1)
         end
       end
     end
@@ -219,15 +283,18 @@ return function(K)
     for i = 1, #CARS do
       local c = CARS[i]
       local x, y = c[2], FLOORS[c[1]]
-      car(1.7 + 0.6 * mid, x, y)
+      local cb = cls and (1.7 + 0.6 * mid) or (1.3 + 0.5 * mid)
+      car(cb, x, y)
       put(1 + 3.5 * hi, x + 8, y - 5, 1, 1)                 -- the windscreen glint
       local f = brakes[i]
       if f > 0 then
-        car(1.7 + 0.6 * mid + E(3 * f), x, y)
-        put(E(9 * f), x - 1, y - 3, 1, 2)
+        car(cb + E(3 * f), x, y)
+        put(G(9 * f), x - 1, y - 3, 1, 2)
         put(E(5 * f), x - 6, y - 1, 6, 1)
-        put(E(3.5 * f), x - 16, y - 1, 10, 1)
-        if c[1] > 1 then put(E(2.4 * f), x - 4, SLAB[c[1] - 1] + 3, 18, 1) end
+        if cls then
+          put(E(3.5 * f), x - 16, y - 1, 10, 1)
+          if c[1] > 1 then put(E(2.4 * f), x - 4, SLAB[c[1] - 1] + 3, 18, 1) end
+        end
         put(E(3 * f), x - 3, y - 4, 3, 1)
         put(E(2.4 * f), x - 6, y - 6, 9, 1)
       end
@@ -245,9 +312,9 @@ return function(K)
         local v = math.min(1, (1 - u) * 2.2) * math.min(1, a / 0.05 + 0.5)
         local ahead = dir > 0 and x + 2 or x - 16
         put(2.4, dir > 0 and x - 7 or x + 1, y - 4, 7, 2)
-        put(E(11 * v), x, y - 4, 1, 1)
+        put(G(11 * v), x, y - 4, 1, 1)
         for k = 1, 4 do
-          put(E((7 - k) * v), x + dir * (k * 4), y - 4 - k * 0.6, 4, 1)
+          put(G((7 - k) * v), x + dir * (k * 4), y - 4 - k * 0.6, 4, 1)
         end
         put(E(3.5 * v), ahead, y - 1, 14, 1)
         put(E(3 * v), ahead, y - 7, 14, 1)
@@ -258,7 +325,7 @@ return function(K)
     line(2.2, SX0, STOP, SX1, STOP)
     line(1.8 + 0.6 * mid, SX0, STOP, SX0, GY)
     line(1.8 + 0.6 * mid, SX1, STOP, SX1, GY)
-    put(2.6 + 1.2 * mid + E(1.5 * pf + 2 * acc.perc), SX0 + 6, STOP + 4, 5, 38)
+    put(cls and (2.6 + 1.2 * mid + E(1.5 * pf + 2 * acc.perc)) or (1.8 + 0.7 * mid + E(1.2 * pf) + G(3.4 * acc.perc)), SX0 + 6, STOP + 4, 5, 38)
     for y = STOP + 6, STOP + 40, 6 do line(1.2, SX0 + 6, y + 5, SX0 + 10, y) end
     for d = 1, 3 do put(1.6, SX0 + 1, SLAB[d], SX1 - SX0 - 1, 1) end
 
@@ -306,6 +373,30 @@ return function(K)
       put(E(2.5 * tf), 2, GY - 9, 5, 2)
     end
 
+    -- fine / dense, kickless: a night patrol car winds slowly up the ramp, its
+    -- headlights feeling ahead along each flight
+    if not cls and kl > 0.05 and fp then
+      local u = (T * 0.07) % 1
+      local x, y, dir = ramp_at(u)
+      local v = kl * math.min(1, u * 8, (1 - u) * 8)
+      put(1.6 * v + 0.6, dir > 0 and x - 7 or x + 1, y - 4, 7, 2)
+      K.put_sub(math.min(12, 2 + 8 * v), x, y - 4, 1, 1)
+      K.put_sub(E(4 * v), x + dir * 3, y - 4.5, 6, 1)
+      K.put_sub(E(2.2 * v), (dir > 0 and x + 2 or x - 14), y - 1, 12, 1)
+    end
+    -- dense: bay lines on every floor, an exit sign by the stairs on each deck
+    -- (the pump breathes them), a drip of oil under each parked car
+    if dense and not cls then
+      for f = 1, 4 do
+        local y = FLOORS[f]
+        for x = X0 + 6, X1 - 4, 11 do put(1.4, x, y - 2, 1, 2) end
+      end
+      for d = 1, 3 do put(3 + E(1.6 * pf), X1 - 4, SLAB[d] + 4, 3, 1) end
+      for i = 1, #CARS do
+        local c = CARS[i]
+        put(1, c[2] + 3, FLOORS[c[1]], 6, 1)
+      end
+    end
     -- dense: a moth at the failing tube and a slow drip off the roof edge
     if dense and fp then
       local ph = T * 2.4

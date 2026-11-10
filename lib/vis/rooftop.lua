@@ -49,8 +49,12 @@ return function(K)
     for c = 0, 3 do TWINS[#TWINS + 1] = {TB0 + 3 + c * 5, TBT + 4 + r * 5, K.hash(r * 4 + c, 5) > 0.7} end
   end
 
-  -- the fades follow the trails setting at half strength, held within 15% / 10%
-  local function TR() return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+  -- the fades follow the trails setting: at classic at half strength, held within
+  -- 15% / 10%; at fine and dense nearly in full (0.44x .. 2.2x), so the slider shows
+  local function TR()
+    if K.detail == "classic" then return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+    return math.min(2.2, math.max(0.4, K.trail ^ 0.9))
+  end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -132,10 +136,16 @@ return function(K)
     local T, DT, DTS, NOW, e = K.T, K.DT, K.DTS, K.NOW, K.energy
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
     local dense, RT = K.detail == "dense", K.react
+    local cls = K.detail == "classic"
+    -- fine / dense: the energy scales the music's marks (calm .. unmistakable),
+    -- and a kickless stretch sends the searchlight slowly through the cloud
+    local ge = cls and 1 or (0.7 + 0.5 * e)
+    local kl = cls and 0 or K.kickless
     if RT > 1 then RT = 1 + (RT - 1) * 0.4 end      -- eased above 1: the lit bound
     local fp = K.playing                            -- time-driven detail waits for the music
     -- an event's level: scaled by the reactivity, never a white point
     local function E(l) return math.min(l * RT, 13) end
+    local function G(l) return E(l * ge) end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local pf = fade(pump_t, 0.3) * rise(pump_t)
     local dk = math.exp(-DT / (0.3 * TR()))
@@ -147,7 +157,7 @@ return function(K)
     rot = (rot + DTS * (0.8 + 12 * bt)) % K.TAU
 
     -- the pad: the low cloud, lit from below by the city
-    K.haze(0, 0, 128, 13, 0.03 + 0.45 * pdz, 1.1 + 1.8 * pdz, T * 1.4)
+    K.haze(0, 0, 128, 13, 0.03 + 0.45 * pdz + 0.14 * kl, 1.1 + 1.8 * pdz + 0.8 * kl, T * 1.4)
     if pdz > 0.05 then
       K.dashes(E(2.8 * pdz), 12, 6, 8, T * 1.2, 0, 128)
       K.dashes(E(2 * pdz), 10, 4, 9, -T, 0, 128)
@@ -159,10 +169,15 @@ return function(K)
     local bl = 1.2 + 0.4 * mid + 0.9 * amp
     for b = 1, #BLDG do
       local x0, x1, top = BLDG[b][1], BLDG[b][2], BLDG[b][3]
+      if not cls then
+        -- fine / dense: the far blocks as dark masses (every other row), so the
+        -- roof's things stand in front of them
+        for y = top + 2, PY - 1, 2 do put(1, x0, y, x1 - x0, 1) end
+      end
       line(bl, x0, top, x1, top)
       line(bl * 0.8, x1, top, x1, PY)
     end
-    local wb = 0.4 + 1.2 * amp
+    local wb = cls and (0.4 + 1.2 * amp) or (0.4 + 1.2 * amp + 1.4 * e)
     for i = 1, #WINS do
       local w = WINS[i]
       put(w[3] + wb, w[1], w[2], 1, 1)
@@ -205,19 +220,34 @@ return function(K)
       put(E(9 * cf), SLX - 1, top - 1, 3, 1)
     end
 
+    -- fine / dense, kickless: the searchlight sweeps slowly through the cloud on its own
+    if kl > 0.05 and fp then
+      local s = math.sin(T * 0.35) * 30
+      local top = BLDG[6][3]
+      line(E(kl * 2.4), SLX, top, SLX + s - 3, 13)
+      line(E(kl * 2.4), SLX, top, SLX + s + 3, 13)
+      K.put_sub(E(kl * (2.6 + 2 * pf)), SLX + s - 8, 13, 17, 1)
+      K.put_sub(E(kl * 1.6), SLX + s - 5, 11, 11, 1)
+      put(E(kl * 5), SLX - 1, top - 1, 3, 1)
+    end
+
     -- the second water tower, on a far roof
     local oc = 1.6 + 0.6 * mid
     local shake = kk > 0.05 and math.sin((NOW - kick_t) * 35) * 1.6 * kk or 0
-    local rl = 1.6 + 0.6 * mid + E(6 * kk)
+    local rl = cls and (1.6 + 0.6 * mid + E(6 * kk)) or (1.4 + 0.5 * mid + G(8 * kk))
     tower(oc, rl, shake, 71, 77, 21, 27, 2)
     line(oc, 72, 27, 71, 30); line(oc, 76, 27, 77, 30)
 
     -- the tower block close behind: its windows, and the stabs lighting one
     line(oc, TB0, TBT, TB1, TBT); line(oc, TB0, TBT, TB0, PY); line(oc, TB1, TBT, TB1, PY)
+    if not cls then
+      -- fine / dense: the block's floors, a dark band between each row of windows
+      for r = 0, 7 do put(1, TB0 + 1, TBT + 2 + r * 5, TB1 - TB0 - 1, 1) end
+    end
     for i = 1, #TWINS do
       local w = TWINS[i]
       local f = fade(lit[i], 0.9) * rise(lit[i])
-      put(math.min(13, (w[3] and 2.4 or 1) + E(10 * f)), w[1], w[2], 2, 2)
+      put(math.min(13, (w[3] and (cls and 2.4 or 2.4 + 1.6 * e) or 1) + (cls and E(10 * f) or G(10 * f))), w[1], w[2], 2, 2)
       if f > 0 then
         put(E(3.5 * f), w[1] - 1, w[2] - 1, 4, 4)
         put(E(2.4 * f), w[1] - 2, w[2] + 3, 6, 1)
@@ -243,6 +273,15 @@ return function(K)
     K.dashes(fl * 0.8, 63, 5, 9, 2, 0, 128)
 
     -- the big water tower on its stilts: the kick shakes its hoops
+    if not cls then
+      -- fine / dense: the water inside, filling the tank as the energy rises (low
+      -- at rest, brimming at the peak); the kick slops it, the lows hum in it
+      local wy = 34 - 13 * e + shake * 1.4
+      for y = math.floor(wy) + 2, 35, 2 do put(1.4 + 0.8 * lo, 5, y, 19, 1) end
+      local tilt = kk > 0.05 and math.sin((NOW - kick_t) * 22) * 2.4 * kk or 0
+      K.line_sub(math.min(13, 2.6 + 2.4 * e + G(8 * kk)), 5, wy - tilt, 23, wy + tilt)
+      K.put_sub(E(2.4 * kk + 1.2 * bt), 6, wy + 1, 17, 1)
+    end
     tower(1.8 + 0.8 * mid, rl, shake, 4, 24, 16, 36, 4)
     line(oc, 14, 9, 14, 7)
     line(oc, 6, 36, 4, RY); line(oc, 22, 36, 24, RY); line(oc, 14, 36, 14, RY)
@@ -346,6 +385,20 @@ return function(K)
       end
     end
 
+    -- dense: a washing line strung from the aerial to the air-con, its washing
+    -- swaying; the pipe run along the roof; a ladder up the tower's stilts
+    if dense and not cls then
+      local sw = fp and math.sin(T * 1.1) * 0.8 or 0
+      line(1.6, 32, 40, 48, 44)
+      for k = 1, 4 do
+        local x = 33 + k * 3
+        local y = 40 + (x - 32) * 0.25
+        K.put_sub(2 + 0.8 * mid + E(1.2 * pf), x + sw * (k % 2 == 0 and 1 or 0.6), y + 1, 2, 2 + k % 2)
+      end
+      line(1.8, 70, RY - 2, 98, RY - 2)
+      for x = 72, 96, 8 do put(2.4, x, RY - 3, 1, 3) end
+      for y = 38, RY - 2, 3 do line(1.6, 11, y, 13, y) end
+    end
     -- dense: a moth round the parapet lamp, a drip off the water tower
     if dense and fp then
       local ph = T * 2.4

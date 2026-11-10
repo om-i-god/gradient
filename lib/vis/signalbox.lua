@@ -35,8 +35,33 @@ return function(K)
   -- points: toe x, rail y, which way the blade swings
   local POINTS = {{54, 55, 1}, {72, 43, -1}, {96, 52, -1}}
 
-  -- the fades follow the trails setting at half strength, held within 15% / 10%
-  local function TR() return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+  -- fine / dense: the far town along the horizon, its blocks picked once, and its windows
+  local TOWN = {}
+  do
+    local x = 41
+    while x < 127 do
+      local w = 5 + math.floor(K.hash(x, 31) * 7)
+      TOWN[#TOWN + 1] = {x, math.min(w, 127 - x), HZ - 3 - math.floor(K.hash(x, 32) * 6)}
+      x = x + w
+    end
+  end
+  local TWIN = {}
+  for i = 1, #TOWN do
+    local b = TOWN[i]
+    for y = b[3] + 2, HZ - 2, 2 do
+      for x = b[1] + 1, b[1] + b[2] - 2, 3 do
+        local h = K.hash(x * 17 + y, 33)
+        if h > 0.62 then TWIN[#TWIN + 1] = {x, y, h} end
+      end
+    end
+  end
+
+  -- the fades follow the trails setting: at classic at half strength, held within
+  -- 15% / 10%; at fine and dense nearly in full (0.44x .. 2.2x), so the slider shows
+  local function TR()
+    if K.detail == "classic" then return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+    return math.min(2.2, math.max(0.4, K.trail ^ 0.9))
+  end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -108,10 +133,16 @@ return function(K)
     local T, DT, NOW, e = K.T, K.DT, K.NOW, K.energy
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
     local dense, RT = K.detail == "dense", K.react
+    local cls = K.detail == "classic"
+    -- fine / dense: the energy scales the music's marks (calm .. unmistakable),
+    -- and a kickless stretch lets the mist settle and the rails sing slowly
+    local ge = cls and 1 or (0.7 + 0.5 * e)
+    local kl = cls and 0 or K.kickless
     if RT > 1 then RT = 1 + (RT - 1) * 0.4 end      -- eased above 1: the lit bound
     local fp = K.playing                            -- time-driven detail waits for the music
     -- an event's level: scaled by the reactivity, never a white point
     local function E(l) return math.min(l * RT, 13) end
+    local function G(l) return E(l * ge) end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local pf = fade(pump_t, 0.3) * rise(pump_t)
     local dk = math.exp(-DT / (0.3 * TR()))
@@ -121,7 +152,22 @@ return function(K)
     local kk, bt, ap, hf, tf = acc.kick * rise(kick_t), acc.bass, acc.pump, acc.hat, acc.tick
 
     -- the sky over the far town: a glow the level lifts, and the horizon
-    K.haze(44, 16, 128, HZ - 1, 0.04 + 0.22 * amp, 1 + 1.4 * amp, T * 2)
+    if cls then
+      K.haze(44, 16, 128, HZ - 1, 0.04 + 0.22 * amp, 1 + 1.4 * amp, T * 2)
+    else
+      -- fine / dense: the far town, a dark mass along the horizon (roofs solid,
+      -- walls every other row), its windows lit by the level, a glow over it
+      for i = 1, #TOWN do
+        local b = TOWN[i]
+        put(1 + 1.2 * amp, b[1], b[3], b[2], 1)
+        for y = b[3] + 2, HZ - 2, 2 do put(1, b[1], y, b[2], 1) end
+      end
+      for i = 1, #TWIN do
+        local w = TWIN[i]
+        put(1.4 + 3 * amp * w[3] + (dense and fp and 1.4 * math.max(0, math.sin(T * 0.6 + i * 1.9)) or 0), w[1], w[2], 1, 1)
+      end
+      K.haze(44, 16, 128, HZ - 1, 0.04 + 0.12 * amp, 1 + 0.8 * amp, T * 2)
+    end
     line(1 + 1.6 * amp, 40, HZ, 127, HZ)
 
     -- the wires: telegraph poles along the horizon, two sagging wires between
@@ -151,7 +197,7 @@ return function(K)
     end
 
     -- the pad: mist lying over the junction
-    K.haze(0, 34, 128, 64, 0.03 + 0.42 * pdz, 1.1 + 1.6 * pdz, T * 1.2)
+    K.haze(0, 34, 128, 64, 0.03 + 0.1 * kl + 0.42 * pdz, 1.1 + 1.6 * pdz + kl, T * 1.2)
     if pdz > 0.05 then
       K.dashes(E(2.4 * pdz), 48, 5, 7, T * 1.5, 0, 128)
       K.dashes(E(2 * pdz), 58, 4, 9, -T, 0, 128)
@@ -161,7 +207,7 @@ return function(K)
     -- lights the sleepers
     local hum = 0.3 * lo + 0.9 * bt
     local bl = 0.9 + 1.6 * lo + E(2.4 * bt)
-    K.dashes(bl, 46, 2, 5, 1, 0, 128)
+    if cls then K.dashes(bl, 46, 2, 5, 1, 0, 128) end
     K.dashes(bl, 57, 2, 6, 3, 0, 128)
     K.dashes(bl * 0.8, 63, 3, 7, 0, 0, 128)
     local sl = 1.3 + E(2.4 * bt)
@@ -193,11 +239,19 @@ return function(K)
         local v = (1 - a / 0.7) * math.min(1, a / 0.05 + 0.4)
         local x = -6 + a * 200
         for r = 1, #RAILS do
-          line(E(10 * v), x, RAILS[r], x + 7, RAILS[r])
-          line(E(4.5 * v), x - 14, RAILS[r], x - 1, RAILS[r])
+          line(cls and E(10 * v) or G(11 * v), x, RAILS[r], x + 7, RAILS[r])
+          line(cls and E(4.5 * v) or G(4.5 * v), x - (cls and 14 or math.floor(10 + 16 * v * e)), RAILS[r], x - 1, RAILS[r])
         end
         put(E(2.6 * v), x - 8, RAILS[1] - 2, 16, 1)
         put(E(2.6 * v), x - 8, RAILS[3] - 2, 16, 1)
+      end
+    end
+    if kl > 0.05 and fp then
+      -- the kickless stretch: the rails sing, a slow glow travelling down the line on the pump
+      local x = (T * 18) % 170 - 30
+      for r = 1, #RAILS do
+        K.put_sub(E(kl * (1.6 + 3 * pf)), x + r * 3, RAILS[r], 26, 1)
+        K.put_sub(E(kl * (0.8 + 1.6 * pf)), x + r * 3 + 6, RAILS[r] + (r % 2 == 0 and 1 or -1), 14, 1)
       end
     end
     -- the point rodding: a dim rod along the six-foot from the box, with its cranks
@@ -281,7 +335,15 @@ return function(K)
     line(1.4, BX0 - 1, BASE, BX1 + 1, BASE)
     -- the window breathes with the pump; levers, bars and the shelf stand against it
     local wy1 = WY0 + WH - 1
-    local wlv = math.min(13, 2.8 + 0.8 * mid + E(2.2 * pf + 2.6 * ap))
+    local wlv = cls and math.min(13, 2.8 + 0.8 * mid + E(2.2 * pf + 2.6 * ap))
+      or math.min(11, 2.4 + 2.4 * e + 0.8 * mid + G(2.4 * pf + 2.6 * ap))
+    if not cls then
+      -- fine / dense: the window's light falls out over the stair and the ballast
+      local sp = (wlv - 2) * 0.45
+      put(1 + sp, BX0 - 1, BASE + 1, BX1 - BX0 + 6, 1)
+      put(sp * 0.7, BX0 + 2, BASE + 3, BX1 - BX0 + 2, 1)
+      put(sp * 0.5, BX0 + 6, BASE + 5, BX1 - BX0 - 4, 1)
+    end
     put(wlv, BX0 + 2, WY0, BX1 - BX0 - 3, WH)
     put(1 + E(1.6 * pf + 1.8 * ap), BX0 - 2, FLR + 1, BX1 - BX0 + 5, 1)
     for x = 14, 30, 8 do line(1.2, x, WY0, x, wy1) end
@@ -315,6 +377,20 @@ return function(K)
     -- highs: glints on the rail heads
     K.grain(function(u, v) return u * 128, RAILS[1 + math.floor(v * 3.99)] - 1 end, hi * 80, 7)
 
+    -- dense: a lineside hut with its lit window and its chimney's smoke, fence
+    -- posts along the far boundary, a third wire on the poles
+    if dense and not cls then
+      line(2, 70, 33, 78, 33); line(2, 70, 33, 70, 38); line(2, 78, 33, 78, 38)
+      put(2.6 + 2 * e + E(1.4 * pf), 72, 35, 3, 2)
+      if fp then
+        for q = 0, 2 do
+          local u = (T * 0.3 + q / 3) % 1
+          K.put_sub(2.4 * (1 - u), 76 + u * 6 + math.sin(T + q) * 1.5, 31 - u * 9, 1, 1)
+        end
+      end
+      for x = 42, 126, 6 do put(1.4, x, HZ + 1, 1, 2) end
+      for i = 2, #POLES do line(1.3, POLES[i - 1], HZ - 6, POLES[i], HZ - 6) end
+    end
     -- dense: a bat round the home signal's lamp, a slow drip off the eaves
     if dense and fp then
       local ph = T * 2.6

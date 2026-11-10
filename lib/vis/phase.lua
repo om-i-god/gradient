@@ -32,10 +32,15 @@ return function(K)
   local hit, hn, percs, arps = {}, 0, {}, {}
   local pdz = 0                           -- the pad, eased in
   local function mark(k) hit[k] = K.NOW end
+  -- the fade scale: at fine, while it plays, the trails param reaches further
+  local function TRf()
+    if K.detail ~= "classic" and K.playing then return K.trail ^ 1.6 end
+    return K.trail
+  end
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / (tau * K.trail))
+    local v = math.exp(-(K.NOW - t) / (tau * TRf()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -101,8 +106,11 @@ return function(K)
   -- the bands as dithered 4x2 cells, equal neighbours merged
   local CW, CH = 4, 2
   local cell = {}
-  local function bands(gain)
-    local faint = (K.detail ~= "classic" and K.playing) and 0.7 or 1   -- fine: the haze of the bands is sparser, so the cores stand out
+  local function bands(gain, kg)
+    local faint = (K.detail ~= "classic" and K.playing) and 0.5 or 1   -- fine: the haze of the bands is sparser, so the cores stand out
+    -- fine, playing: the band cores may climb higher, more so at the peak
+    local top, lift_e = 8, 1
+    if K.detail ~= "classic" and K.playing then top, lift_e = 11, 0.9 + 0.6 * K.energy end
     for row = 0, (Y1 - Y0) // CH - 1 do
       local y = Y0 + row * CH
       for col = 0, 31 do
@@ -112,7 +120,7 @@ return function(K)
         local u = (b - 0.8 + v * 0.05) / 0.2
         local l = 0
         if u > 0 then
-          local val = math.min(8, u * u * (gain * f + v * 3) * 1.6)
+          local val = math.min(top, u * u * ((gain * lift_e + kg) * f + v * 3) * 1.6)
           local th = (TH[(row + col * 3) % 8 + 1] + 0.5) / 8
           if val < 1 then l = (val * faint > th) and -1 or 0
           else
@@ -205,6 +213,7 @@ return function(K)
   function M.draw(S)
     lift_y = nil                          -- the voices moved since last frame
     local fine, dense, R = K.detail ~= "classic", K.detail == "dense", K.react
+    local fp, dp = fine and K.playing, dense and K.playing
     if R > 1 then R = 1 + (R - 1) * 0.5 end         -- the top of the range is eased: the fence is already near the lit bound
     local function ev(l) return math.min(l * R, 13) end
     local T, DT, kl = K.T, K.DT, K.kickless
@@ -254,18 +263,26 @@ return function(K)
     K.haze(0, Y0, 128, GROUND, (0.02 + 0.14 * kl + 0.08 * K.throw) * ((fine and K.playing) and 0.6 or 1), 1, T * 3)
 
     -- the far fence then the near one
-    bands((2.3 + 0.3 * e) * (1 + 0.1 * mid) + kk * (fine and 0.3 + 0.35 * R or 0.3))
+    bands((2.3 + 0.3 * e) * (1 + 0.1 * mid), kk * (fine and 0.3 + 0.35 * R or 0.3))
     grating(2, 3 + lk2 * 4 + A[K.HI] * 2 + pd * 1.5, 0)
     grating(1, 4 + lk1 * 4 + A[K.HI] * 2, 1)
 
     -- an arp note lights a wire of its fence end to end
     for j = #arps, 1, -1 do
       local a = arps[j]
-      local f = math.exp(-(K.NOW - a.t) / (0.3 * K.trail))
+      local f = math.exp(-(K.NOW - a.t) / (0.3 * TRf()))
       if f < 0.03 then table.remove(arps, j)
       else
         local x0, y0, x1, y1 = wire(a.g, a.m)
-        if x0 then line(fine and ev(8 * f) or 7 * f, x0, y0, x0 + (x1 - x0) * 0.4, y0 + (y1 - y0) * 0.4) end
+        if x0 and fp then
+          -- fine, playing: the note's light runs along the wire as it fades,
+          -- a bright head and a dimmer tail behind it
+          local u1 = 0.3 + 0.7 * (1 - f)
+          local u0 = 0
+          local um = math.max(0, u1 - 0.18)
+          line(ev(4.5 * f), x0 + (x1 - x0) * u0, y0 + (y1 - y0) * u0, x0 + (x1 - x0) * um, y0 + (y1 - y0) * um)
+          line(ev(9 * f), x0 + (x1 - x0) * um, y0 + (y1 - y0) * um, x0 + (x1 - x0) * u1, y0 + (y1 - y0) * u1)
+        elseif x0 then line(fine and ev(8 * f) or 7 * f, x0, y0, x0 + (x1 - x0) * 0.4, y0 + (y1 - y0) * 0.4) end
       end
     end
     -- the hats glint on the near fence's wire
@@ -301,7 +318,7 @@ return function(K)
     -- a perc: a lit window in the city, placed by voice and note
     for j = #percs, 1, -1 do
       local p = percs[j]
-      local f = math.exp(-(K.NOW - p.t) / (0.7 * K.trail))
+      local f = math.exp(-(K.NOW - p.t) / (0.7 * TRf()))
       if f < 0.03 then table.remove(percs, j)
       else
         local x = (p.v * 29 + p.n * 3) % 116 + 4
@@ -316,6 +333,26 @@ return function(K)
       end
     end
 
+    if fp then
+      -- the floodlight's throw: two faint edges falling to the pool, and with
+      -- the kick away the beam fills with a slow dithered haze
+      local la = 1.6 + bs * 0.6
+      for y = Y0 + 1, GROUND - 1, 2 do
+        local u = (y - LY) / (GROUND - LY)
+        put(la * (1 - u * 0.4), LX - 3 - u * 18, y, 1, 1)
+        put(la * (1 - u * 0.4), LX + 5 + u * 34, y, 1, 1)
+        if kl > 0.05 and (y // 2) % 2 == 0 then
+          K.dashes(kl * (1.2 + pd * 1.5), y, 1, 6, T * 3 + y * 1.7, math.floor(LX - 1 - u * 18), math.floor(LX + 4 + u * 34))
+        end
+      end
+      if dp then
+        -- dense: barbs knotted along the top rail
+        for x = 3, 124, 7 do
+          put(2 + lamp, x, Y0 - 3, 1, 1); put(2 + lamp, x + 1, Y0 - 2, 1, 1)
+          put(1.5, x + 2, Y0 - 3, 1, 1)
+        end
+      end
+    end
     -- the floodlight on its pole, breathing with the pump
     put(2, LX + 1, LY + 2, 1, Y0 - LY - 3)
     put(fine and math.min(13, 5 + lamp * 6 + ev(4 * kk)) or 5 + lamp * 6, LX - 3, LY, 7, 2)
@@ -324,9 +361,21 @@ return function(K)
     -- the ground: the lamp's pool, the bass glowing in it, the fence's
     -- shadow raked across
     put(fine and math.min(13, 2 + K.bar_pulse * 2 + bh * (4 + 1.5 * R)) or 2 + K.bar_pulse * 2 + bh * 4, 0, GROUND, 128, 1)
-    K.gradient(GROUND + 1, 63, function(y)
+    local glv = function(y)
       return (0.3 + bs * 1.8 + (fine and bh * R * 1.5 or 0)) * math.exp(-(y - GROUND) / (1 + bs * 1.6))
-    end)
+    end
+    if fp then
+      -- fine, playing: the glow gathers into the lamp's pool, widening toward
+      -- us and with the bass
+      local pcx = LX + 16
+      for y = GROUND + 1, 63 do
+        local hw = math.floor(20 + bs * 16 + (y - GROUND) * 2.5 + 0.5)
+        local x0, x1 = math.max(0, pcx - hw), math.min(128, pcx + hw)
+        K.gradient(y, y, glv, nil, x0, x1)
+      end
+    else
+      K.gradient(GROUND + 1, 63, glv)
+    end
     if fine and bh > 0.03 then K.dashes(ev(6 * bh), GROUND + 1, 2, 2, 0, 0, 128) end   -- the bass rakes the first row of the pool
     for r = 0, 3 do
       local y = GROUND + 3 + r * 3

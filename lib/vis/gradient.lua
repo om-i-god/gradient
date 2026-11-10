@@ -13,6 +13,18 @@ return function(K)
   local vk = {0, 0, 0, 0}                 -- each voice's stab, eased in
   local bs = 0                            -- the bass glow, eased in
   local wobs, gains = {}, {}              -- per-frame scratch
+  -- fine, playing: each band's lit core (a stab flares it, the trails decide
+  -- how long it glows), a ghost of its row that lags behind voice leading,
+  -- and the lamp in the haze that rides the top band
+  local cg, gy = {0, 0, 0, 0}, {40, 30, 22, 14}
+  local lampx = 64
+
+  -- the fade scale: at fine, while it plays, the trails param reaches further
+  -- (0.25x at 0, ~4x at 100, before the kit's lit clamp)
+  local function TRf()
+    if K.detail ~= "classic" and K.playing then return K.trail ^ 1.5 end
+    return K.trail
+  end
 
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
   local hit, hn = {}, 0
@@ -21,7 +33,7 @@ return function(K)
   local function fade(k, tau)
     local t = hit[k]
     if not t then return 0 end
-    local v = math.exp(-(K.NOW - t) / (tau * K.trail))
+    local v = math.exp(-(K.NOW - t) / (tau * TRf()))
     if v < 0.02 then hit[k] = nil; return 0 end
     return v
   end
@@ -31,13 +43,14 @@ return function(K)
   end
   local function live(list, tau)
     for i = #list, 1, -1 do
-      local f = math.exp(-(K.NOW - list[i].t) / (tau * K.trail))
+      local f = math.exp(-(K.NOW - list[i].t) / (tau * TRf()))
       if f < 0.02 then table.remove(list, i) else list[i].f = f end
     end
   end
 
   function M.init()
     ys = {40, 30, 22, 14}; vk = {0, 0, 0, 0}; bs = 0
+    cg, gy, lampx = {0, 0, 0, 0}, {40, 30, 22, 14}, 64
     hit, hn, arps, percs = {}, 0, {}, {}
   end
 
@@ -58,7 +71,11 @@ return function(K)
     local T, e, c = K.T, K.energy, K.chord
     local fine, dense, R = K.detail ~= "classic", K.detail == "dense", K.react
     -- an event's level: scaled by the reactivity, never a white point
-    local hz = (fine and K.playing) and 0.65 or 1     -- the events carry the light now
+    local fp, dp = fine and K.playing, dense and K.playing
+    local hz = fp and 0.65 or 1     -- the events carry the light now
+    if fp then hz = hz * (1 - 0.3 * K.kickless) * (dp and 0.75 or 1) end    -- the kickless lamp (and dense's texture) take the haze's room
+    -- the body's share of the glow: the peak tightens it, a sparse bar lets it lie low
+    local body = 0.28 + 0.1 * e
     local function ev(l) return math.min(l * R, 13) end
     local breathe = 1 - K.duck * (0.18 + 0.1 * (1 - K.kickless))
     local kk, cl, pd = fade("kick", 0.25), fade("clap", 0.3), K.env.pad
@@ -91,7 +108,10 @@ return function(K)
         -- soft knee: close voices merge into a glow, not a flat slab; the
         -- tails thin to a dither so the black stays black
         local l = 12 * (1 - math.exp(-v * v * 0.045))
-        if l >= 1.6 then l = K.B > 0.05 and math.floor(l * K.B + 0.5) / K.B or 0
+        if l >= 1.6 then
+          -- fine, playing: the glow is the body (2..~7), so the cores read over it
+          if fp then l = 2 + (l - 1.6) * body end
+          l = K.B > 0.05 and math.floor(l * K.B + 0.5) / K.B or 0
         elseif l >= 0.8 and (row + col) % 2 == 0 then l = -1
         else l = 0 end
         lv[col] = l
@@ -100,7 +120,11 @@ return function(K)
       for col = 1, 32 do
         local l = lv[col]
         if l ~= rl then
-          if rl > 0 then put(rl, run * 4, y, (col - run) * 4, 2)
+          if rl > 0 and dp and rl >= 3 then
+            -- dense: the glow is drawn in scanlines, a darker row under each
+            put(rl, run * 4, y, (col - run) * 4, 1)
+            put(math.max(1, math.floor(rl * 0.5)), run * 4, y + 1, (col - run) * 4, 1)
+          elseif rl > 0 then put(rl, run * 4, y, (col - run) * 4, 2)
           elseif rl < 0 then put(1, run * 4, y, (col - run) * 4, 1) end
           run, rl = col, l
         end
@@ -108,13 +132,55 @@ return function(K)
     end
     -- fine: a hairline at each band's centre, riding the eased row to the
     -- sub-pixel so the bands glide instead of stepping two pixels at a time
-    if fine and K.playing then
+    if fp then
+      local tr = TRf()
+      local kl = K.kickless
       for i = 1, 4 do
-        local l = math.min(4.5, gains[i] * 0.55) * breathe
+        -- the core: a stab flares it and it glows on as long as the trails say;
+        -- the top voices take the highs, the peak lifts them all
+        -- (it swells in over a few frames, so a stab across the sky never jumps)
+        local vkk = K.voice_kick[i]
+        if vkk > cg[i] then cg[i] = K.follow(cg[i], vkk, 0.07, K.DT)
+        else cg[i] = cg[i] * math.exp(-K.DT / (0.45 * tr)) end
+        -- (the reactivity scales the flare only, and the pump barely touches
+        -- it: a whole-width line dipping on every beat would flicker)
+        local l = (4.5 + 4 * e + cg[i] * (4.5 + 2 * e) * math.min(R, 1.3) + (i >= 3 and hi * 1.5 or 0) + kk * 1.5)
+          * (1 - K.duck * 0.08) * (1 - 0.15 * kl)
+        l = math.min(13, math.max(l, math.min(4.5, gains[i] * 0.55) * breathe))
         local sg = i % 2 == 0 and 1 or -1
         local step = dense and 4 or 8
-        for col = 0, 31, step // 4 do
-          K.put_sub(l, col * 4, ys[i] + wobs[col] * sg + 0.5, step, 1)
+        -- kickless: the core comes apart into beads, a gap every other cell
+        local skip = kl > 0.5 and 2 or 1
+        for col = 0, 31, step // 4 * skip do
+          put(l, col * 4, math.floor(ys[i] + wobs[col] * sg + 0.5), step, 1)
+        end
+        -- the ghost: where the band was, lagging behind as the voices lead on
+        gy[i] = K.follow(gy[i], ys[i], 0.5 * tr, K.DT)
+        local gd = math.abs(gy[i] - ys[i])
+        if gd > 1 then
+          K.dashes(math.min(4, 1.5 + gd * 0.4), math.floor(gy[i] + 0.5), 2, 6, i * 3 + T * 2)
+        end
+      end
+      -- the lamp in the haze: a light riding the top band, slowly across.
+      -- the kick drives it; kickless, it spreads wide and breathes with the pump
+      local top = 1
+      for i = 2, 4 do if ys[i] < ys[top] then top = i end end
+      lampx = 64 + 46 * math.sin(T * 0.06)
+      local lx, ly = math.floor(lampx + 0.5), math.floor(ys[top] + wobs[math.floor(lampx / 4) % 32] * (top % 2 == 0 and 1 or -1) + 0.5)
+      local lk = ev((6.5 + 4 * e + kk * 5 + cg[top] * 2) * (1 - 0.1 * kl) * (1 - K.duck * 0.15))
+      local hw = math.floor(3 + 2 * e + kl * 5 + 0.5)
+      put(lk * 0.3, lx - hw - 2, ly - 1, 2 * hw + 5, 3)
+      put(lk * 0.45, lx - hw, ly, 2 * hw + 1, 1)
+      put(lk * 0.7, lx - 2, ly - 1, 5, 3)
+      put(lk * 0.6, lx, ly - 2, 1, 5)
+      put(lk, lx - 1, ly, 3, 1)
+      if dp then
+        -- dense: motes drifting through the light, caught where they cross a band
+        for k = 1, 16 do
+          local mx = (K.hash(k, 21) * 128 + T * (2 + K.hash(k, 22) * 3)) % 128
+          local bi = 1 + k % 4
+          local my = ys[bi] + (K.hash(k, 23) - 0.5) * width * 3 + math.sin(T * 0.5 + k) * 1.5
+          K.put_sub(4 + 4 * cg[bi] + hi * 2, mx, my, 1, 1)
         end
       end
     end
@@ -131,6 +197,8 @@ return function(K)
       local l = 1.5 + K.voice_kick[i] * 3
       local off = T * (6 + i * 3) + i * 17
       K.dashes(l * breathe, FLOOR + 2 + i, 3 + i, 10 + i * 2, off)
+      -- dense: each reflection doubled lower down, its core's light in it
+      if dp then K.dashes((1 + cg[i] * 3) * breathe * (1 - K.kickless), FLOOR + 6 + i, 2, 9 + i * 2, -off * 0.7) end
     end
     -- haze: a light bank low down, heavier with dub and kickless
     K.haze(0, 36, 128, FLOOR, (0.12 + 0.2 * K.dub * K.throw + 0.18 * K.kickless + 0.25 * pd) * hz, 1, T * 4)

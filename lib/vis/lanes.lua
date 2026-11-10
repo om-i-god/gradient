@@ -79,6 +79,7 @@ return function(K)
     local fine, dense, R = K.detail ~= "classic", K.detail == "dense", K.react
     if R > 1 then R = 1 + (R - 1) * 0.55 end        -- the top of the range is eased: peak bars are full already
     local sub = fine and K.playing                  -- sub-pixel glide while it plays
+    local dp = dense and sub
     local function ev(l) return math.min(l * R, 13) end
     local tz = K.trail > 1 and K.trail ^ -0.4 or 1   -- long trails keep the extra marks, a little fainter
     local calm = 1.7 - 1.4 * K.energy               -- a lone note reads bigger in a sparse bar
@@ -109,6 +110,8 @@ return function(K)
     bs = follow(bs, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.5), A[K.LO] * 0.7), 0.06, DT)
     lo = follow(lo, A[K.LO], 0.1, DT)
     local trail = (0.6 + K.throw * 2 + K.dub * 0.6) * K.trail ^ 0.5       -- in steps
+    -- fine, playing: the trails param reaches all the way (a third to ~3x)
+    if sub then trail = (0.6 + K.throw * 2 + K.dub * 0.6) * K.trail ^ 1.2 end
     local hi = A[K.HI]
     pdz = follow(pdz, K.env.pad, 0.25, DT)
     local kk, cl, hh, pd = fade("kick", 0.25), fade("clap", 0.3), fade("hat", 0.25), pdz
@@ -126,12 +129,28 @@ return function(K)
     -- the pad and the mids fill the air above the machine
     if mid + pd + A[K.AMP] > 0.05 then K.haze(0, 4, 128, 44, 0.1 * mid + 0.15 * pd + 0.15 * A[K.AMP], 1, -T * 2) end
 
+    if sub then
+      -- the well: the floor of the machine inside the first ring, dim and
+      -- dithered, lifting with the lows; kickless it sinks back
+      local rx1, ry1 = ring(1)
+      rx1, ry1 = rx1 - 2, ry1 - 1.5
+      local wl = 1 + lo * 0.7 + pd * 0.9 - K.kickless * 0.3
+      for dy = -math.floor(ry1), math.floor(ry1), dp and 1 or 2 do
+        local w = rx1 * math.sqrt(math.max(0, 1 - (dy / ry1) ^ 2))
+        -- dense: the rows between are drawn too, shorter, so the plate reads as grooves
+        if dy % 2 ~= 0 then w = w * 0.72 end
+        w = math.floor(w + 0.5)
+        if w > 2 then put(dy % 2 == 0 and wl or 1, cx - w, cy + dy, 2 * w, 1) end
+      end
+    end
     local heads = {}
     for i = 1, 4 do
       local l = K.lane(S, i)
       local rx, ry, rot = ring(i)
       local g = K.gain(S, "lane" .. i)
       local lit = 1 + g * 1.5 + vk[i] * 4
+      -- fine, playing: the rings are structure, dim, and a stab lights them
+      if sub then lit = 0.9 + g * 1.2 + vk[i] * 3 end
       -- the ring itself: a line where the lane plays, dots where it rests
       local n = 20 + i * 8
       if g > 0 then
@@ -200,14 +219,32 @@ return function(K)
         local a = ang[i] + rot
         -- its trail: fading points behind it along the ring
         local span = trail / len
+        if sub then
+          -- fine: the longer the trails, the further back and the fainter
+          -- (a short bright stub at 0, a long glimmer at 100)
+          local m = math.min(36, math.floor(4 + span * 30))
+          local tl = (2 + g * 4 + K.lane_kick[i] * 3) * K.clamp(K.trail ^ -0.5, 0.6, 1.4)
+          for k = m, 1, -1 do
+            local u = k / m
+            local x, y = pt(rx, ry, a - span * u, cx, cy)
+            put(tl * (1 - u) ^ 1.3, x, y, 1, 1)
+          end
+        else
         local m = math.floor(4 + span * 40)
         for k = m, 1, -1 do
           local u = k / m
           local x, y = pt(rx, ry, a - span * u, cx, cy)
           put((2 + g * 4 + K.lane_kick[i] * 3) * (1 - u) ^ 1.3, x, y, 1, 1)
         end
+        end
         local hx, hy = pt(rx, ry, a, cx, cy)
+        if sub then
+          -- the playheads are the live marks: a halo, and a bright head that the notes drive
+          put(2 + g * 2 + K.energy * 1.5, math.floor(hx + 0.5) - 2, math.floor(hy + 0.5) - 1, 4, 3)
+          put_s(math.min(13, 6 + g * 4 + K.lane_kick[i] * 4 + K.energy), hx - 0.5, hy - 0.5, 2, 2)
+        else
         put_s(5 + g * 4 + K.lane_kick[i] * 4, hx - 0.5, hy - 0.5, 2, 2)
+        end
         if fine and K.lane_kick[i] > 0.05 then
           -- a note kicks a halo round its lane's playhead
           local lk = K.lane_kick[i] * calm
@@ -239,13 +276,25 @@ return function(K)
         if inner > 0 and math.abs(dy) < rh - 1 then
           put(hl, cx - w, cy + dy, w - inner, 1)
           put(hl, cx + inner, cy + dy, w - inner, 1)
-          put(hl * 0.35, cx - inner, cy + dy, 2 * inner, 1)
+          put(hl * (sub and 0.55 or 0.35), cx - inner, cy + dy, 2 * inner, 1)
         else
           put(hl, cx - w, cy + dy, 2 * w, 1)
         end
       end
     end
     put(hl + 2, cx - 1, cy - 1, 2, 2)
+    if sub and K.kickless > 0.05 then
+      -- kickless: with the kick away, slow lights drift round the middle
+      -- rings with the pad, the machine idling in its own glow
+      for i = 2, 3 do
+        local rx, ry = ring(i)
+        local a0 = T * 0.05 * (i == 2 and 1 or -1) + i * 0.37
+        for q = 0, 4 do
+          local x, y = pt(rx, ry, a0 - q * 0.012, cx, cy)
+          put((2.5 + pd * 3 + mid * 1.5) * K.kickless * (1 - q / 5), x, y, 1, 1)
+        end
+      end
+    end
     -- a hand inside the hub, round once a bar
     local hx, hy = pt(rh - 1, (rh - 1) * 0.9, K.bar_ph, cx, cy)
     line(hl + 1, cx, cy, hx, hy)

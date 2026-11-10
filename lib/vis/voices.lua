@@ -29,7 +29,12 @@ return function(K)
   local arp_row, arp_t = 40, nil          -- the last arp note, held as a pip at the playhead
 
   -- the fade scale: eased at fine, where the long tails of a busy bar stack up
-  local function TR() return K.detail ~= "classic" and K.trail ^ 0.4 or K.trail end
+  -- (while it plays the trails param reaches all the way: the ribbons' own
+  -- fade length follows it too, see `reach` in draw)
+  local function TR()
+    if K.detail == "classic" then return K.trail end
+    return K.playing and K.trail or K.trail ^ 0.4
+  end
   local function vrow(n) return clamp(50 - (K.num(n, 60) - 46) * 1.5, 4, 49) end
   local function brow(n)
     n = K.num(n, 36)
@@ -131,6 +136,9 @@ return function(K)
   function M.draw(S)
     local T, DT = K.T, K.DT
     local fine, dense, R = K.detail ~= "classic", K.detail == "dense", K.react
+    local fp, dp = fine and K.playing, dense and K.playing
+    -- how many columns back the ribbons stay lit (fine, playing): the trails param
+    local reach = NCOL * K.clamp(0.5 * K.trail, 0.22, 1)
     if R > 1 then R = 1 + (R - 1) * 0.5 end         -- the top of the range is eased: peak is already near the frame-change bound
     local function ev(l) return math.min(l * R, 13) end
     local c = K.chord
@@ -157,10 +165,12 @@ return function(K)
     local breathe = 1 - K.duck * (0.35 + 0.1 * (1 - K.kickless))
     local base = (playing and (2.2 + K.energy * 1.8) or 2.2) * ((fine and playing) and 0.68 or 1) * (0.8 + 0.4 * A[K.MID]) * (1 + 0.4 * A[K.AMP])   -- fine: dimmer ambient ribbons, so the hits stand out
     local kk, cl, hh, pd = fade("kick", 0.25), fade("clap", 0.3), fade("hat", 0.25), K.env.pad
+    -- fine, playing: the ribbons carry the energy (dim in a sparse bar, bright at the peak)
+    if fp then base = (1.8 + K.energy * 2.6) * (0.8 + 0.4 * A[K.MID]) * (1 + 0.4 * A[K.AMP]) end
 
     -- the staff: dotted lines drifting with the scroll
     for _, n2 in ipairs(STAFF) do
-      K.dashes(1 + A[K.HI] * 1.6 + pd * 1.5, math.floor(vrow(n2)), 1, 6, -T * RATE, 0, HEAD)
+      K.dashes(fp and (1 + A[K.HI] * 1.5 + pd) or (1 + A[K.HI] * 1.6 + pd * 1.5), math.floor(vrow(n2)), 1, 6, -T * RATE, 0, HEAD)
       -- the hats catch on the staff near the playhead
       if hh > 0.02 then K.dashes(fine and ev(6 * hh) or 5.5 * hh, math.floor(vrow(n2)), 1, 2, -T * RATE, HEAD - 40, HEAD) end
     end
@@ -184,7 +194,7 @@ return function(K)
     -- the clap lights a line beside the playhead
     if cl > 0.05 then put(6 * cl, HEAD + 3, 20, 1, 14) end
     -- the playhead: the pump breathes it, the kick lights it
-    put(1.5 + (1 - breathe) * 6 + K.env.kick * 4, HEAD + 2, 3, 1, BASS_BOT - 3)
+    put(1.5 + (1 - breathe) * 6 + K.env.kick * (fp and 8 or 4), HEAD + 2, 3, 1, BASS_BOT - 3)
 
     -- beat / bar lines and stems first, so the ribbons sit on top
     for k = 1, #cols do
@@ -221,12 +231,20 @@ return function(K)
         local x = cx(k)
         if x < -1 then break end
         local fade = 1 - (k / (NCOL + 6)) ^ 1.5
+        local near = fade
+        if fp then
+          -- fine, playing: written bright at the playhead, sinking into the
+          -- past (how far back it stays lit is the trails param)
+          near = math.max(0, 1 - k / reach) ^ 1.3
+          fade = 0.3 + 0.7 * near
+        end
         local hit = math.max(col.s[i], (col.echo or 0) * 0.7)
         if k <= 16 then
           local w = 1 - k / 16
           hit = math.max(hit, kk * (fine and 0.4 + 0.5 * R or 0.5) * w, ((i == 2 or i == 3) and cl * (fine and 1.15 or 0.9) * w or 0))
         end
         local lv = (base + hit * (7 + i * 0.6)) * fade * breathe
+        if fp then lv = (base * fade + hit * (7 + i * 0.6) * near * near * 1.3) * breathe end
         if k > 6 and lv > 3 then lv = math.floor(lv / 2 + 0.5) * 2 end   -- older: coarser, longer runs
         local y = col.y[i]
         run(1, lv, x, y)
@@ -238,12 +256,19 @@ return function(K)
         prev_y = y
         -- a stab swells the ribbon upward; its echoes leave a shadow under it
         if hit > 0.35 then run(2, lv * 0.45, x, y - 1) end
+        -- dense: a faint overtone a row above, near the playhead
+        if dp and near > 0.25 then run(5, 1 + near * 1.5 + A[K.HI], x, y - 2) end
+        -- kickless: a soft second voice under each ribbon, wavering apart
+        if fp and K.kickless > 0.3 and k % 2 == 0 and near > 0.1 then
+          put((1 + near * 2) * K.kickless, x, y + 2 + math.floor(math.sin(col.t * 2.3 + i) * 1.5 + 0.5), 2, 1)
+        end
         if col.echo and col.echo > 0.2 then
-          run(3, (1 + col.echo * 2.5) * fade, x, y + 2)
-          if K.throw > 0.3 then run(4, (0.6 + col.echo * 2) * fade * K.throw, x, y + 3) end
+          local ef = fp and near or fade        -- fine: the echoes fade into the past too
+          run(3, (1 + col.echo * 2.5) * ef, x, y + 2)
+          if K.throw > 0.3 then run(4, (0.6 + col.echo * 2) * ef * K.throw, x, y + 3) end
         end
       end
-      for r = 1, 4 do run(r) end
+      for r = 1, 5 do run(r) end
     end
 
     -- the bass ribbon: heavy, low, with a glow under it
@@ -288,7 +313,14 @@ return function(K)
     -- the heads at the playhead: bright points where each voice is written
     for i = 1, 4 do
       if fine and K.playing then
-        K.put_sub(4 + vk[i] * 6 + K.env.kick * 2 + kk * 1.5 + kg * 4, HEAD, ys[i] + 0.5, 2, 1)
+        -- the pen: a soft nib of light round each head, the stab and the
+        -- kick driving it, the peak making it bigger
+        local hl = 4 + vk[i] * 6 + K.env.kick * 2 + kk * 1.5 + kg * 4
+        local yi = math.floor(ys[i] + 0.5)
+        local nib = ev((1.5 + K.energy * 1.5 + vk[i] * 3 + kg * 2 + K.env.kick * 3 + A[K.HI]) * (1 - 0.3 * K.kickless))
+        put(nib, HEAD - 3, yi - 1, 5, 3)
+        if K.energy > 0.7 or vk[i] > 0.3 then put(nib * 0.6, HEAD - 6, yi, 3, 1) end
+        K.put_sub(math.min(13, hl * 1.15), HEAD, ys[i] + 0.5, 2, 1)
       else
       put(4 + vk[i] * 6 + K.env.kick * 2 + kk * 1.5 + kg * 4, HEAD, math.floor(ys[i] + 0.5), 2, 1)
       end

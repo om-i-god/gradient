@@ -55,7 +55,8 @@ return function(K)
 
   -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
   -- (a short trail would make every hit a frame-to-frame jump)
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- (widened in the theme pass: 0.75..2.2, so trails 0 and 100 read apart; still never a hard cut)
+  local function TR() return K.detail ~= "classic" and math.min(2.2, math.max(0.75, K.trail ^ 0.85)) or K.trail end
 
   local sq, sqs = {}, {}                 -- each line's squeeze: ground, sky (j = 1..NMAX)
   local lv_sky, lv_gnd = {0, 0, 0, 0}, 0 -- the stab bands and the bass, eased in
@@ -69,6 +70,7 @@ return function(K)
   local acc = {bass = 0, hat = 0, arp = 0}  -- hits piling up and draining: each adds, so a hit shows whenever it lands
   local ba = 0                            -- the bass pile, eased
   local pdz, bz = 0, 0                   -- the pad and the bass hit, eased in
+  local pe, core = 0, 0                  -- fine: the playing eased in; the heart of the city, eased
   local function mark(k) hit[k] = K.NOW end
   local function fade(k, tau)
     local t = hit[k]
@@ -95,6 +97,7 @@ return function(K)
     lv_sky, lv_gnd, flare, lo, lights = {0, 0, 0, 0}, 0, 0, 0, {}
     hit, percs, flashes, pdz, bz = {}, {}, {}, 0, 0
     acc, ba = {bass = 0, hat = 0, arp = 0}, 0
+    pe, core = 0, 0
   end
 
   function M.arp(lane, note)
@@ -150,11 +153,14 @@ return function(K)
     local dk = math.exp(-DT / (0.3 * TR()))
     for k, v in pairs(acc) do acc[k] = v < 0.01 and 0 or v * dk end
     local pd, mid, amp = pdz, A[K.MID], A[K.AMP]
+    pe = fine and K.follow(pe, K.playing and 1 or 0, 0.6, DT) or 0
 
     -- the city's glow, low on the sky and cut by the skyline
     K.gradient(HY - 26, HY - 1, function(y)
       local u = (HY - y) / 26
-      return (0.75 + 0.6 * e) * (1 + 0.3 * amp) * (1 - u) ^ 1.4 + 0.12 + 0.9 * pd * (1 - u)
+      local v = (0.75 + 0.6 * e) * (1 + 0.3 * amp) * (1 - u) ^ 1.4 + 0.12 + 0.9 * pd * (1 - u)
+      if fp and v < 0.35 then return 0 end   -- fine: no stray full-width dither rows high in the sky
+      return v
     end, sky)
     -- the sky: ruled bands stopping at the skyline; each band belongs to a
     -- chord voice, lit when it is stabbed. far bands break into dashes
@@ -173,6 +179,12 @@ return function(K)
         if f < 0.45 then
           dash_above(l + hi * 2.5, y, 5, 7, off)
           if sl > 0.3 then dash_above(l + sl + hi * 2.5, y, 5, 7, off, math.floor(cx - hw), math.floor(cx + hw)) end
+        elseif dense and fp then
+          dash_above(l, y, 11, 13, off * 0.3)      -- dense: the far bands break up, the rooftops take the light
+          if sl > 0.3 then
+            put(l + sl * 0.6, cx - hw, y, 2 * hw, 1)
+            put(l + sl, cx - hw * 0.5, y, hw, 1)
+          end
         else
           K.row_above(l, y, sky)
           if sl > 0.3 then
@@ -205,6 +217,17 @@ return function(K)
       end
     end
     put(1 + 7 * (0.5 + 0.5 * math.sin(T * 2.2)) ^ 4, MAST, HY - 25, 1, 1)
+    -- fine: the city's glow catches the roofs of the taller blocks, so the
+    -- skyline reads as buildings against the bands (dense: their corners too)
+    if fp then
+      for _, b in ipairs(BLK) do
+        if b.h >= 7 then
+          local rl = pe * (1.5 + 1.2 * e + 1.5 * pd) + E(2 * hh)
+          put(rl, b.x, HY - b.h, b.w, 1)
+          if dense then put(rl * 0.7, b.x, HY - b.h + 1, 1, math.min(5, b.h - 2)) end
+        end
+      end
+    end
     -- dense: the tall towers carry their own slow warning lights
     if dense and K.playing then
       for i, b in ipairs(BLK) do
@@ -255,6 +278,27 @@ return function(K)
     end
     -- the horizon: flares with the kick (eased, never a slab)
     put(math.min(12, 2 + flare * 7 + K.bar_pulse * 1.5 + 8 * acc.arp), 0, HY, 128, 1)
+    -- fine: the city's heart, where every line meets: a glow on the horizon that
+    -- the kick swells and every pump squeezes thin with the lines, the energy
+    -- lifting it; in kickless stretches it sinks into a long broken shaft on the water
+    if fp then
+      core = K.follow(core, (0.35 + 0.65 * e) * (0.6 + 0.4 * amp) + 0.6 * flare, 0.08, DT)
+      local sqz = sq[NMAX]
+      local cw = (6 + 10 * core) * sqz
+      local cl = pe * (2 + 6 * core)
+      put(cl * 0.45, 64 - cw, HY - 1, 2 * cw, 1)
+      put(cl * 0.7, 64 - cw * 0.55, HY - 2, 1.1 * cw, 1)
+      put(cl, 64 - cw * 0.25, HY - 3, math.max(1, 0.5 * cw), 1)
+      put(E(cl * 0.5 + 6 * flare * pe), 63, HY - 4 - math.floor(3 * core), 2, 1)
+      if w > 0.05 then
+        for k = 0, 9 do
+          local y = HY + 2 + k * 2.6
+          local hw = (1.5 + k * 0.6 + 2 * core) * (0.7 + 0.3 * math.sin(T * 1.9 + k * 1.3))
+          local wob = math.sin(T * 1.3 + k * 0.9) * 2 * w
+          put(w * pe * (3.5 + 5 * core) * (1 - k * 0.06), 64 - hw + wob, y, 2 * hw, 1)
+        end
+      end
+    end
 
     -- the ground: the field's rays (sinking into water when kickless)
     if w < 0.95 then

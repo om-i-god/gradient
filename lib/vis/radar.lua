@@ -59,6 +59,7 @@ return function(K)
   local pump_t, kick_t, bass_t, arp_t = -99, -99, -99, -99
   local hats_n, tick_n, bass_n = 0, 0, 0
   local pdz = 0
+  local live = 0                         -- fine: eases to 1 while the music runs (the wake and the storm wait for it)
   -- fine: each part's own range-gate mark (an arc and end ticks at its bearing)
   local marks, mi = {}, 0
   for i = 1, 16 do marks[i] = {t = -99, a = 0, r = 0, lv = 0, w = 0.2} end
@@ -67,8 +68,9 @@ return function(K)
     local m = marks[mi]
     m.t, m.a, m.r, m.lv, m.w = K.NOW, a, r, lv, w
   end
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense at full strength (0.45..2, the kit holds it back
+  -- near the lit bound), so trails 0 is a crisp scope and 100 a long phosphor
+  local function TR() return K.detail ~= "classic" and math.min(2, math.max(0.45, K.trail)) or K.trail end
 
   local function blip(a, r, lv, sz, spoke)
     bi = bi % #blips + 1
@@ -86,6 +88,7 @@ return function(K)
     for _, c in ipairs(cells) do c.t = -99 end
     bass_n = 0
     ci, pump_t, kick_t, bass_t, arp_t, hats_n, tick_n, pdz = 0, -99, -99, -99, -99, 0, 0, 0
+    live = 0
     for _, m in ipairs(marks) do m.t = -99 end
     mi = 0
   end
@@ -149,9 +152,11 @@ return function(K)
     -- an event's level: scaled by the reactivity, capped (fine only)
     local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
+    local fp = fine and K.playing
+    live = K.follow(live, fp and 1 or 0, 0.6, DT)
 
-    -- the arm: once a bar, a little quicker as the set builds
-    sa = sa + K.DTS * TAU / (K.beat_sec * (K.beats or 4)) * (0.9 + 0.2 * e)
+    -- the arm: once a bar, a little quicker as the set builds (fine: a kickless stretch slows it, the scope drifts)
+    sa = sa + K.DTS * TAU / (K.beat_sec * (K.beats or 4)) * (0.9 + 0.2 * e) * (fine and 1 - 0.3 * kl or 1)
     if sa > 1e4 then sa = sa - 1e4 * 0 - math.floor(sa / TAU) * TAU end
 
     local pmp = fade(pump_t, 0.3)
@@ -160,12 +165,37 @@ return function(K)
     if at > 0.03 then draw_circle(3.5 * at, CIRC[2]) end
     local kk = fade(kick_t, 0.3)
 
+    -- fine: the scope's glass, a faint scanned face (every third row) so the disc has weight; the lows
+    -- warm the middle of it
+    if fine then
+      for y = CY - 9, CY + 9, 2 do
+        local dy = y - CY
+        local h2 = math.sqrt(100 - dy * dy)
+        put(1 + 1.6 * lo * live + 1.2 * kk, CX - h2, y, 2 * h2, 1)
+      end
+      -- dense: the whole glass is scanned, and dotted bearing spokes every 30 degrees make a plotting grid
+      if dense then
+        for y = CY - R + 2, CY + R - 2, 3 do
+          local dy = y - CY
+          if math.abs(dy) > 9 then
+            local h = math.sqrt(R * R - dy * dy) - 1.5
+            put(1, CX - h, y, 2 * h, 1)
+          end
+        end
+        for k = 0, 11 do
+          if k % 3 ~= 0 then
+            local a = k / 12 * TAU
+            for r = 11, 23, 4 do put(1.4 + 0.8 * mid * live, CX + math.cos(a) * r, CY + math.sin(a) * r, 1, 1) end
+          end
+        end
+      end
+    end
     -- the scope: rim, range rings, bearing cross, rim ticks
     draw_circle(fine and (1.5 + 1.6 * amp) or (1.5 + 0.5 * amp), RIM)
     for i = 1, 4 do
-      draw_circle(0.8 + mid * (fine and 1.8 or 1.2) + (fine and 6.5 or 4.5) * pmp * (i == 2 and 1 or 0.7) + (i == 1 and lo * 2 or 0), CIRC[i])
+      draw_circle((fine and 0.7 or 0.8) + mid * (fine and 1.1 or 1.2) + (fine and 6.5 or 4.5) * pmp * (i == 2 and 1 or (fine and 0.35 or 0.7)) + (i == 1 and lo * 2 or 0), CIRC[i])
     end
-    local cl = 1 + 0.8 * K.duck + 0.5 * mid
+    local cl = fine and 0.7 + 0.8 * K.duck + 0.4 * mid or 1 + 0.8 * K.duck + 0.5 * mid
     line(cl, CX - R, CY, CX + R, CY); line(cl, CX, CY - R, CX, CY + R)
     for k = 0, 23 do
       local a = k / 24 * TAU + T * 0.12
@@ -269,15 +299,51 @@ return function(K)
     -- the hub: lit by the lows and the kick
     put(2 + 4 * kk + 2 * lo + 2 * K.duck, CX - 2, CY - 2, 5, 5)
 
+    -- fine: a kickless stretch brings weather onto the scope: three slow storm cells of speckle, boiling
+    -- in place, drifting round, flaring each time the arm sweeps them (the pad thickens them)
+    if fine and kl > 0.03 and live > 0.02 then
+      for c = 1, 3 do
+        local ca = c * 2.1 + T * 0.035
+        local cr = 13 + 4 * c
+        local since = (sa - ca) % TAU
+        local cl = kl * live * (1.4 + 6 * math.exp(-since / 1.3)) * (0.7 + 0.6 * pdz)
+        for k = 1, 22 do
+          local ra = K.hash(k + c * 17, 31)
+          local rr = K.hash(k + c * 17, 32)
+          local da = (ra - 0.5) * (0.7 + 0.1 * math.sin(T * 0.3 + k))
+          local dr = (rr - 0.5) * 9 + math.sin(T * 0.4 + k * 1.3) * 0.8
+          put(cl * (0.45 + 0.55 * K.hash(k, 33 + c)), CX + math.cos(ca + da) * (cr + dr), CY + math.sin(ca + da) * (cr + dr), 2, 2)
+        end
+      end
+    end
+    -- fine: the phosphor the arm paints, a filled wedge behind it that fades round the scope. it grows
+    -- and brightens with the energy, the trails stretch it, a kickless stretch draws it long and soft
+    if fine and live > 0.02 then
+      local span = math.min(1.5, (0.4 + 0.6 * e + 0.45 * kl) * math.min(1.6, TR()))
+      local top = (1.6 + 2.6 * amp + 2.2 * kk) * (1 - 0.3 * kl) * live
+      for r = 5, R - 1, 2.5 do
+        local n = math.max(1, math.floor(span * r / 2.2))
+        for j = 0, n - 1 do
+          local u = (j + 0.5) / n
+          local a = sa - u * span
+          put(top * (1 - u) ^ 1.5, math.floor(CX + math.cos(a) * r - 0.5), math.floor(CY + math.sin(a) * r - 0.5), 2, 2)
+        end
+      end
+    end
+
     -- the wake and the arm
     local lenw = 0.35 + 0.35 * e
     if fine then
       -- a longer wake in more steps; the lit head of the arm glides on the sub-pixel
       for k = 0, 6 do
         local a = sa - k / 6 * lenw
-        local l = (1.8 + 3.6 * amp) * (1 - k / 7) ^ 2 + (k == 0 and 1.5 + amp or 0)
+        local l = (1.8 + 3.6 * amp) * (1 - k / 7) ^ 2 + (k == 0 and 1.5 + amp + live * (1 + 3.5 * amp + 2.5 * kk) or 0)
         local ca, sn = math.cos(a), math.sin(a)
-        if k <= 1 then K.line_sub(l, CX + ca * 3, CY + sn * 3, CX + ca * R, CY + sn * R)
+        if k == 0 and live > 0.02 then
+          -- the head itself is drawn whole, the brightest line on the scope; its glow glides beside it
+          line(math.min(l, 12), CX + ca * 2, CY + sn * 2, CX + ca * R, CY + sn * R)
+          K.line_sub(l * 0.45, CX + ca * 3, CY + sn * 3, CX + ca * (R - 1), CY + sn * (R - 1))
+        elseif k <= 1 then K.line_sub(l, CX + ca * 3, CY + sn * 3, CX + ca * R, CY + sn * R)
         else line(l, CX + ca * 3, CY + sn * 3, CX + ca * R, CY + sn * R) end
       end
     else
@@ -310,11 +376,18 @@ return function(K)
     for _, b in ipairs(blips) do
       if b.on then
         local age = NOW - b.t
-        if age > 9 then b.on = false
+        if age > (fine and 9 * TR() or 9) then b.on = false
         else
           local since = (sa - b.a) % TAU
           local ph = 3.2 * math.exp(-since / 2.4) * (1 - age / 9)
           local fl = b.lv * math.exp(-age / 0.3)
+          if fine then
+            -- the arm re-lights each echo hard as it passes (the freshest pass brightest), and the hit flares
+            -- whiter; the trails stretch how long the echoes last
+            local life = 9 * TR()
+            ph = (6 * math.exp(-since / 1.1) + 1.2 * math.exp(-since / 4)) * math.max(0, 1 - age / life)
+            fl = E(b.lv * 1.5) * math.exp(-age / (0.3 * TR()))
+          end
           local l = math.max(fl, ph) + 0.4 * math.min(fl, ph)
           if l > 0.5 then
             local x, y = CX + math.cos(b.a) * b.r, CY + math.sin(b.a) * b.r

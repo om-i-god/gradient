@@ -47,8 +47,9 @@ return function(K)
   local pad_notes = {}
   local pdz = 0
 
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense at full strength (0.45..2, the kit holds it back
+  -- near the lit bound), so trails 0 is crisp and 100 leaves the lights smeared on the water
+  local function TR() return K.detail ~= "classic" and math.min(2, math.max(0.45, K.trail)) or K.trail end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -161,11 +162,12 @@ return function(K)
     if fine then kk = kk * math.min(1, (NOW - kick_t) / 0.07) end
     local bf = fade(bridge_t, 0.35)
     local sway = 0.5 + 3.5 * lo + 1.5 * K.env.bass
+    local kl = fine and K.kickless or 0             -- fine: a kickless stretch brings the fog in
 
     -- the dock's glow on the horizon: a few dashed rows, lifted by the pump
     for y = 28, 33, 2 do
       K.dashes(0.8 + 3.5 * pf * (y - 26) / 7, y, 3, 8, y * 5 + T * 2, 0, 128)
-      if pf > 0.05 then K.dashes(3.2 * pf, y + 1, 5, 7, y * 3 - T * 3, 0, 128) end
+      if pf > 0.05 then K.dashes((fine and 4.2 or 3.2) * pf, y + 1, fine and 2 or 5, 7, y * 3 - T * 3, 0, 128) end
     end
     if pf > 0.05 then put(E(3 * pf), 28, 38, 72, 1); put(E(2 * pf), 0, 37, 128, 1) end
 
@@ -189,8 +191,20 @@ return function(K)
       line(1.2, tipx - dir * 8, 11, tipx - dir * 8, 24)
     end
 
+    -- fine: the ship has weight: a dark steel hull, the boxes filled in two shades, the bridge block
+    if fine then
+      for y = 32, 37 do
+        local x0, x1 = 28 + (y - 31) * 6 / 7, 100 - (y - 31) * 4 / 7
+        put(1 + 0.5 * mid, x0 + 1, y, x1 - x0 - 1, 1)
+      end
+      for x = 30, 68, 8 do
+        put(1 + K.hash(x, 7) * 1.4, x + 1, 25, 5, 5)
+        if x < 54 then put(1 + K.hash(x, 8) * 1.4, x + 2, 19, 4, 5) end
+      end
+      put(1, 77, 23, 18, 8)
+    end
     -- the ship: hull, boxes, bridge, funnel
-    local hl = 2 + (fine and 5 or 3.5) * kk
+    local hl = fine and E(2.2 + 8.5 * kk) or 2 + 3.5 * kk
     line(hl, 28, 31, 100, 31)
     line(hl * 0.8, 28, 31, 34, 38); line(hl * 0.8, 100, 31, 96, 38)
     line(hl, 34, 38, 96, 38)
@@ -203,11 +217,12 @@ return function(K)
     put(1.6, 76, 22, 20, 1); put(1.6, 76, 22, 1, 9); put(1.6, 95, 22, 1, 9)
     put(1.6, 84, 15, 1, 7); put(1.6, 88, 15, 1, 7)
     line(1.8, 83, 15, 89, 15)
-    put(0.9 + (fine and 6.5 or 5) * kk, 28, 38, 72, 1)
+    put(fine and E(0.9 + 9.5 * kk) or 0.9 + 5 * kk, 28, 38, 72, 1)
     if dense then K.dashes(0.9, 33, 2, 5, 0, 30, 98) end      -- the hull's plating
     if kk > 0.03 then
       put(2.5 * kk, 30, 32, 66, 6)
-      put(3 * kk, 24, 39, 80, 1); put(2 * kk, 20, 40, 88, 1)
+      put(3 * kk, 24, 39, 80, 1)
+      if not fine then put(2 * kk, 20, 40, 88, 1) end
     end
 
     -- lights and their reflections
@@ -218,7 +233,11 @@ return function(K)
       if s.k == 1 then
         local b = fade(blink[s.g], 0.28)
         l = 2.5 + (fine and 6.5 or 4.5) * b; len = 3 + math.floor(b * 3)
+        if fine then l = E(2.5 + 9.5 * b) end
         if fine and b > 0.05 then put(E(3.5 * b), s.x - 2, s.y - 1, 5, 3) end
+        if kl > 0.05 then                     -- a soft cross of halo in the fog
+          put(kl * (1.2 + 2.4 * b), s.x - 4, s.y, 9, 2); put(kl * (1.2 + 2.4 * b), s.x - 1, s.y - 3, 3, 8)
+        end
       elseif s.k == 2 then
         local p = port[i]
         local pv = p and fade(p, 0.4) or 0
@@ -275,7 +294,14 @@ return function(K)
       if y < 63 then
         local wlv = 1 + (k % 2) * 0.5 + lo * (fine and 2.8 or 2) + hi * (fine and 3.8 or 3)
         local woff = T * (4 + k) * (k % 2 == 0 and 1 or -1) + k * 17
-        K.dashes(wlv, math.floor(y), 5 + k, 14 + 2 * k, woff, 0, 128)
+        if fine then
+          -- fine: the water stays dark, shorter wave dashes a shade or two up, so the lights on it carry
+          -- (the fog swallows the far rows)
+          wlv = (0.9 + (k % 2) * 0.4 + lo * 1.1 + hi * 1.5) * (1 - 0.75 * kl * (1 - k / 10))
+          K.dashes(wlv, math.floor(y), 3 + math.floor(k * 0.7), 14 + 2 * k, woff, 0, 128)
+        else
+          K.dashes(wlv, math.floor(y), 5 + k, 14 + 2 * k, woff, 0, 128)
+        end
       end
     end
 
@@ -298,7 +324,8 @@ return function(K)
         local u = a / 0.9
         local w = 6 + u * 50
         local y = 44 + u * 12
-        local l = (fine and 7.5 or 6) * (1 - u)
+        local l = (fine and 10.5 or 6) * (1 - u)
+        if fine then l = E(l) end
         put(l, r.x - w / 2, y, w, 1)
         put(l * 0.5, r.x - w / 2 - 3, y + 1, w + 6, 1)
         if fine then put(E(l * 0.5), r.x - w / 2 + 3, y - 1, w - 6, 1) end
@@ -320,11 +347,28 @@ return function(K)
       local b = buoys[i]
       local f = fade(b.t, 0.5)
       local by = 46 + b.lane * 3 + math.floor(b.n * 3)
-      if f > 0 then put(1.2 + 6 * f, b.x, by, 2, 2) end
+      if f > 0 then put(fine and E(1.2 + 9.5 * f) or 1.2 + 6 * f, b.x, by, 2, 2) end
       if fine and f > 0.05 then put(E(5 * f), b.x - 1, by - 1, 4, 4); put(E(3 * f), b.x - 5, by - 1, 12, 3) end
       if f > 0.05 then put(2.5 * f, b.x - 3, by + 2, 8, 1); line(4 * f, b.x, by - 10, b.x, by); put(1.8 * f, b.x - 12, by + 4, 24, 1); refl(4 * f, b.x, by - 6, sway, 1) end
     end
 
+    -- dense: drizzle slants down through the lights, the crane legs are braced all the way up, the ship's
+    -- mooring lines reach the quay
+    if dense then
+      for c = 1, 2 do
+        local cx = c == 1 and 18 or 112
+        line(1.4 + 0.8 * mid, cx - 4, 22, cx + 4, 12); line(1.4 + 0.8 * mid, cx + 4, 22, cx - 4, 12)
+      end
+      line(1.3, 30, 32, 20, 34); line(1.3, 98, 32, 108, 34)
+      if fp then
+        for i = 1, 16 do
+          local sp = 9 + 5 * K.hash(i, 41)
+          local y = (K.hash(i, 42) * 64 + T * sp) % 64
+          local x = (K.hash(i, 43) * 140 - y * 0.35) % 128
+          put(1.1 + 1.2 * K.hash(i, 44) + 0.8 * hi, x, y, 1, 2)
+        end
+      end
+    end
     -- dense: a far ferry's lights crawl along the horizon, and the channel buoys wink
     if dense and fp then
       local fx = (T * 1.5) % 170 - 20
@@ -333,6 +377,12 @@ return function(K)
         local tw = math.sin(T * (0.7 + 0.13 * i) + i * 2.1)
         if tw > 0 then put(1.6 * tw, 6 + i * 20 % 117, 56 + i % 3 * 2, 1, 1) end
       end
+    end
+
+    -- fine: a kickless stretch rolls a fog bank over the berth, thickening with the pad; the lights
+    -- bloom through it
+    if kl > 0.05 and fp then
+      K.haze(0, 14, 128, 28, kl * (0.22 + 0.25 * pdz), 1.3 + 0.8 * pdz, T * 3)
     end
 
     -- the highs glint on the water

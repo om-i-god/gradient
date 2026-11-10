@@ -22,8 +22,8 @@ return function(K)
   local STR = {14, 30, 46, 62, 78, 94}   -- insulator string x on the gantry
   local FY0, FY1 = 53, 61                -- fence top / bottom rail
 
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting (fine: nearly at full strength, about 0.5x at 0 to 1.9x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(1.9, math.max(0.48, K.trail ^ 0.8)) or K.trail end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -185,7 +185,23 @@ return function(K)
       local v = 0.3 + (y / GY) * (0.6 + (fine and 1.5 or 1.2) * amp)
       if v > 0.9 then K.dashes(math.min(fine and 2.4 or 2, v), y, 3, 10, y * 3 + T * 5, 0, 128) end
     end
-    K.haze(0, 26, 128, GY, 0.12 + pdz * 0.4, 1.2 + 1.2 * pdz, T * 3)
+    K.haze(0, 26, 128, fine and TY0 + 2 or GY, 0.12 + pdz * 0.4, 1.2 + 1.2 * pdz, T * 3)
+    if fine then
+      -- fine, far: the line leaving the yard over two distant pylons (dim, so the yard stands in front of them)
+      for p = 1, 2 do
+        local px, top, hw = p == 1 and 118 or 84, p == 1 and 4 or 9, p == 1 and 5 or 3
+        line(1.2, px - hw, GANT - 1, px, top); line(1.2, px + hw, GANT - 1, px, top)
+        line(1, px - hw - 1, top + 3, px + hw + 1, top + 3)
+        if p == 1 then line(1, px - hw + 1, top + 8, px + hw - 1, top + 8) end
+      end
+      -- the wires out: gantry top to the near pylon to the far one, sagging, swayed by the pump
+      local sw = 1.5 * pf * math.sin(T * 6)
+      for k = 0, 1 do
+        local y0 = GANT - 1 - k * 2
+        line(1.3, 104, y0, 111, y0 + 1 + sw); line(1.3, 111, y0 + 1 + sw, 118 - 6 + k * 12, 7 + k)
+        if k == 0 then line(1, 84, 12, 98, 10 + sw * 0.5); line(1, 98, 10 + sw * 0.5, 112, 7) end
+      end
+    end
     for i = 1, #pad_notes do
       local x = K.px(pad_notes[i])
       put(3 + (fine and 3.6 or 3) * pdz, x - 1, 40, 3, 1)
@@ -197,7 +213,11 @@ return function(K)
 
     -- the gantry bar, wires swaying with the pump, strings hanging off it
     local sag = 1 + 5 * pf
-    line(math.min(11, 2 + mid * 1.5 + 4 * pf + 4 * acc.arp), 2, GANT, 108, GANT)
+    if fine then      -- fine: the pump's share kept under the arcs and the core; the arps still lift it
+      line(math.min(11, math.min(6, 2 + mid * 1.5 + 4 * pf) + 4.5 * acc.arp), 2, GANT, 108, GANT)
+    else
+      line(math.min(11, 2 + mid * 1.5 + 4 * pf + 4 * acc.arp), 2, GANT, 108, GANT)
+    end
     if pf > 0.05 then line(E(3 * pf), 2, GANT - 2, 108, GANT - 2); line(E(2.5 * pf), 2, GANT + 1, 108, GANT + 1) end
     line(1.4, 4, GANT, 4, GY); line(1.4, 106, GANT, 106, GY)
     for i = 1, #STR do
@@ -211,9 +231,9 @@ return function(K)
       line(1.5, x, GANT, x, GANT + 1)
       if f > 0 then
         put(E(4 * f), x - 3, GANT + 3 + s.n * 2, 7, 1)
-        put(E(2.5 * f), x - 6, GANT + 4 + s.n * 2, 13, 1)
+        if fine then put(E(2.5 * f), x - 3, GANT + 4 + s.n * 2, 7, 1) else put(E(2.5 * f), x - 6, GANT + 4 + s.n * 2, 13, 1) end
         put(E(2.5 * f), x, GANT + 1, 1, 11)
-        if fine then put(E(3 * f), x - 2, GANT + 1 + s.n * 2, 5, 1) end
+        if fine then put(E(5 * f), x - 2, GANT + 1 + s.n * 2, 5, 1); put(E(9 * f), x - 1, GANT + 1 + s.n * 2, 3, 1); put(E(7 * f * f), x - 4, GANT - 1, 9, 1) end      -- fine: the reached disc burns, the clamp glints
       end
     end
     -- conductors from the string feet down to the bushing tops (sagging)
@@ -235,15 +255,31 @@ return function(K)
       line(fine and tk + 0.6 or tk, x0, TY0, x0, GY)             -- fine: lit from the left
       line(fine and tk - 0.5 or tk, x0 + w, TY0, x0 + w, GY)
       line(1.5, x0 - 2, TY0 + 4, x0 + w + 2, TY0 + 4)
-      for fx = x0 + 3, x0 + w - 2, 5 do line(1 + (fine and 4 or 3) * acc.tick + (fine and (fx - x0) % 10 == 3 and 0.5 or 0), fx, TY0 + 5, fx, GY - 1) end
+      for fx = x0 + 3, x0 + w - 2, 5 do
+        if not (fine and math.abs(fx - (x0 + w // 2)) <= 2) then      -- fine: the core's slot stays clear
+          line(1 + (fine and 4 or 3) * acc.tick + (fine and (fx - x0) % 10 == 3 and 0.5 or 0), fx, TY0 + 5, fx, GY - 1)
+        end
+      end
       if bt > 0.04 then
         for y = TY0 + 6, GY - 2, 3 do put(6 * bt, x0 + 1, y, w - 1, 1) end
         put(4 * bt, x0 - 3, GY - 1, w + 7, 1); put(3 * bt, x0 - 5, GY, w + 11, 1)
       end
+      if fine then
+        -- fine: the lid catches the light, and a slot down the middle shows the core's glow
+        -- (the lows and the bass; the middle tank burns hottest: the yard's heart)
+        put(1.4 + 0.8 * kk, x0 + 1, TY0 + 1, w - 1, 2)
+        local cx = x0 + w // 2 - 1
+        local heat = math.min(12.5, (t == 2 and 1 or 0.6) * (1.2 + 2.5 * lo + (K.playing and 4 * K.energy * K.energy or 0)) + E(7 * bt) * (t == 2 and 1 or 0.7))
+        put(heat, cx, TY0 + 6, 3, GY - TY0 - 7)
+      end
       for k = 1, 3 do
         local bx, by = bush(t, k)
-        line(2.2, bx, by, bx, TY0)
-        for y = by + 1, TY0 - 1, 2 do put(3, bx - 1, y, 3, 1) end
+        line(fine and 1.8 or 2.2, bx, by, bx, TY0)
+        for y = by + 1, TY0 - 1, 2 do
+          if fine then      -- fine: the sheds taper, wide and narrow in turn, a step dimmer
+            if (y - by) % 4 == 1 then put(2, bx - 1, y, 3, 1) else put(2, bx, y, 1, 1) end
+          else put(3, bx - 1, y, 3, 1) end
+        end
         put(3 + (fine and 3.2 or 2) * kk, bx - 1, by - 1, 3, 1)
       end
       -- the hum: heat shimmer over the tank
@@ -289,7 +325,7 @@ return function(K)
     if hf > 0 then
       put(E(7 * hf * (fine and 1.2 or 1)), hat_x - 1, FY0 - 3, 3, 1)
       put(E(4 * hf * (fine and 1.2 or 1)), hat_x - 6, FY0 - 2, 13, 1)
-      put(E(2.5 * hf), hat_x - 10, FY0 - 1, 21, 1)
+      if fine then put(E(2.5 * hf), hat_x - 5, FY0 - 1, 11, 1) else put(E(2.5 * hf), hat_x - 10, FY0 - 1, 21, 1) end
       if fine then put(E(3 * hf), hat_x - 1, FY0 - 6, 3, 3) end
     end
     K.grain(function(u, v) return u * 127, FY0 + v * 8 end, hi * 90, 7)
@@ -297,9 +333,19 @@ return function(K)
       K.dashes(hi * 4, FY0 + 2, 1, 9, T * 9, 0, 128); K.dashes(hi * 3, FY1 + 1, 2, 11, T * 5, 0, 128)
     end
     if pf > 0.05 then
-      for y = FY0 + 1, FY1, 4 do put(E(4.5 * pf), 0, y, 128, 1) end
+      for y = FY0 + 1, FY1, 4 do
+        if fine then K.dashes(E(4.5 * pf), y, 4, 8, y * 3, 0, 128) else put(E(4.5 * pf), 0, y, 128, 1) end
+      end
     end
 
+    -- fine, kickless: a ground fog creeps through the yard and the fence
+    if fp and K.kickless > 0.05 then
+      K.haze(0, 40, 128, 62, 0.4 * K.kickless, 1 + 0.9 * K.kickless + 0.8 * pdz, T * 2)
+    end
+    -- dense: the chain-link's other diagonal, where the mesh is patched
+    if dense then
+      for x = 0, 127, 20 do line(0.7, x + 8, FY0 + 1, x, FY1 - 1) end
+    end
     -- dense: moths circle the floodlights, and the control room's beacon blinks
     if dense and fp then
       for x = 14, 127, 24 do
@@ -321,9 +367,16 @@ return function(K)
         put(3 * f, s.x - 6, s.y, 13, 1)
         put(3 * f, s.x - 2, s.y + 3, 5, 1)
         put(2.5 * f, s.x - 1, GY - 2, 3, 2)
-        put(2 * f, s.x - 8, s.y - 1, 17, 1); put(2 * f, s.x - 8, s.y + 1, 17, 1)
-        put(3 * f, s.x, TY0 + 5, 1, GY - TY0 - 6)
-        put(2 * f, s.x - 12, s.y - 3, 25, 1)
+        if fine then
+          -- fine: a tighter, hotter spark (the glow kept close to the point)
+          put(E(11 * f), s.x, s.y, 1, 1)
+          put(2.5 * f, s.x - 4, s.y - 1, 9, 1); put(2.5 * f, s.x - 4, s.y + 1, 9, 1)
+          put(3 * f, s.x, TY0 + 5, 1, GY - TY0 - 6)
+        else
+          put(2 * f, s.x - 8, s.y - 1, 17, 1); put(2 * f, s.x - 8, s.y + 1, 17, 1)
+          put(3 * f, s.x, TY0 + 5, 1, GY - TY0 - 6)
+          put(2 * f, s.x - 12, s.y - 3, 25, 1)
+        end
         if s.k > 2 then put(3 * f, s.x - 3, s.y - 3, 1, 1); put(3 * f, s.x + 3, s.y + 3, 1, 1) end
       end
     end
@@ -333,18 +386,26 @@ return function(K)
       local a = arcs[i]
       local f = fade(a.t, 0.16)
       if f > 0 then
-        bolt(2.5 + (fine and 3.2 or 2.5) * f, a, f)
         local mx, my = (a.x0 + a.x1) / 2, math.min(a.y0, a.y1)
-        put(3 * f, mx - 12, my - 2, 25, 1)
-        put(2.4 * f, mx - 18, my, 37, 1)
-        put(2 * f, mx - 10, my + 3, 21, 1)
-        put(2 * f, a.x0 - 4, a.y0 + 2, 9, 1); put(2 * f, a.x1 - 4, a.y1 + 2, 9, 1)
+        if fine then
+          -- fine: the arc is the brightest thing in the yard, its glow kept round it, the ends white-hot
+          bolt(E(3.5 + 8.5 * f), a, f)
+          put(2.6 * f, mx - 7, my - 4, 15, 1)
+          put(2 * f, mx - 9, my - 1, 19, 1)
+          put(E(5 * f), a.x0 - 1, a.y0 - 2, 3, 3); put(E(5 * f), a.x1 - 1, a.y1 - 2, 3, 3)
+        else
+          bolt(2.5 + 2.5 * f, a, f)
+          put(3 * f, mx - 12, my - 2, 25, 1)
+          put(2.4 * f, mx - 18, my, 37, 1)
+          put(2 * f, mx - 10, my + 3, 21, 1)
+          put(2 * f, a.x0 - 4, a.y0 + 2, 9, 1); put(2 * f, a.x1 - 4, a.y1 + 2, 9, 1)
+        end
       end
     end
     -- the kick's thin pulse along the ground
     if kk > 0.04 then
-      put(E((fine and 3.6 or 3) * kk), 0, GY + 1, 128, 1)
-      put(E(2 * kk), 20, GY - 1, 88, 1)
+      if fine then K.dashes(E(3.6 * kk), GY + 1, 6, 8, 0, 0, 128) else put(E(3 * kk), 0, GY + 1, 128, 1) end      -- fine: the gravel catches it in pieces
+      if not fine then put(E(2 * kk), 20, GY - 1, 88, 1) end      -- fine: the tanks' own outlines answer instead
     end
   end
 

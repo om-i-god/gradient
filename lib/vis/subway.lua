@@ -41,8 +41,8 @@ return function(K)
     return n
   end
 
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting (fine: nearly at full strength, about 0.5x at 0 to 1.9x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(1.9, math.max(0.48, K.trail ^ 0.8)) or K.trail end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -121,13 +121,14 @@ return function(K)
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
     local kl = K.kickless
     local fine, dense, RT = K.detail ~= "classic", K.detail == "dense", K.react
-    if RT > 1 then RT = 1 + (RT - 1) * 0.3 end      -- eased above 1: the frame change is tight here
+    if RT > 1 then RT = 1 + (RT - 1) * (fine and 0.12 or 0.3) end      -- eased above 1: the frame change is tight here
     -- an event's level: scaled by the reactivity, never a white point (fine only)
     local function E(l) return fine and math.min(l * RT, 13) or l end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
 
     -- the speed: energy and the pulse; kickless stretches crawl
     local to = (9 + 22 * e) * (1 - 0.7 * kl) * (1 + 0.5 * K.duck)
+    if fine then to = (9 + 17 * e) * (1 - 0.7 * kl) * (1 + 0.3 * K.duck) end      -- fine: a steadier ride, so the lit windows can burn brighter
     vel = K.follow(vel, to, 0.4, DT)
     local step = vel * K.DTS
     dist = dist + step
@@ -135,7 +136,15 @@ return function(K)
     pdist = (pdist + step * 1.5) % 4096
 
     local kk, pf, bt = fade(kick_t, 0.3), fade(pump_t, 0.3), fade(bass_t, 0.3)
+    if fine then
+      -- fine: the full-width thumps swell in over a few frames instead of landing in one
+      local function rise(t) return math.min(1, 0.3 + (NOW - t) / 0.12) end
+      kk, pf, bt = kk * rise(kick_t), pf * rise(pump_t), bt * rise(bass_t)
+    end
 
+    local fp = fine and K.playing
+    -- fine: the tunnel wall behind, far and dim (two courses of blocks sliding by)
+    if fine and not dense then K.dashes(1, 2, 5, 12, -pdist * 0.7, 0, 128) end
     -- the tunnel: a cornice, pillars and lamps going by faster than the train
     put(1, 0, 11, 128, 1)
     for c = 0, 2 do
@@ -149,11 +158,15 @@ return function(K)
       end
     end
     local lamp = 1.5 + (fine and 3.6 or 2.5) * amp + 3 * pf
+    if fine then lamp = lamp + 2.5 * e end
     for c = 0, 3 do
       local x = (c * 56 - pdist * 1.25) % 224 - 24
       if fine then
         K.put_sub(lamp, x, 4, 8, 1)
         if lamp > 2.2 then K.put_sub(lamp * 0.4, x + 1, 5, 6, 1) end
+        -- at speed each lamp smears into a streak behind it (longer with the trails)
+        local sk = math.floor(math.max(0, vel - 15) * 0.9 * TR())
+        if sk >= 2 then K.put_sub(lamp * 0.3, x + 8, 4, math.min(sk, 24), 1) end
       else
         put(lamp, x, 4, 8, 1)
         if lamp > 2.2 then put(lamp * 0.4, x + 1, 5, 6, 1) end
@@ -161,7 +174,10 @@ return function(K)
     end
     if pf > 0.03 then put(3.5 * pf, 0, 10, 128, 1) end
     -- dense: the cable runs along the tunnel wall
-    if dense then put(0.8, 0, 7, 128, 1); put(0.6, 0, 9, 128, 1) end
+    if dense then
+      put(0.8, 0, 7, 128, 1)
+      if fine then K.dashes(0.6, 9, 3, 12, -pdist, 0, 128) else put(0.6, 0, 9, 128, 1) end      -- fine: the second cable on its cleats
+    end
     -- the pad glows in the roof, its notes as soft lights
     if pdz > 0.03 then
       put(1.5 * pdz, 0, 0, 128, 2)
@@ -177,9 +193,18 @@ return function(K)
     put(bl, 0, 47, 128, 1)
     put(1 + E(3 * kk), 0, 36, 128, 1)
     if kk > 0.03 then put(E(2 * kk), 0, 48, 128, 1); put(E(2 * kk), 0, 12, 128, 1) end
+    -- fine: the livery band low on the body gives the carriage its weight; the lows warm it
+    if fine then put(1.6 + 1.6 * lo, 0, 40, 128, 1) end
 
     -- the slots, window by window
     local base = 1.8 + 1.0 * mid + 0.4 * amp
+    -- fine: kickless stretches dim the cabin to a low breathing glow
+    local strip = base
+    if fine then
+      base = (1.7 + 1.4 * mid + 0.7 * amp) * (1 - 0.35 * kl * (0.6 + 0.4 * K.duck))
+      -- the ceiling strips: the energy's own light, dim at rest and burning at the peak
+      strip = math.min(10, base * 1.4 + 5.5 * e * e * (0.7 + 0.3 * amp))
+    end
     for j = -1, 8 do
       local sx = j * PITCH - math.floor(dist)
       local n = j + 6 * cnt
@@ -197,8 +222,25 @@ return function(K)
         local dark = K.hash(n, 11) < 0.08
         local rider = K.hash(n, 12) < 0.4
         if not dark then
-          glass(base, sx + 2, rider)
-          if fine then put(base * 0.4, sx + 2, WY + WH, 12, 1) end      -- the sill
+          if fine then
+            -- the cabin in three tones: the ceiling strip, the lit air, the dimmer seats
+            if rider then
+              glass(base * 0.8, sx + 2, true)
+              put(base * 0.55, sx + 2, WY + 10, 2, 4); put(base * 0.55, sx + 12, WY + 10, 2, 4)
+            else
+              if dense then      -- dense: each window split in two panes by a dark mullion
+                put(base * 0.8, sx + 2, WY + 1, 5, 8); put(base * 0.8, sx + 8, WY + 1, 6, 8)
+                put(base * 0.55, sx + 2, WY + 10, 5, 4); put(base * 0.55, sx + 8, WY + 10, 6, 4)
+              else
+                put(base * 0.8, sx + 2, WY + 1, 12, 8)
+                put(base * 0.55, sx + 2, WY + 10, 12, 4)      -- a dark seat-back line above the seats
+              end
+            end
+            put(strip, sx + 2, WY, 12, 1)
+            put(base * 0.4, sx + 2, WY + WH, 12, 1)      -- the sill
+          else
+            glass(base, sx + 2, rider)
+          end
         end
         if hi > 0.03 then put(hi * 4, sx + 2, WY - 1, 12, 1) end
       end
@@ -207,6 +249,19 @@ return function(K)
         local wl2 = 1.2 + 4.5 * lo + E(4 * bt)
         put(wl2, sx + 3, 49, 4, 3); put(wl2, sx + 9, 49, 4, 3)
       end
+      -- dense: the underframe boxes between the bogies and rivets along the body
+      if dense then
+        if k == 1 or k == 3 then put(1, sx + 3, 50, 10, 1); put(1, sx + 3, 49, 1, 1); put(1, sx + 12, 49, 1, 1) end
+        put(1, sx + 3, 44, 1, 1); put(1, sx + 11, 44, 1, 1)
+      end
+    end
+    -- fine, kickless: with the cabin dim, the tunnel lamps slide across the glass as reflections
+    if fine and kl > 0.05 then
+      for c = 0, 3 do
+        local x = (c * 56 - pdist * 1.25) % 224 - 24
+        K.line_sub(1 + 3 * kl, x + 3, WY + WH - 1, x + 9, WY + 1)
+        K.line_sub(0.8 + 1.5 * kl, x + 7, WY + WH - 1, x + 11, WY + 5)
+      end
     end
 
     -- lit windows: each part's mark rides along with its window
@@ -214,16 +269,39 @@ return function(K)
       if w.on then
         local age = NOW - w.t
         local f = math.exp(-age / (0.32 * TR()))
-        if fine then f = f * math.min(1, 0.3 + age / 0.07) end      -- a short rise
+        if fine then f = f * math.min(1, 0.25 + age / 0.12) end      -- a short rise
         local sx = (w.n - 6 * cnt) * PITCH - math.floor(dist)
         if f < 0.03 or sx < -PITCH or sx > 128 then w.on = false
         else
           local l, kd, x = w.lv * f, w.kind, sx + 2
-          if kd == "bar" then l = E(l) end      -- the stab's bars
-          if kd == "full" then
+          if fine and kd ~= "spark" then
+            -- fine: each part's window is a soft glow with one small hot mark in it (the note, the
+            -- head, the cap of the bar) that burns well above the cabin, light spilling under it
+            put(l * 0.35, x + 2, WY + WH + 1, 8, 1)
+            if kd == "full" then
+              glass(E(l * 1.3), x, false)
+              line(E(l * 2), x - 1, WY - 1, x + 12, WY - 1)
+            elseif kd == "bar" then
+              local h = math.max(2, math.floor(w.x * WH + 0.5))
+              put(l * 0.9, x, WY + WH - h + 1, 12, h - 1)
+              put(E(l * 2.4), x, WY + WH - h, 12, 1)
+              put(l * 0.3, x, WY, 12, WH - h)
+            elseif kd == "arp" then
+              local yy = WY + 1 + (w.x - 1) * 3
+              put(l * 0.7, x, yy, 12, 2)
+              put(E(l * 1.8), x + math.floor(w.y * 9), WY + WH - 4, 3, 3)
+            elseif kd == "rider" then
+              put(E(l * 1.6), x + 4, WY + 5, 4, 4)
+              put(l * 0.6, x + 1, WY + 9, 10, 5)
+            elseif kd == "hat" then
+              put(E(l * 1.5), x, WY, 12, 1)
+              put(l * 0.5, x, WY + 1, 12, 2)
+            end
+          elseif kd == "full" then      -- (classic from here, and fine's sparks)
             glass(l, x, false)
             line(l, x - 1, WY - 1, x + 12, WY - 1)
           elseif kd == "bar" then
+            l = E(l)      -- the stab's bars
             local h = math.max(2, math.floor(w.x * WH + 0.5))
             put(l, x, WY + WH - h, 12, h)
             put(l * 0.4, x, WY, 12, WH - h)
@@ -237,6 +315,7 @@ return function(K)
           elseif kd == "hat" then
             put(l, x, WY, 12, 3)
           elseif kd == "spark" then
+            if fine then l = E(l * 1.5) end
             put(l * 0.6, x + 4 + w.x % 3, WY, 2, WH)
             put(l, x + 3 + w.x % 3, WY + 4 + w.x % 4, 4, 4)
             if fine then
@@ -252,6 +331,11 @@ return function(K)
 
     -- the rail below: sleepers going by, the rail itself, sparks from the bass
     put(1.5 + lo * 2, 0, 54, 128, 1)
+    -- fine: at speed the running rail throws back long glints (the energy, longer with the trails)
+    if fine and e > 0.35 then
+      local gl = (e - 0.35) * 1.55
+      K.dashes(1.5 + 3.5 * gl * (0.6 + 0.4 * amp), 54, math.floor(6 + 10 * gl * TR()), 37, -pdist * 2.2, 0, 128)
+    end
     K.dashes(1, 57, 8, 24, -pdist * 0.6, 0, 128)
     K.dashes(1, 61, 4, 13, -pdist * 0.9, 0, 128)
     for i = #sparks, 1, -1 do
@@ -262,7 +346,9 @@ return function(K)
         local l = 7 * (1 - a / 0.4)
         local x = sp.x - a * 30
         put(l, x, 52 - a * 12, 2, 2); put(l * 0.7, x - 4, 51 - a * 8, 2, 2); put(l * 0.7, x + 4, 52 - a * 6, 2, 2)
-        put(l, sp.x - 4, 53, 9, 1); put(l * 0.6, sp.x - 6, 50, 13, 3)
+        put(l, sp.x - 4, 53, 9, 1)
+        if fine then put(E(l * 0.9), sp.x - 1, 52, 3, 1); put(l * 0.5, sp.x - 6, 51, 13, 1)      -- fine: a hot point on the rail, a thinner glow
+        else put(l * 0.6, sp.x - 6, 50, 13, 3) end
       end
     end
 

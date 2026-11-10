@@ -41,8 +41,8 @@ return function(K)
   local pdz = 0
   local nearest = 0
 
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting (fine: nearly at full strength, about 0.5x at 0 to 1.9x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(1.9, math.max(0.48, K.trail ^ 0.8)) or K.trail end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -174,9 +174,22 @@ return function(K)
     local m0 = first_id()
 
     -- the sky: sodium haze that thickens toward the horizon
-    for y = 3, VY do
-      local v = 0.2 + (y / VY) * (0.6 + 1.0 * amp)
-      if y % 4 == 1 and v > 0.7 then K.dashes(v, y, 3, 7, y * 3 + T * 1.5, 0, 128) end
+    if fine then
+      -- fine: the haze only shows between the rooftops, so the buildings stand as dark masses
+      -- against it, and it gathers into a glow down the street's slot of sky
+      for y = 2, VY - 1 do
+        local xl = math.max(0, (y - 8) * 58 / 15)
+        local u = y / VY
+        local v = 0.25 + u * u * (1.3 + 1.6 * amp + 1.2 * K.energy)
+        if xl < VX - 7 and ((y % 4 == 1 and v > 0.7) or (y > 15 and y % 2 == 1 and v > 1.2)) then
+          K.dashes(v, y, 3, 7 - math.floor(u * 3), y * 3 + T * 1.5, xl, 128 - xl)
+        end
+      end
+    else
+      for y = 3, VY do
+        local v = 0.2 + (y / VY) * (0.6 + 1.0 * amp)
+        if y % 4 == 1 and v > 0.7 then K.dashes(v, y, 3, 7, y * 3 + T * 1.5, 0, 128) end
+      end
     end
     if dense and fp then      -- a few stars through the haze
       for i = 1, 16 do
@@ -194,6 +207,8 @@ return function(K)
     -- the glow at the vanishing point, thumped by the kick
     local gl = 2 + (fine and 6.4 or 4) * kk
     put(gl, VX - 2, VY - 1, 5, 2)
+    -- fine: the light at the end of the street, a hot core that the kick and the energy feed
+    if fine then put(E(3 + 3 * K.energy + 6 * kk), VX - 1, VY - 1, 3, 1) end
     put(gl * 0.5, VX - 6 - 4 * kk, VY, 13 + 8 * kk, 1)
     if kk > 0.03 then
       put(2.5 * kk, VX - 14, VY + 1, 29, 1); put(2 * kk, VX - 10, VY - 2, 21, 1)
@@ -204,6 +219,19 @@ return function(K)
 
     -- rooflines running in, with a few windows on the facades
     line(1.3, 0, 8, VX - 6, VY - 2); line(1.3, 128, 8, VX + 6, VY - 2)
+    if fine then
+      if dense then
+        -- dense: the dark windows of the upper floors, a dot grid in perspective
+        for k = 0, 5 do
+          local x = 4 + k * 9
+          local u = x / (VX - 10)
+          for f = 0, 2 do
+            local y = 8 + f * 13 + 6 + u * (VY - 2 + f * 1.2 - 8 - f * 13) * 0.95
+            put(1, x, y, 2 - math.floor(u * 1.5), 2 - math.floor(u * 1.5)); put(1, 126 - x, y, 2 - math.floor(u * 1.5), 2 - math.floor(u * 1.5))
+          end
+        end
+      end
+    end
     for k = 0, 6 do
       local z = k * 1.5 + (1 - ((cum / 1.5) % 1)) * 1.5
       local s = scale(z)
@@ -258,8 +286,14 @@ return function(K)
         put((fine and 5 or 4) * f, x - 4, y - 2, 9, 5)
         put(3 * f, x - 9, y, 19, 1)
         put(2.5 * f, x - 6, y + 3, 13, 1)
-        put(3.2 * f, VX - 46 * s, y, 92 * s, 1)
-        put(2 * f, VX - 40 * s, y + 1, 80 * s, 1)
+        if fine then
+          -- fine: the eye's glint runs only a little way along the kerb, and one point burns
+          put(E(10 * f), x, y, 1, 1)
+          put(2.4 * f, x - 14 * s - 2, y + 1, 28 * s + 5, 1)
+        else
+          put(3.2 * f, VX - 46 * s, y, 92 * s, 1)
+          put(2 * f, VX - 40 * s, y + 1, 80 * s, 1)
+        end
       end
     end
 
@@ -369,6 +403,31 @@ return function(K)
           local py = VY + GH * s
           for r = 1, 4 do
             K.put_sub(1.4 * (1 - r / 5) * (0.6 + 0.4 * math.sin(T * 3 + r * 1.7 + m)), hx + math.sin(T * 1.3 + r + m) * 1.5 * s, py + 4 + r * 2, 2, 1)
+          end
+        end
+      end
+    end
+
+    if fp then
+      -- fine, kickless: a low fog rolls across the far street and swallows the pools
+      local kl = K.kickless
+      if kl > 0.05 then K.haze(0, VY + 1, 128, VY + 17, 0.42 * kl, 1 + 1.2 * kl + 0.8 * pdz, T * 2.5) end
+      -- fine, at the peak: rain shows in the light of the nearest lamps
+      local rain = clamp((e - 0.55) / 0.45, 0, 1) * (0.6 + 0.4 * hi)
+      if rain > 0.05 then
+        for j = 0, 2 do
+          local m = m0 + j
+          local z = m * SP - cum
+          if z >= 0.15 then
+            local s = scale(z)
+            local hx = VX + ((m % 2 == 0) and -1 or 1) * 36 * s
+            local top = VY + GH * s - 50 * s
+            local len = 50 * s
+            for i = 1, math.floor(9 * rain) do
+              local x = hx + (K.hash(i + m * 13, 41) - 0.5) * 30 * s
+              local y = top + 2 + ((T * 3.2 + K.hash(i + m * 13, 42)) % 1) * len
+              line(E((2 + 5 * rain) * (1 - (y - top) / (len + 4))), x, y, x - 1, y + 2 + math.floor(2 * s))
+            end
           end
         end
       end

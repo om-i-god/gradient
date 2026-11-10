@@ -68,8 +68,21 @@ return function(K)
   local pdz = 0
   local sway = 0
 
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting (fine: nearly at full strength, about 0.5x at 0 to 1.9x at 100)
+  local function TR() return K.detail ~= "classic" and math.min(1.9, math.max(0.48, K.trail ^ 0.8)) or K.trail end
+
+  -- fine: the street's buildings rise into the lower corners, dark against the haze: {x0, x1, roof}
+  local BLD = {{0, 17, 31}, {17, 38, 39}, {92, 109, 43}, {109, 128, 35}}
+  local bwin = {}                         -- the windows on a grid: x, y, lit (warm) or dark
+  for b = 1, #BLD do
+    local B = BLD[b]
+    for x = B[1] + 2, B[2] - 4, 5 do
+      for y = B[3] + 4, 60, 6 do
+        local h = K.hash(x * 7 + y, 51)
+        bwin[#bwin + 1] = {x = x, y = y, lit = h < 0.3, warm = h < 0.12}
+      end
+    end
+  end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -171,7 +184,27 @@ return function(K)
     -- the night sky: haze lifted by the mids, a few stars
     -- (fine keeps the haze to the upper sky and thins it at the top end, so the marks drawn after it are never cut by the draw budget)
     if fine then
-      K.haze(0, 0, 128, 46, math.min(0.1 + mid * 0.6 + pdz * 0.3, 0.75), 1 + 1.6 * mid, T * 1.5)
+      -- fine: the haze is the far layer, kept dim, and stops at the rooftops so the buildings stand dark against it
+      local hd, hl = math.min(0.1 + mid * 0.5 + pdz * 0.3, 0.55), 1 + 0.9 * mid + 0.6 * pdz
+      K.haze(0, 0, 128, 30, hd, hl, T * 1.5)
+      K.haze(17, 30, 92, 38, hd, hl, T * 1.5)
+      K.haze(38, 38, 92, 46, hd, hl, T * 1.5)
+      K.haze(109, 30, 128, 34, hd, hl, T * 1.5)
+      K.haze(92, 30, 109, 42, hd, hl, T * 1.5)
+      -- the buildings: a dim cornice on each roof and a few windows, lit ones warmed by the mids
+      for i = 1, #BLD do
+        local b = BLD[i]
+        put(1.6, b[1], b[3], b[2] - b[1], 1)
+        if b[1] > 0 then put(1, b[1], b[3] + 1, 1, 63 - b[3]) end
+        if b[2] < 128 then put(1, b[2] - 1, b[3] + 1, 1, 63 - b[3]) end
+        if dense then put(0.8, b[1], b[3] + 2, b[2] - b[1], 1) end      -- dense: a second string course
+      end
+      for i = 1, #bwin do
+        local w = bwin[i]
+        if w.warm then put(2.6 + 2.2 * mid + 1.5 * pdz, w.x, w.y, 3, 3)
+        elseif w.lit then put(1.4 + 1.2 * mid, w.x, w.y, 3, 3)
+        elseif dense then put(0.7, w.x, w.y, 3, 1) end      -- dense: the dark windows' sills
+      end
     else
       K.haze(0, 0, 128, 64, 0.1 + mid * 0.6 + pdz * 0.3, 1 + mid, T * 1.5)
     end
@@ -222,7 +255,7 @@ return function(K)
           local len = xb - xa
           local h = hum * len * 0.03
           span(fine and cl - (2.3 * (1 - dep)) or cl, xa, ya, xb, yb, 0.2, h * 0.3, swv * 0.3, 4)
-          span(1.5 * dep + hi * 1.5, xa, ya - 6, xb, yb - 6, 2.5 * sagk, h, swv, 6)
+          span(fine and (1.1 * dep + hi * 1.2) or (1.5 * dep + hi * 1.5), xa, ya - 6, xb, yb - 6, 2.5 * sagk, h, swv, 6)
           -- droppers: jittered, from the messenger down to the contact wire
           for q = 1, 2 do
             local u = hu[w][n][q]
@@ -310,17 +343,27 @@ return function(K)
       local y = ywire(w, x)
       local l = 3 + 4 * f
       if fine then
+        -- fine: the pantograph is the scene's live point: brighter, with a hot contact on the wire
+        l = math.min(12, 3.5 + E(6 * f) + (K.playing and 2 + 3 * K.energy or 0))
         -- the collector glides on the sub-pixel along the wire as the arps move it
         local iy = math.floor(y + 0.5)
         sbar(l, x - 3, iy - 1, 7)
         K.line_sub(l * 0.8, x - 4, iy + 4, x, iy - 1); K.line_sub(l * 0.8, x + 4, iy + 4, x, iy - 1)
         sbar(l * 0.6, x - 4, iy + 4, 9)
+        -- the stretch of wire it draws on carries the current, brighter the harder the music runs
+        if K.playing then
+          local cw = 1.5 + 7.5 * K.energy * K.energy
+          line(cw, x - 16, ywire(w, x - 16), x - 4, ywire(w, x - 4))
+          line(cw, x + 4, ywire(w, x + 4), x + 16, ywire(w, x + 16))
+        end
         if f > 0.05 then
           sbar(E(5.2 * f), x - 7, iy - 3, 15)
           line(E(5 * f), x, iy - 2, x, iy - 11)
           sbar(E(3 * f), x - 5, iy - 11, 11)
           line(E(4.4 * f), x - 12, ywire(w, x - 12) - 1, x + 12, ywire(w, x + 12) - 1)
           sbar(E(6 * f), x - 1, iy - 2, 3)
+          put(E(5 + 8 * f), math.floor(x + 0.5), iy - 1, 1, 1)
+          put(E(2.2 * f), x - 3, iy - 5, 7, 2)
         end
       else
         put(l, x - 3, y - 1, 7, 1)
@@ -337,6 +380,19 @@ return function(K)
         for r = 0, 4 do
           local w = 8 + r * 6 + math.floor(math.sin(T * 0.5 + i + r) * 4)
           put(pdz * (3.2 - r * 0.5), x - w / 2, 8 + r * 5, w, 1)
+        end
+      end
+    end
+
+    -- fine, kickless: with no kick the current shows as glints running down the contact wires
+    if fp and K.kickless > 0.05 then
+      local kl = K.kickless
+      for w = 1, NW do
+        local x = (T * (9 + 14 * K.duck) + w * 47) % 150 - 10
+        for q = 0, 2 do
+          local xq = x - q * 3 * TR()
+          local yq = ywire(w, xq)
+          if yq < 63 then K.put_sub((2.5 + 6 * kl) * (1 - q * 0.33), xq, yq - 0.5, 2, 1) end
         end
       end
     end

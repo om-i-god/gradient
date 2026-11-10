@@ -30,7 +30,11 @@ return function(K)
   local hit, percs = {}, {}
   local pdz = 0                           -- the pad, eased in
   -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- (round 4: the whole range, about 0.45x at 0 to 2x at 100, so the slider shows)
+  local function TR() return K.detail ~= "classic" and math.min(2.0, math.max(0.45, K.trail ^ 0.9)) or K.trail end
+  -- pz: the music's presence, eased in and out (fine, while playing). it sinks the
+  -- deck's outlines so the light on the turning record stands out
+  local pz = 0
   local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
   local function fade(k, tau)
     local t = hit[k]
@@ -54,6 +58,7 @@ return function(K)
     dust, glints = {}, {}
     rot, armr, bs, lamp, sw, warp = 0, 0.93, 0, 0.6, 0, 0
     hit, percs, pdz = {}, {}, 0
+    pz = 0
   end
   M.clear = M.init
 
@@ -98,6 +103,10 @@ return function(K)
     -- an event's level: scaled by the reactivity, never a white point (fine only)
     local function E(l) return fine and math.min(l * RT, 13) or l end
     local kl = K.kickless
+    pz = fine and K.follow(pz, K.playing and 1 or 0, 0.8, DT) or 0
+    local live = pz > 0.001
+    local dimS = 1 - 0.4 * pz
+    local e = K.energy
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, hh, cl, bh, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("bass", 0.4), fade("tick", 0.4)
     local pd = pdz
@@ -120,7 +129,7 @@ return function(K)
     line(1.2, 5, 6, 122, 6)
     line(1.2, 5, 6, 1, 57)
     line(1.2, 122, 6, 126, 57)
-    line(2, 0, 58, 127, 58)
+    line(2 * dimS, 0, 58, 127, 58)
     line(1.5, 0, 61, 127, 61)
     -- start / stop lit while playing; the pitch fader at the tempo
     put(K.playing and (3 + 3 * lamp) or 1.5, 5, 51, 5, 3)
@@ -149,7 +158,7 @@ return function(K)
       local a = k / 36 * TAU + 0.04
       if math.sin(a) > 0.15 then
         local x, y = pt(pr, a, 1.5)
-        put((2 + 6 * lamp) * (k % 2 == 0 and 1 or 0.55), x, y, 2, 1)
+        put((2 + 6 * lamp) * (k % 2 == 0 and 1 or 0.55) * (live and 1 + pz * (0.5 * e - 0.2 - 0.25 * kl) or 1), x, y, 2, 1)
         -- a kick lights every third dot, a different third each time
         if kk > 0.03 and (k + (hit.kickn or 0)) % 3 == 0 then put(E(6 * kk), x - 1, y - 1, 4, 3) end
       end
@@ -158,20 +167,35 @@ return function(K)
 
     -- the record: its edge, the gaps between tracks, the grooves where they
     -- catch the light
-    arc(2.5, 1, 0, TAU, 28, warp)
+    arc(2.5 * dimS, 1, 0, TAU, 28, warp)
     arc(1.5, 0.66, 0, TAU, 20, warp * 0.66)
     arc(1.2, 0.8, 0, TAU, 22, warp * 0.8)
     local wd = (0.42 + sw * 0.25 + A[K.MID] * 0.1) * (1.15 - 0.35 * K.duck)
     local sl = 0.25 + 0.9 * lamp
     local hi = A[K.HI]
+    -- (fine, playing) the sheen's heart takes the energy and its flanks sink, so the
+    -- wedges read as light on black; kickless softens the heart as the sheen widens
+    local shc = live and 1 + pz * (0.75 * e - 0.25 - 0.2 * kl) or 1
+    local shf = live and 1 - 0.3 * pz or 1
     for wedge = 0, 1 do
       local c = -2.5 + wedge * math.pi + math.sin(T * 0.07) * 0.08
       for gi, r in ipairs(GR) do
         local g = sl * (wedge == 0 and 1 or 0.7) * (0.7 + 0.3 * ((gi * 7) % 3) / 2)
         local dy = warp * r
-        arc(1.5 + 2 * g, r, c - wd, c - wd * 0.35, 2, dy)
-        arc(2.5 + 4 * g + hi * 2.5 * ((gi + wedge) % 2), r, c - wd * 0.35, c + wd * 0.35, 2, dy)
-        arc(1.5 + 2 * g, r, c + wd * 0.35, c + wd, 2, dy)
+        arc((1.5 + 2 * g) * shf, r, c - wd, c - wd * 0.35, 2, dy)
+        arc(math.min(12, (2.5 + 4 * g + hi * 2.5 * ((gi + wedge) % 2)) * shc), r, c - wd * 0.35, c + wd * 0.35, 2, dy)
+        arc((1.5 + 2 * g) * shf, r, c + wd * 0.35, c + wd, 2, dy)
+      end
+    end
+    -- dense: the dark of the record isn't empty: the grooves glint faintly all the
+    -- way round, a speck every so often, turning with it
+    if dense and live then
+      for gi, r in ipairs(GR) do
+        for k = 0, 5 do
+          local a = k / 6 * TAU + gi * 0.9 - rot * (gi % 2 == 0 and 1 or 0)
+          local x, y = pt(r, a, warp * r)
+          put(pz * (2 + 3 * K.env.hat + 1.5 * A[K.HI]), x, y, 1, 1)
+        end
       end
     end
 
@@ -218,7 +242,7 @@ return function(K)
     for i = #dust, 1, -1 do
       local d = dust[i]
       local age = T - d.t0
-      local life = 16 * K.beat_sec
+      local life = 16 * K.beat_sec * (live and TR() or 1)   -- (fine, playing) the dust stays as long as the trails say
       if age > life then table.remove(dust, i)
       else
         local a = d.a + rot
@@ -269,6 +293,14 @@ return function(K)
     -- the tonearm: pivot and counterweight, the arm, the headshell on the
     -- groove, a little light on the stylus
     local sx, sy = pt(armr, SA, warp * armr)
+    -- (fine, playing) the groove under the needle: it reads the music, lit by the
+    -- level and the kick, and the light trails back along the groove it has just played
+    if live then
+      local rd = pz * (2.5 + 5 * A[K.AMP] * (0.4 + 0.6 * e) + 4 * K.env.kick + 2 * bs)
+      arc(math.min(11, rd), armr, SA - 0.06, SA + 0.12, 1, warp * armr, true)
+      arc(math.min(11, rd) * 0.6, armr, SA + 0.12, SA + 0.45, 2, warp * armr, true)
+      arc(math.min(11, rd) * 0.3, armr, SA + 0.45, SA + 0.45 + 0.45 * TR(), 2, warp * armr, true)
+    end
     put(3, PX - 3, PY - 3, 7, 6)
     put(4 + lamp, PX + 3, PY - 2, 5, 4)
     local bx, by = PX - 10, PY + 14

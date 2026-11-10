@@ -45,7 +45,11 @@ return function(K)
   local hit, percs = {}, {}
   local pdz = 0                          -- the pad, eased in
   -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- (round 4: the whole range, about 0.45x at 0 to 1.6x at 100, so the slider shows)
+  local function TR() return K.detail ~= "classic" and math.min(1.6, math.max(0.45, K.trail ^ 0.9)) or K.trail end
+  -- pz: the music's presence, eased in and out (fine, while playing). it sinks the
+  -- glass's static frame and the far city so the bokeh the music makes stands out
+  local pz, rain = 0, 0
   local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
   local function fade(k, tau)
     local t = hit[k]
@@ -67,6 +71,7 @@ return function(K)
 
   function M.init()
     hit, percs, pdz = {}, {}, 0
+    pz, rain = 0, 0
     disc = {}
     for i = 1, 4 do disc[i] = {x = 14 + (i - 1) * 32, y = 34 - i * 6, r = 6, k = 0} end
     lamp, mist, lights, drops, ghost = 0, 0, {}, {}, {}
@@ -91,7 +96,7 @@ return function(K)
       if L.x == x and L.y == y then L.t0 = K.T; return end
     end
     if #lights >= 40 then table.remove(lights, 1) end
-    lights[#lights + 1] = {x = x, y = y, t0 = K.T, life = 2 + 3 * K.hash(x * 3 + y, 9)}
+    lights[#lights + 1] = {x = x, y = y, t0 = K.T, life = (2 + 3 * K.hash(x * 3 + y, 9)) * (pz > 0.001 and math.min(1, TR()) or 1)}
   end
 
   function M.stab()
@@ -120,9 +125,28 @@ return function(K)
     row(l * (1 - f), ix, y, 1); row(l, ix + 1, y, w - 1); row(l * f, ix + w, y, 1)
   end
 
-  local function draw_disc(l, cx, cy, r, rim, sub)
+  -- bk (fine, playing): a bokeh's lens look, 0..1: the middle of the disc a shade
+  -- under its level and the rim ring over it, so the disc reads as light, not a shape
+  local function draw_disc(l, cx, cy, r, rim, sub, bk)
     if l < 0.4 or r < 1 then return end
     local rw = sub and srow or row
+    if bk and bk > 0 then
+      local li, lr = l * (1 - 0.25 * bk), l + rim + bk * (0.4 + 0.25 * l)
+      for dy = -r, r do
+        local u = dy / (r + 0.5)
+        local hw = math.floor(r * math.sqrt(math.max(0, 1 - u * u)) + 0.5)
+        if hw > 0 then
+          local y = math.floor(cy + dy)
+          if math.abs(dy) >= r - 1 or hw < 3 then rw(math.min(12, lr), cx - hw, y, 2 * hw)
+          elseif dy % 2 ~= 0 then rw(math.min(12, li), cx - hw, y, 2 * hw)
+          else
+            rw(math.min(12, li), cx - hw + 1, y, 2 * hw - 2)
+            rw(math.min(12, lr), cx - hw, y, 1); rw(math.min(12, lr), cx + hw - 1, y, 1)
+          end
+        end
+      end
+      return
+    end
     for dy = -r, r do
       local u = dy / (r + 0.5)
       local hw = math.floor(r * math.sqrt(math.max(0, 1 - u * u)) + 0.5)
@@ -147,6 +171,9 @@ return function(K)
     -- an event's level: scaled by the reactivity, never a white point (fine only)
     local function E(l) return fine and math.min(l * RT, 13) or l end
     local kl = K.kickless
+    pz = fine and K.follow(pz, K.playing and 1 or 0, 0.8, DT) or 0
+    local live = pz > 0.001
+    local dimS = 1 - 0.45 * pz              -- the static frame and far city, sunk while it plays
     local c = K.chord
     local mean = (c[1] + c[2] + c[3] + c[4]) / 4
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
@@ -160,7 +187,7 @@ return function(K)
 
     -- the far skyline, a dim blur; the city's ground glow under it
     K.gradient(50, SILL - 1, function(y)
-      return 0.15 + 0.35 * (y - 50) / 7 + 0.3 * lamp
+      return (0.15 + 0.35 * (y - 50) / 7 + 0.3 * lamp) * (1 - 0.35 * pz)   -- (fine, playing) thinner, so the bokeh own the glass
     end)
     -- the street far below: smeared lights, shimmering through the water
     for i = 0, 15 do
@@ -177,14 +204,15 @@ return function(K)
     for c2 = 0, 63, 2 do
       local top = far[c2]
       for y = top + 2, SILL - 6, 3 do
-        if K.hash(c2 * 31 + y, 5) > (fp and 0.66 or 0.55) then row(1.8 + ((c2 * 2 < 92 or c2 * 2 > 120) and 2.4 * mf or 0), c2 * 2, y, 2) end
+        if K.hash(c2 * 31 + y, 5) > (fp and 0.66 or 0.55) then row(1.8 * dimS + ((c2 * 2 < 92 or c2 * 2 > 120) and 2.4 * mf or 0), c2 * 2, y, 2) end
       end
     end
 
     -- the bass: a big streetlamp blur low on the right, and the kick in it
     local bassg = K.gain(S, "bass") > 0 and 1 or 0.4
     lamp = K.follow(lamp, math.max(K.env.bass * bassg * 0.8, A[K.LO] * 0.75, K.env.kick * (fp and 0.6 or 0.5)), 0.07, DT)
-    draw_disc(1 + lamp * (fp and 3.4 or 3), 106, 50, math.floor(8 + lamp * 3 + kl * 2), 0.8)
+    draw_disc(1 + lamp * (fp and 3.4 or 3) * (live and 1 + pz * (0.35 * e - 0.3 * kl) or 1), 106, 50, math.floor(8 + lamp * 3 + kl * 2), 0.8,
+      false, live and pz * 0.5 * (1 - 0.7 * kl) or nil)
     -- the kick swells the lamp's blur
     -- a bass note lights a hot core in it
     if bh > 0.03 then
@@ -220,12 +248,20 @@ return function(K)
       d.k = K.follow(d.k, K.voice_kick[i], 0.06, DT)
       local r = math.floor((5 + (4 - i) * 0.7 + d.k * 2) * soft * breathe + 0.5)
       local l = (1.6 + 1.2 * e + d.k * (fp and 4.6 or 4)) * (1 - kl * 0.25) * (1 + (fp and 0.36 or 0.3) * A[K.AMP])
-      draw_disc(l, d.x, d.y, r, 1 + A[K.HI] * 0.5, fp)
+      if live then
+        -- (fine, playing) the bokeh carry the energy: soft and low when it is quiet,
+        -- full and ringing at the peak; a stab blooms its voice's disc hardest
+        -- (the stab's own jump is softened, its bloom comes in over a few frames instead)
+        d.b = K.follow(d.b or 0, K.voice_kick[i], K.voice_kick[i] > (d.b or 0) and 0.15 or 0.5, DT)
+        local g = (1 - kl * 0.25) * (1 + 0.36 * A[K.AMP])
+        l = (1.6 + 1.2 * e) * g * (1 + pz * (0.2 * e - 0.15)) + d.k * 4.6 * g * (1 - 0.5 * pz) + pz * d.b * 1.5 * (0.5 + e)
+      end
+      draw_disc(l, d.x, d.y, r, 1 + A[K.HI] * 0.5, fp, live and pz * (1 - 0.75 * kl) or nil)
     end
     -- the discs' ghosts in the double glazing, at the echo time
     for i = #ghost, 1, -1 do
       local g = ghost[i]
-      local u = (T - g.t0) / 0.6
+      local u = (T - g.t0) / (0.6 * (pz > 0.001 and math.min(1.1, TR()) or 1))   -- (fine, playing) the glazing holds them as long as the trails say
       if u >= 1 then table.remove(ghost, i)
       elseif u >= 0 then
         local a = g.a * math.sin(math.pi * u)
@@ -238,8 +274,8 @@ return function(K)
 
     -- the frame: the mullion's edge and the sill catch the room's light
     put(1, MX, 0, 1, SILL)
-    put(2, MX + MW - 1, 0, 1, SILL)
-    put(2, 0, SILL, 128, 1)
+    put(2 * dimS, MX + MW - 1, 0, 1, SILL)
+    put(2 * dimS, 0, SILL, 128, 1)
     -- the newest window flares in the wet air round it
     local af = fade("arp", 0.45)
     if af > 0.03 then
@@ -310,6 +346,19 @@ return function(K)
       local ln = lens(x, y)
       row((1.5 + ln + hi * 3 * tw) * a, x, y, 1)
       if a > 0.5 then row((2.5 + ln * 1.5 + hi * 4 * tw) * a, x, y - 1, i % 3 == 0 and 2 or 1) end
+    end
+    -- dense: the rain itself beyond the glass, slanting down through the city's light;
+    -- heavier with the dub and in kickless stretches, glinting with the highs
+    if dense and live then
+      rain = rain + K.DTS * (38 + 18 * e)
+      local n = math.floor(9 + 6 * K.dub + 6 * kl + 0.5)
+      for i = 1, n do
+        local sp = 0.7 + 0.6 * K.hash(i, 71)
+        local y = (rain * sp + K.hash(i, 72) * 80) % 80 - 12
+        local x = (K.hash(i, 73) * 140 - y * 0.35 + rain * 0.08) % 132 - 2
+        local ll = pz * (2 + 2 * hi + e)
+        if y > 0 and y < SILL - 4 then row(ll, x, y, 1); row(ll * 0.7, x - 1, y + 2, 1); row(ll * 0.45, x - 1, y + 3, 1) end
+      end
     end
     -- dense: a second, finer set of beads, condensation on the cold glass
     if dense and fp then

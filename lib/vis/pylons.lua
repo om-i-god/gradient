@@ -50,7 +50,11 @@ return function(K)
   local acnt = {0, 0, 0, 0}             -- arp notes so far, per lane
   local pdz, mz = 0, 0  -- the pad, eased in
   -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- (round 4: the whole range, about 0.45x at 0 to 2x at 100, so the slider shows)
+  local function TR() return K.detail ~= "classic" and math.min(2.0, math.max(0.45, K.trail ^ 0.9)) or K.trail end
+  -- pz: the music's presence, eased in and out (fine, while playing). it sinks the
+  -- steel into the night so the current the music runs along the wires stands out
+  local pz = 0
   local function mark(k) hit[k] = K.NOW; hit[k .. "n"] = (hit[k .. "n"] or 0) + 1 end
   local function fade(k, tau)
     local t = hit[k]
@@ -74,6 +78,7 @@ return function(K)
     ring, sag, sway, sparks, pump_t = {0, 0, 0, 0}, 0, 0, {}, -99
     hit, arps, percs, pdz, mz = {}, {-99, -99, -99, -99}, {}, 0, 0
     acnt = {0, 0, 0, 0}
+    pz = 0
   end
 
   function M.pump() pump_t = K.NOW end
@@ -133,6 +138,8 @@ return function(K)
     local function E(l) return fine and math.min(l * RT, 13) or l end
     local kl = K.kickless
     local hi, lo = A[K.HI], A[K.LO]
+    pz = fine and K.follow(pz, K.playing and 1 or 0, 0.8, DT) or 0
+    local live = pz > 0.001
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     mz = K.follow(mz, A[K.MID], 1.0, DT)
     local kk, hh, cl, tk = fade("kick", 0.3), fade("hat", 0.3), fade("clap", 0.3), fade("tick", 0.4)
@@ -144,12 +151,14 @@ return function(K)
     -- the pump: every wire dips at once and springs back
     local age = K.NOW - pump_t
     local dip = 0
-    if age >= 0 and age < 1 then dip = age < 0.07 and K.ease(age / 0.07) or math.exp(-(age - 0.07) / (K.beat_sec * 0.2)) end
+    -- (fine, playing: the brighter wires go down over a frame more, so the dip is a sway, not a jump)
+    local dr = live and 0.1 or 0.07
+    if age >= 0 and age < 1 then dip = age < dr and K.ease(age / dr) or math.exp(-(age - dr) / (K.beat_sec * 0.2)) end
 
     -- the sky: a town's glow low on the right behind the treeline, a moon
     K.gradient(HY - 16, HY - 1, function(y)
       local u = (HY - y) / 16
-      return (0.9 + 0.5 * e) * (1 - u) ^ 1.6 * (1 + 0.8 * pd)
+      return (0.9 + 0.5 * e) * (1 - u) ^ 1.6 * (1 + 0.8 * pd) * (1 + 0.6 * pz * e + 0.6 * pz * A[K.AMP])   -- (fine, playing) the town burns brighter at the peak and with the level
     end, trees, 40, 128)
     K.gradient(HY - 8, HY - 1, function(y)
       return 0.55 * (1 - (HY - y) / 8) * (1 + 0.8 * pd)
@@ -191,13 +200,45 @@ return function(K)
         put(1.2 + (0.5 + 0.5 * math.sin(T * (0.7 + K.hash(i, 86)) + i)) * 1.6, lx, HY - 1 - math.floor(K.hash(i, 87) * 4), 1, 1)
       end
     end
+    -- dense: a low wooden line in the near field, three poles and two slack wires,
+    -- swinging on the bass and buzzing with the highs, under the big line's span
+    if dense and live then
+      local PL = {{x = 64, y = 63, h = 15}, {x = 96, y = 57, h = 9}, {x = 117, y = 53, h = 5}}
+      local pl = pz * (1.3 + 0.6 * e)
+      local ws = 1.5 + 2.5 * sag + 1.2 * dip
+      for k, q in ipairs(PL) do
+        line(pl, q.x, q.y, q.x, q.y - q.h)
+        line(pl * 0.8, q.x - q.h * 0.25, q.y - q.h + 1, q.x + q.h * 0.25, q.y - q.h + 1)
+        local nq = PL[k + 1] or {x = 140, y = 50, h = 3}
+        for w = -1, 1, 2 do
+          local ax, ay = q.x + w * q.h * 0.22, q.y - q.h + 1
+          local bx, by = nq.x + w * nq.h * 0.22, nq.y - nq.h + 1
+          local px0, py0 = ax, ay
+          local wb = pz * (1.6 + 2.2 * hi * (0.6 + 0.4 * math.sin(T * 13 + k + w)) + 1.5 * lo)
+          for j = 1, 5 do
+            local u = j / 5
+            local x, y = ax + (bx - ax) * u, ay + (by - ay) * u + ws * (q.h / 15 + 0.3) * 4 * u * (1 - u)
+            line(wb, px0, py0, x, y)
+            px0, py0 = x, y
+          end
+        end
+      end
+    end
     local fog_top = HY - 2 - kl * 8
-    K.haze(0, math.floor(fog_top), 128, 64, 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw + (fp and 0.36 or 0.3) * mz + (fp and 0.19 or 0.15) * pd, 1, T * 2.5)
+    local fogd = 0.16 + 0.18 * kl + 0.1 * K.dub * K.throw + (fp and 0.36 or 0.3) * mz + (fp and 0.19 or 0.15) * pd
+    K.haze(0, math.floor(fog_top), 128, 64, fogd, 1, T * 2.5)
+    if live then
+      -- the fog's thick hearts lit from within, by the town in kickless stretches and the pad
+      -- (the same banks at a lower density: a subset of the fog, brighter, no more of the screen)
+      local fl = pz * (1.2 + 1.6 * kl + 1.2 * pd)
+      if fl > 1.2 then K.haze(0, math.floor(fog_top), 128, 64, fogd * 0.55, fl, T * 2.5) end
+    end
 
     -- the towers, far to near; the near one's warning light marks the bar
+    -- (fine, playing) the steel sinks back a little: the wires and their sparks carry the scene
     tower(TW[3], 1.2, 0)
-    tower(TW[2], 1.8, 0)
-    tower(TW[1], 2.6, 0)
+    tower(TW[2], 1.8 * (1 - 0.3 * pz), 0)
+    tower(TW[1], 2.6 * (1 - 0.35 * pz), 0)
     if fp then        -- the near tower's legs have thickness
       local t1 = TW[1]
       line(1.3, t1.x - 9 + 1, t1.y, t1.x - 3 + 1, t1.y - 34); line(1.3, t1.x + 9 - 1, t1.y, t1.x + 3 - 1, t1.y - 34)
@@ -237,12 +278,16 @@ return function(K)
 
     -- the wires: four spans' worth each, hung by the sag, humming
     local hum = (0.3 + 1.2 * lo) * math.sin(T * 31)
+    -- (fine, playing) the wires carry more light, so their hum is held finer: a shiver, not a jitter
+    if live then hum = hum * (1 - 0.8 * pz) end
     local sw = sway * math.sin(T * 0.9) * 2.5
     local function wire_sag(i, near)
-      return (2 + (fp and 4.8 or 4) * sag + (fp and 3 or 2.2) * dip) * near + sw * near + (i % 2 == 0 and 0.3 or 0)
+      return (2 + (fp and 4.8 or 4) * sag + (fp and 3 - 1.2 * pz or 2.2) * dip) * near + sw * near + (i % 2 == 0 and 0.3 or 0)
     end
     for i = 1, 4 do
       local wl = (1.6 + K.lane_kick[i] * 1.5 + e * 0.5 + hi * 1.3) * (1 + 0.15 * A[K.AMP])
+      -- (fine, playing) the line's load: low and grey when it is quiet, charged at the peak
+      if live then wl = wl * (1 + pz * (0.75 * e - 0.2)) end
       -- in from the left, toward us (only its last stretch is on screen)
       local spans = SPANS[i]
       for si, sp in ipairs(spans) do
@@ -272,6 +317,15 @@ return function(K)
         if r > 0.25 and s > 0.3 then
           put(r * 3 * s, p[1] - 1, p[2] + 1, 3, 1)
         end
+      end
+    end
+    -- (fine, playing) the near insulators wear a corona that builds with the energy and the highs
+    if live and e > 0.3 then
+      local cr = pz * (e - 0.3) * (3 + 3.5 * hi) * (0.8 + 0.2 * math.sin(T * 7.3))
+      for i = 1, 4 do
+        local p = TIP[1][i]
+        K.put_sub(cr, p[1] - 2, p[2] - 1, 5, 1); K.put_sub(cr, p[1] - 2, p[2] + 2, 5, 1)
+        K.put_sub(cr * 0.8, p[1] - 3, p[2], 1, 2); K.put_sub(cr * 0.8, p[1] + 3, p[2], 1, 2)
       end
     end
     -- a hat snaps the insulators of one tower, a different tower each time
@@ -326,6 +380,11 @@ return function(K)
           -- the spark glides along the wire between pixels, its tail drawn from where it just was
           K.put_sub(math.min(lv * 1.5, 13), x, y - 1, 1, 1)
           line(lv * 0.35, tx, ty, x, y)
+          if live then
+            -- the wire glowing on behind the spark
+            local tx2, ty2 = at(math.max(0, pos - 0.08 - 0.14 * TR()))   -- longer with the trails
+            line(lv * 0.22 * pz, tx2, ty2, tx, ty)
+          end
         else
           put(lv, x, y - 1, 1, 1)
           line(lv * 0.35, tx, ty, x, y)

@@ -25,8 +25,12 @@ return function(K)
   local CX0, CX1 = 105, 118              -- the change machine
   local NSEG = 10                        -- segments in a door ring
 
-  -- the fades follow the trails setting at half strength, held within 15% / 10%
-  local function TR() return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+  -- the fades follow the trails setting: at classic at half strength, held within
+  -- 15% / 10%; at fine and dense nearly in full (0.44x .. 2.2x), so the slider shows
+  local function TR()
+    if K.detail == "classic" then return math.min(1.1, math.max(0.85, K.trail ^ 0.5)) end
+    return math.min(2.2, math.max(0.4, K.trail ^ 0.9))
+  end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -106,10 +110,16 @@ return function(K)
     local T, DT, DTS, e = K.T, K.DT, K.DTS, K.energy
     local lo, mid, hi, amp = A[K.LO], A[K.MID], A[K.HI], A[K.AMP]
     local dense, RT = K.detail == "dense", K.react
+    local cls = K.detail == "classic"
+    -- fine / dense: the energy scales the music's marks (calm .. unmistakable),
+    -- and a kickless stretch lets the machines settle into a slow soak
+    local ge = cls and 1 or (0.7 + 0.5 * e)
+    local kl = cls and 0 or K.kickless
     if RT > 1 then RT = 1 + (RT - 1) * 0.4 end      -- eased above 1: the lit bound
     local fp = K.playing                            -- time-driven detail waits for the music
     -- an event's level: scaled by the reactivity, never a white point
     local function E(l) return math.min(l * RT, 13) end
+    local function G(l) return E(l * ge) end
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local pf = fade(pump_t, 0.3) * rise(pump_t)
     local dk = math.exp(-DT / (0.3 * TR()))
@@ -118,7 +128,7 @@ return function(K)
     for i = 1, #MACH do panels[i] = panels[i] < 0.01 and 0 or panels[i] * pk end
     local kk, bt, ap, hf, tf = acc.kick * rise(kick_t), acc.bass, acc.pump, acc.hat, acc.tick
     -- the drums: slow at rest, faster with the energy, a surge on the pump
-    rot = (rot + DTS * (0.7 + 2.6 * e + 2.4 * pf)) % K.TAU
+    rot = (rot + DTS * (0.7 + 2.6 * e * (1 - 0.6 * kl) + 2.4 * pf)) % K.TAU
 
     -- the sign over the window: lettering that the level lights
     line(1.6 + 2 * amp, 2, 0, 125, 0)
@@ -126,7 +136,8 @@ return function(K)
     -- the ceiling: three tubes and their glow, breathing with the pump
     for i = 1, #TUBES do
       local a, b = TUBES[i][1], TUBES[i][2]
-      put(math.min(13, 4.2 + 1.2 * mid + E(2.4 * pf + 2 * ap)), a, 9, b - a, 1)
+      local tl = cls and (4.2 + 1.2 * mid) or (2.8 + 2.4 * e + 1 * mid)
+      put(math.min(13, tl + E(2.4 * pf + 2 * ap)), a, 9, b - a, 1)
       put(1 + E(1.6 * pf + 1.6 * ap), a - 4, 11, b - a + 8, 1)
     end
 
@@ -162,17 +173,40 @@ return function(K)
       -- the porthole: a stab floods it with light
       local df = fade(doors[i], 0.4)
       if df > 0 then
-        disc(E(5 * df), cx, dy, r - 1)
+        disc(cls and E(5 * df) or math.max(1, G(5.5 * df)), cx, dy, r - 1)
         put(E(3 * df), cx - r - 2, dy, 2, 1); put(E(3 * df), cx + r + 1, dy, 2, 1)
+      elseif not cls then
+        disc(1, cx, dy, r - 1)                 -- fine / dense: the dark glass, filled
       end
       ring(2.2 + 0.8 * mid + E(4.5 * df), cx, dy, r)
-      ring(1.2 + E(2.6 * hf), cx, dy, r - 2)
+      if cls or hf > 0.02 then ring(1.2 + E(2.6 * hf), cx, dy, r - 2) end
       -- the load: three lumps of washing going round, thumped by the kick
       local dir = i <= 2 and -1 or 1
       for k = 0, 2 do
         local a = rot * dir + k * K.TAU / 3 + i
         local rr = (r - 3) * (1 - 0.35 * kk)
-        K.put_sub(2.4 + E(5 * kk), cx + math.cos(a) * rr - 0.5, dy + math.sin(a) * rr + kk * 1.5 - 0.5, 2, 1)
+        local lx, ly = cx + math.cos(a) * rr - 0.5, dy + math.sin(a) * rr + kk * 1.5 - 0.5
+        if cls then
+          K.put_sub(2.4 + E(5 * kk), lx, ly, 2, 1)
+        else
+          -- fine / dense: the lumps glow with the energy and smear behind as
+          -- they turn (the smear lengthens with the speed and the trails)
+          K.put_sub(math.min(13, 4 + 4 * e + G(6 * kk)), lx, ly, 2, 2)
+          if fp then
+            local sm = math.min(1.2, (0.25 + 0.5 * e + 0.4 * pf) * TR())
+            for q = 1, 2 do
+              local b = a - dir * sm * q * 0.5
+              K.put_sub((2.2 + 1.6 * e) * (1 - q * 0.3), cx + math.cos(b) * rr - 0.5, dy + math.sin(b) * rr + kk * 1.5 - 0.5, 1, 1)
+            end
+          end
+        end
+      end
+      if kl > 0.05 and i > 2 then
+        -- the kickless soak: water sloshing in the drum, its line rocked by the pump
+        local wy = dy + 1 + math.sin(T * 1.3 + i) * 1.2 * (0.4 + pf)
+        local hw = math.floor(math.sqrt(math.max(0, (r - 1) ^ 2 - (wy - dy) ^ 2)))
+        K.put_sub(E(kl * (3.4 + 3.4 * pf)), cx - hw, wy, hw * 2 + 1, 1)
+        put(E(kl * 2), cx - hw + 1, math.floor(wy) + 2, hw * 2 - 1, 1)
       end
       if kk > 0.04 then
         -- the load slumps into the bottom of the drum
@@ -241,7 +275,7 @@ return function(K)
     for k = 0, 1 do
       local gx = (T * 2.2 + k * 64) % 150 - 20
       K.line_sub(1.2, gx, TOP + 2, gx - 12, SILL - 2)
-      K.line_sub(1, gx + 3, TOP + 2, gx - 9, SILL - 2)
+      if cls then K.line_sub(1, gx + 3, TOP + 2, gx - 9, SILL - 2) end
     end
     K.grain(function(u, v) return 3 + u * 121, TOP + 2 + v * (SILL - TOP - 4) end, hi * 90, 7)
     if hi > 0.04 then
@@ -250,7 +284,7 @@ return function(K)
     end
 
     -- the pad: steam on the window, rising from the sill
-    K.haze(2, 30, 126, SILL, 0.03 + 0.45 * pdz, 1.1 + 1.8 * pdz, T * 1.5)
+    K.haze(2, 30, 126, SILL, (cls and 0.03 or 0.08 * kl) + 0.45 * pdz, 1.1 + 1.8 * pdz + kl, T * 1.5)
     if pdz > 0.05 then
       K.dashes(E(2.6 * pdz), SILL - 3, 4, 6, T, 2, 126)
       K.dashes(E(2 * pdz), SILL - 6, 3, 7, -T, 2, 126)
@@ -259,6 +293,18 @@ return function(K)
     -- the pavement: the shop's light spilling out, breathing with the pump
     K.dashes(1.2 + E(2.4 * pf + 1.6 * ap), 59, 6, 10, 3, 4, 124)
 
+    -- dense: the back wall's clock (its hand creeping round), notices pinned
+    -- over the washers, the tiled floor through the glass
+    if dense and not cls then
+      local ccx, ccy = 74, 18
+      line(2, ccx - 3, ccy - 2, ccx - 3, ccy + 2); line(2, ccx + 3, ccy - 2, ccx + 3, ccy + 2)
+      line(2, ccx - 2, ccy - 3, ccx + 2, ccy - 3); line(2, ccx - 2, ccy + 3, ccx + 2, ccy + 3)
+      local ha = (fp and T * 0.25 or 0) - math.pi / 2
+      K.line_sub(3.4 + E(1.6 * pf), ccx, ccy, ccx + math.cos(ha) * 2.4, ccy + math.sin(ha) * 2.4)
+      put(1.6, 34, 17, 5, 6); put(1.3, 41, 19, 4, 4); put(1.6, 90, 16, 6, 5)
+      put(2.6, 35, 18, 3, 1); put(2.6, 91, 17, 4, 1)
+      for y = FLOOR + 2, SILL - 2, 2 do K.dashes(1, y, 1, 4, y * 2, 4, 100) end
+    end
     -- dense: a sock turning in the nearest drum, a fly round a tube
     if dense and fp then
       local m = MACH[3]

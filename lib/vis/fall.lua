@@ -54,6 +54,7 @@ return function(K)
 
   local drops, splashes, ripples = {}, {}, {}
   local glow, lamp, mist_t = 0, 0.6, 0
+  local pe, cone = 0, 0                   -- fine: the playing, eased in; the lamp's cone, slow
   local drip_acc = 0
 
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
@@ -82,6 +83,7 @@ return function(K)
     drops, splashes, ripples = {}, {}, {}
     glow, lamp, drip_acc = 0, 0.6, 0
     hit, percs, pdz = {}, {}, 0
+    pe, cone = 0, 0
   end
 
   local function drop(X, z, heavy, lv)
@@ -154,6 +156,8 @@ return function(K)
     local pf = fine and E(fade("pump", 0.3)) or 0
     lamp = K.follow(lamp, (0.55 + 0.45 * e) * (1 - K.duck * 0.55) * (1 - kl * 0.3) * (1 + 0.3 * A[K.AMP]) + pd * 0.2, 0.06, DT)
     glow = K.follow(glow, math.max(K.env.bass * (K.gain(S, "bass") > 0 and 1 or 0.4), A[K.LO] * 0.85, bh * (fine and 1.6 or 1.3)), 0.08, DT)
+    -- fine: once the music plays the stone steps back (eased, so a start never jumps)
+    pe = fine and K.follow(pe, K.playing and 1 or 0, 0.6, DT) or 0
 
     -- the brick face of the near arch: courses, joints, the voussoirs
     for y = 1, 63, 4 do K.row_above(1, y, face) end
@@ -171,7 +175,7 @@ return function(K)
       if k % 2 == 1 then                          -- the voussoirs' joints
         local nx, ny = X, arch(X) / RISE
         local len = 1 / math.sqrt(nx * nx + ny * ny + 0.01) * 2.5
-        line(2, x, y, x + nx * len, y + ny * len)
+        line(2 - 0.7 * pe, x, y, x + nx * len, y + ny * len)
       end
       px0, py0 = x, y
     end
@@ -205,7 +209,37 @@ return function(K)
     line(1, 57, 32, 57, FAR_FLOOR - 2)                 -- a lamp post, its head
     put(7 + 4 * fl - 3 * pf, 58, 32, 1, 1)
     put(1.5 + fl * 1.5, 57, 33, 3, 1)
+    -- fine: the lamp is the street's heart: a halo round its head and a cone of
+    -- light on the road, swelling with the level and the kick, ducking with the pump;
+    -- in kickless stretches the street fills with fog and the lamp blooms in it
+    if fp then
+      local hl = pe * (2.5 + 2.5 * fl + 2 * A[K.AMP] + 2.5 * K.env.kick) * (1 - 0.4 * pf / 13)
+      put(hl, 56, 31, 5, 1); put(hl, 56, 33, 1, 1); put(hl, 60, 33, 1, 1)
+      put(hl * 0.6, 57, 30, 3, 1)
+      local fy = math.floor(FAR_FLOOR) - 1
+      cone = K.follow(cone, fl, 0.35, DT)
+      for y = 35, fy, 1 do
+        local u = (y - 34) / (fy - 34)
+        local w = 2 + u * 9
+        put(pe * (2 + 2.5 * cone) * (1 - 0.45 * u) + 2.4 * kl, 58.5 - w / 2, y, w, 1)
+      end
+      if kl > 0.05 then
+        K.haze(math.floor(VX - SF + 3), math.floor(VY - RISE * SF) + 3, math.floor(VX + SF - 3), math.floor(FAR_FLOOR) - 1,
+          0.45 * kl, 2 + 1.5 * fl, T * 1.5)
+        put(kl * (2 + 2 * fl), 54, 29, 9, 1); put(kl * (2 + 2 * fl), 54, 35, 9, 1)
+      end
+    end
 
+    -- dense: rain coming down in the street beyond, lit by the lamp, slanting in kickless air
+    if dense and fp then
+      local top, bot = VY - RISE * SF + 4, FAR_FLOOR - 2
+      for k = 0, 10 do
+        local x0 = VX - SF + 4 + K.hash(k, 61) * (2 * SF - 8)
+        local y = top + ((T * (14 - 6 * kl) + K.hash(k, 62) * 40) % (bot - top))
+        local near = 1 - math.min(1, math.abs(x0 - 58.5) / 14)
+        put(2 + 1.5 * fl + 3 * near * pe, x0 + (y - top) * 0.15 * kl, y, 1, 3)
+      end
+    end
     -- dense: the soffit sweats, a bead hanging at each voussoir, glinting on the wet
     if dense and K.playing then
       for k = 1, 15, 2 do
@@ -331,6 +365,7 @@ return function(K)
       else
         local near = s / S0
         local trail = math.min(d.v * s * 0.09, 9)
+        if fp then trail = math.min(d.v * s * 0.09 * (0.35 + 0.65 * K.trail), 15) end   -- fine: the trails set the streak
         local lv = d.lv * (0.55 + 0.45 * near) + A[K.HI] * 1.5
         if d.heavy then
           if trail >= 1 then put(lv * (fp and 0.5 or 0.35), x, y - trail, 1, trail) end

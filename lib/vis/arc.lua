@@ -21,6 +21,7 @@ return function(K)
   local lights = {}                       -- arp windows, placed in bars
   local glow, vb, lamp = 0, 0, 0
   local top, hollow, bi = {}, {}, {}      -- per 2-px column, this frame
+  local pe, halo = 0, 0                   -- fine: the playing eased in; the beacon's halo
 
   -- the far range: fixed, black against the horizon glow
   local far = K.profile(function(x)
@@ -57,6 +58,7 @@ return function(K)
     bars, lights = 0, {}
     glow, vb, lamp = 0, 0, 0
     hit, percs, pdz = {}, {}, 0
+    pe, halo = 0, 0
   end
   M.clear = function() lights = {} end
 
@@ -109,6 +111,23 @@ return function(K)
         end
       end
       top[c], hollow[c], bi[c] = t, ho, b
+    end
+    pe = fine and follow(pe, K.playing and 1 or 0, 0.6, DT) or 0
+    -- fine: the far range is a mass, not a line: contours follow its rim down
+    -- into the valley, dimmer as they go, lifting with the mids; hidden behind the ridge
+    if fp then
+      for j = 1, dense and 5 or 4 do
+        local l = pe * (2.3 - 0.3 * j + 1.4 * mid) * (1 - 0.45 * K.kickless)   -- kickless: they sink into the mist
+        local px, py, pc
+        for x = 0, 128, 4 do
+          local c = math.min(63, x // 2)
+          local y = far[c] + j * (dense and 2.6 or 3.2) + math.sin(x * 0.11 + j * 1.7) * 0.8
+          if px and y < GROUND - 1 and py < GROUND - 1 and y < top[c] - 1 and py < top[pc] - 1 then
+            line(l, px, py, x, y)
+          end
+          px, py, pc = x, y, c
+        end
+      end
     end
     -- the horizon glow behind the far range, swelling with the stabs
     local st = env.stab * (K.gain(S, "chords") > 0 and 1 or 0.6)
@@ -299,6 +318,15 @@ return function(K)
       if kk > 0.03 then put(E(3 * kk), X_NOW, y + 1, 1, 1) end end
     lamp = follow(lamp, math.max(kick * (1 - K.kickless), K.duck * 0.4), 0.03, DT)
     put(5 + lamp * 7, X_NOW - 1, lt - 2, 2, 2)
+    -- fine: the lamp is the scene's heart: a halo that the kick swells and the
+    -- energy holds open, and its light pooled on the ground below
+    if fp then
+      halo = follow(halo, 0.3 + 0.5 * K.energy + 0.6 * kick + 0.3 * pd, 0.1, DT)
+      local hl = pe * (1.5 + 3.5 * halo)
+      put(hl * 0.4, X_NOW - 4, lt - 5, 8, 7)
+      put(hl * 0.75, X_NOW - 2, lt - 3, 4, 4)
+      put(hl * 0.7, X_NOW - 8, GROUND, 16, 1)
+    end
     -- the kick sends a ring out from the lamp
     if kk > 0.03 then
       local r = 2 + (1 - kk) * 18
@@ -335,7 +363,7 @@ return function(K)
       return cc * 2 + 1, top[cc] - 1
     end, hi * 45, 7)
     -- haze in the valleys, heavier in kickless stretches and with dub
-    K.haze(0, 40, 128, GROUND, 0.06 + 0.12 * K.dub * K.throw + 0.2 * K.kickless + 0.2 * mid + 0.15 * pd, 1, T * 3)
+    K.haze(0, 40, 128, GROUND, 0.06 + 0.12 * K.dub * K.throw + 0.2 * K.kickless + (fp and 0.1 or 0.2) * mid + 0.15 * pd, 1, T * 3)
     if mid > 0.05 then K.haze(0, 14, 128, 38, 0.2 * mid, 1, -T * 2) end
   end
 

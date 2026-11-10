@@ -20,6 +20,7 @@ return function(K)
 
   local copies, emits, wins
   local lamp, bs, kl
+  local pe, glow = 0, {}                   -- fine: the playing eased in; each arch's backlight
 
   -- the other parts leave a mark (K.NOW of the hit) that fades on its own
   local hit, percs = {}, {}
@@ -48,6 +49,8 @@ return function(K)
     copies, emits, wins = {}, {}, {}
     lamp, bs, kl = 0.6, 0, 0
     hit, percs, pdz = {}, {}, 0
+    pe = 0
+    for k = 0, NA - 1 do glow[k] = 0 end
   end
   M.clear = M.init
 
@@ -115,6 +118,22 @@ return function(K)
     lamp = K.follow(lamp, (1 - K.duck * 0.7) * (fp and (0.62 + 0.6 * A[K.AMP]) or (0.7 + 0.3 * A[K.AMP])) + K.env.kick * 0.3 + pd * 0.15, 0.05, DT)
     bs = K.follow(bs, math.max(K.env.bass * 0.8, A[K.LO], bh * 0.9) * (K.gain(S, "bass") > 0 and 1 or 0.5), 0.07, DT)
     local duckv = 1 - 0.55 * K.duck * K.duck
+    -- fine: the stone steps back once the music is playing (eased, so a start never jumps)
+    pe = fine and K.follow(pe, K.playing and 1 or 0, 0.6, DT) or 0
+    -- fine: each arch's vault lights up behind the echo it holds, and the light
+    -- lingers there with the trails, so the echo is seen walking along the viaduct
+    if fp then
+      local want = {}
+      for k = 0, NA - 1 do want[k] = 0 end
+      for _, c in ipairs(copies) do
+        local v = c.lv / 12 * math.exp(-(T - c.t0) / (1.7 * K.trail))
+        if v > want[c.arch] then want[c.arch] = v end
+      end
+      for k = 0, NA - 1 do
+        local g = glow[k] or 0
+        glow[k] = K.follow(g, want[k], want[k] > g and 0.06 or 0.45 * K.trail, DT)
+      end
+    end
 
     -- the sky: a few stars, a low glow of the city behind the deck
     for i = 0, 8 do
@@ -142,7 +161,13 @@ return function(K)
     for k = 0, NA do put(wl, X0 + k * PITCH - 1, 3, 1, DECK - 3) end
     -- the deck: parapet, the deck's edge
     line(3 + K.bar_pulse * 2 + (fine and E(3 * pf) or 0), 0, DECK, 127, DECK)
-    line(2, 0, DECK + 2, 127, DECK + 2)
+    line(2 - 0.7 * pe, 0, DECK + 2, 127, DECK + 2)
+    -- fine: lamps along the parapet at each mast, brighter as the track climbs
+    if fp then
+      for k = 0, NA do
+        put(pe * (1.5 + 6 * K.energy * lamp) + E(4 * pf), X0 + k * PITCH - 1, DECK - 1, 1, 1)
+      end
+    end
 
     -- the masonry: mortar courses between the openings, pier joints
     for y = DECK + 4, QUAY - 1, 4 do
@@ -153,18 +178,28 @@ return function(K)
         local a, b = math.floor(c - h + 0.5), math.floor(c + h + 0.5)
         if h <= 0 then a, b = math.floor(c), math.floor(c) end
         if a > xs then
-          if fp then K.dashes(1, y, 2, 4, xs + ((y // 4) % 2) * 2, xs, a) else put(1, xs, y, a - xs, 1) end
+          if fp then K.dashes(1 + 0.8 * pe * (1 - (y - DECK) / (QUAY - DECK)), y, 2, 4, xs + ((y // 4) % 2) * 2, xs, a) else put(1, xs, y, a - xs, 1) end
         end
         xs = b
       end
       if xs < 128 then
-        if fp then K.dashes(1, y, 2, 4, xs + ((y // 4) % 2) * 2, xs, 128) else put(1, xs, y, 128 - xs, 1) end
+        if fp then K.dashes(1 + 0.8 * pe * (1 - (y - DECK) / (QUAY - DECK)), y, 2, 4, xs + ((y // 4) % 2) * 2, xs, 128) else put(1, xs, y, 128 - xs, 1) end
       end
     end
     -- dense: the brick joints in the piers, staggered course to course
     if dense and K.playing then
       for y = DECK + 4, QUAY - 5, 12 do
         for k = 0, NA - 2 do put(1, ax(k) + OW + 2 + ((y // 12) % 2) * 2, y + 1, 1, 2) end
+      end
+      -- and the spandrels between the arch heads laid in brick, a header every
+      -- other stone, lit from below by the vaults either side
+      for y = math.floor(SPRING - R) + 1, SPRING - 1, 3 do
+        local h = half(y)
+        for k = 0, NA - 2 do
+          local a, b = ax(k) + OW / 2 + h + 1, ax(k + 1) + OW / 2 - h - 1
+          local gl = fp and 2.5 * math.max(glow[k], glow[k + 1]) or 0
+          for x = math.floor(a) + (y // 3) % 2 * 2, b - 1, 4 do put(1 + gl * (y - SPRING + R) / R, x, y, 1, 1) end
+        end
       end
     end
     -- the arch rings and their lamps
@@ -175,16 +210,23 @@ return function(K)
       for s = 1, 6 do
         local a = math.pi - s / 6 * math.pi
         local nx, ny = c + math.cos(a) * R, SPRING - math.sin(a) * R
-        line(2.5, px, py, nx, ny)
+        line(2.5 - 0.6 * pe + (fp and 3.5 * glow[k] + 1.6 * mid or 0), px, py, nx, ny)
+        -- fine: a lit vault shows a second, inner ring of light under the first
+        if fp and glow[k] > 0.06 then
+          local r2 = R - 1.6
+          line(glow[k] * 7, c + math.cos(a + math.pi / 6) * r2, SPRING - math.sin(a + math.pi / 6) * r2,
+            c + math.cos(a) * r2, SPRING - math.sin(a) * r2)
+        end
         if cl > 0.03 then line(E(7 * cl), px, py, nx, ny) end
         px, py = nx, ny
       end
-      line(2, x0, SPRING, x0, QUAY)
-      line(2, x0 + OW, SPRING, x0 + OW, QUAY)
+      local jl = 2 - 0.7 * pe + (fp and 2.5 * glow[k] or 0)
+      line(jl, x0, SPRING, x0, QUAY)
+      line(jl, x0 + OW, SPRING, x0 + OW, QUAY)
       -- the lamp under the crown and its pool on the quay
       local ll = lamp * (0.8 + 0.2 * math.sin(T * 0.7 + k * 2.3))
       put(1.5, c, SPRING - R + 1, 1, 2)
-      put(3 + 6 * ll, c - 1, SPRING - R + 3, 3, 1)
+      put(fp and math.min(13, 3 + 6 * ll + E(4 * glow[k])) or 3 + 6 * ll, c - 1, SPRING - R + 3, 3, 1)
       put(1 + 2.5 * ll, c - 4, QUAY - 1, 9, 1)
       -- a tick flickers one arch's lamp
       if tk > 0.03 and hit.tk == k then
@@ -197,16 +239,18 @@ return function(K)
     end
 
     -- haze in the arches, thick when the kick is away
-    K.haze(0, SPRING - 6, 128, QUAY, fp and ((0.04 + 0.22 * kl + 0.08 * K.throw) * (dense and 0.05 or 0.2) + 0.15 * mid + 0.2 * pd)
+    K.haze(0, SPRING - 6, 128, QUAY, fp and ((0.04 + 0.22 * kl + 0.08 * K.throw) * (dense and 0.05 or 0.2) + 0.07 * mid + 0.2 * pd)
       or (0.04 + 0.22 * kl + 0.08 * K.throw + 0.15 * mid + 0.2 * pd), 1, T * 2)
 
     -- the mids thicken the air over the deck
-    if mid > 0.05 then K.haze(0, 6, 128, SPRING - 6, 0.25 * mid, 1, -T * 2) end
+    if mid > 0.05 then K.haze(0, 6, 128, SPRING - 6, (fp and (dense and 0.04 or 0.07) or 0.25) * mid, 1, -T * 2) end
 
     -- the quay and the water: the bass glowing on it, the lamps' streaks
     put(2 + bs * 2, 0, QUAY, 128, 1)
     K.gradient(QUAY + 1, 63, function(y)
-      return bs * 1.2 * math.exp(-(y - QUAY - 1) / (0.8 + bs))
+      local v = bs * 1.2 * math.exp(-(y - QUAY - 1) / (0.8 + bs))
+      if fp and v < 0.2 then return 0 end         -- fine: no stray full-width dither row in the far water
+      return v
     end)
     for k = 0, NA - 1 do
       local c = ax(k) + OW / 2
@@ -256,7 +300,27 @@ return function(K)
 
     -- ripples drifting on the canal
     for r = 0, 2 do
-      if not (fp and r == 1) then K.dashes(1, QUAY + 4 + r * 4, 2 + r, 11 + r * 4, T * (3 + r * 2) + r * 5, 0, 128) end
+      if not (fp and (r == 1 or (dense and r == 2))) then K.dashes(1, QUAY + 4 + r * 4, 2 + r, 11 + r * 4, T * (3 + r * 2) + r * 5, 0, 128) end
+    end
+    -- dense: each arch hangs upside down in the canal, a dotted ring under the quay
+    if dense and fp then
+      for k = 0, NA - 1 do
+        local c = ax(k) + OW / 2
+        for s = 1, 5 do
+          local a = s / 6 * math.pi
+          local wob = math.sin(T * 1.4 + k + s) * 0.8
+          put(1 + 1.5 * lamp + 3 * glow[k], c + math.cos(a) * R + wob, QUAY + 14 - math.sin(a) * R * 0.7, 1, 1)
+        end
+      end
+    end
+    -- fine, kickless: a mist lies on the canal and each lamp hangs in a halo
+    if fp and kl > 0.05 then
+      K.haze(0, QUAY + 3, 128, 63, 0.32 * kl, 1, T * 1.2)
+      for k = 0, NA - 1 do
+        local c = ax(k) + OW / 2
+        put(kl * (1 + 1.5 * lamp), c - 3, SPRING - R + 2, 7, 1)
+        put(kl * (0.8 + lamp), c - 2, SPRING - R + 4, 5, 1)
+      end
     end
 
     -- train windows on the deck, running right to left at their lane's row
@@ -286,6 +350,9 @@ return function(K)
       local lv = c.lv * fade * duckv
       if lv < 0.6 or age > 6 then table.remove(copies, i)
       else
+        -- fine: an echo holds its light longer and then lets go smoothly, so the
+        -- live copies stand well above the stone instead of sinking into it
+        if fp then lv = math.min(13, c.lv * fade ^ 0.6 * duckv * math.min(1, (lv - 0.6) / 1.5)) end
         local x = ax(c.arch) + 2 + math.sin(T * 0.9 + c.ph) * wow * 0.6
         local w = OW - 3
         for k = 1, 4 do
@@ -301,6 +368,12 @@ return function(K)
           if th > 0.05 and c.arch > 0 then
             local sl = math.floor(PITCH * 0.7 * th)
             put(lv * 0.2 * th, x - sl, y, sl, 1)
+          end
+          -- fine: the trails setting draws each echo's tape tail back toward the
+          -- arch it came from (none at 0, most of a pier at 100)
+          if fp and c.arch > 0 and K.trail > 0.6 then
+            local sl = math.floor(PITCH * 0.32 * (K.trail - 0.6))
+            if sl >= 1 then put(lv * 0.22, x - sl, y, sl, 1) end
           end
           local ry = QUAY + 1 + (QUAY - y) * 0.45
           if ry < 64 and math.floor(ry) % 2 == 0 then

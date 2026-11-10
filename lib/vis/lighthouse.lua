@@ -36,8 +36,16 @@ return function(K)
   local function add(k) acc[k] = math.min(2, acc[k] + 0.3) end
   local ang = 0.3
 
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense at full strength (0.45..2, the kit holds it back
+  -- near the lit bound), so trails 0 is crisp and 100 leaves the beam's hits glowing in the haze
+  local function TR() return K.detail ~= "classic" and math.min(2, math.max(0.45, K.trail)) or K.trail end
+  -- fine: the headland's seaward edge at row y (the rock is to the right of it)
+  local CREST = {}
+  for x = 0, 127 do CREST[x] = 45 - 7 * math.exp(-((x - 100) / 20) ^ 2) end
+  local function rock_x(y)
+    if y < 46 then return 66 + (46 - y) * 1.2 end
+    return 70 + (y - 46) * 2.5
+  end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -157,6 +165,8 @@ return function(K)
       for j = -3, 3 do
         local ty = LY + 5 + j * (1 + 6 * reach) * 0.7 + (1 - reach) * j * 2
         local l = bl * (1 - math.abs(j) / 4.5) * 0.7
+        -- fine: the beam has a hot core, the brightest thing on the screen, its edges falling away
+        if fine and K.playing then l = j == 0 and E(math.min(12, bl * 1.7)) or l * (math.abs(j) == 1 and 1.15 or 0.8) end
         line(l, LX - 3, LY, tx, ty)
       end
       -- haze on the beam: dither in the cone
@@ -183,6 +193,20 @@ return function(K)
       put(1.5 * f, LX - 4, LY, 9, 1); put(1.5 * f, LX, LY - 4, 1, 9)
     end
 
+    -- fine: the headland is a dark mass of rock, filled under the crest down to the sea, its upper face
+    -- a shade lighter with the level
+    if fine then
+      for y = 39, 63 do
+        if y < 54 or y % 2 == 0 then              -- below the strata the rock breaks up toward the sea
+          -- the run of columns under the crest, from the seaward edge to the right side
+          local a
+          for x = math.floor(math.max(rock_x(y), 66)), 127, 2 do
+            if y > CREST[x] + 1 then a = a or x elseif a then put(1, a, y, x - a, 1); a = nil end
+          end
+          if a then put(1 + (y < 50 and 0.4 * amp or 0), a, y, 128 - a, 1) end
+        end
+      end
+    end
     -- the headland: a dim rock mass, a crest and dithered strata below it
     local prev
     for x = 66, 127, 3 do
@@ -222,9 +246,18 @@ return function(K)
       line(E((fine and 3 or 2.2) * kk), 0, HZ + 1, 76, HZ + 1)
     end
     if pf > 0.05 then
-      for y = 8, 26, 2 do K.dashes((fine and 3.8 or 3) * pf, y, 2, 3, y * 3, LX - 14, LX + 14) end
+      if fine then
+        -- fine: the pump's glow is round, a dithered disc about the lantern
+        for y = 8, 26, 2 do
+          local dy = (y - LY - 1) / 10
+          local h = 14 * math.sqrt(math.max(0, 1 - dy * dy))
+          if h > 1 then K.dashes(3.8 * pf * (1 - 0.4 * math.abs(dy)), y, 2, 3, y * 3, LX - h, LX + h) end
+        end
+      else
+        for y = 8, 26, 2 do K.dashes(3 * pf, y, 2, 3, y * 3, LX - 14, LX + 14) end
+      end
     end
-    put(lamp, LX - 1, LY + 1, 3, 2)
+    put(fine and E(lamp * 1.15) or lamp, LX - 1, LY + 1, 3, 2)
     -- fine: a ring of faint glow dots round the lamp, lifted by the level and the pump
     if fine then
       for q = 0, 7 do
@@ -281,7 +314,10 @@ return function(K)
         local pre
         for x = 0, 128, 4 do
           local yy = y + math.sin(x * 0.06 + T * (0.8 + k * 0.1) + k * 0.4) * amy
-          if pre then line((fine and (1 + (k % 3) * 0.4 + 0.06 * k) * (k < 2 and 0.8 or 1) or 1 + (k % 3) * 0.4 + 0.3 * k * 0.2) + hi * 1.5, x - 4, pre, x, yy) end
+          if fine then
+            -- fine: the swell is dark water, a shade or two, and breaks on the rock instead of crossing it
+            if pre and x - 4 < rock_x(yy) then line((0.8 + (k % 3) * 0.35 + 0.05 * k) * (k < 2 and 0.8 or 1) + hi * 0.8 + 0.6 * lo, x - 4, pre, x, yy) end
+          elseif pre then line(1 + (k % 3) * 0.4 + 0.3 * k * 0.2 + hi * 1.5, x - 4, pre, x, yy) end
           pre = yy
         end
       end
@@ -345,10 +381,29 @@ return function(K)
       end
     end
 
+    -- fine: a kickless stretch is a foggy night: the horn sounds once a bar, a slow ring of fog-light
+    -- spreading out from the lantern over the water, and the fog lies thicker on the sea
+    if fine and K.kickless > 0.03 and K.playing then
+      local kl = K.kickless
+      for q = 0, 1 do
+        local u = ((K.bar_ph or 0) + q * 0.5) % 1
+        local r = 8 + u * 70
+        local l = kl * (1.2 + 2.6 * pf + 1.2 * pdz) * (1 - u) * math.min(1, u * 6)
+        if l > 0.5 then
+          local px2, py2
+          for i2 = 0, 10 do
+            local a = math.pi * (0.55 + i2 / 10 * 0.6)
+            local x, y = LX + math.cos(a) * r, LY + 2 + math.sin(a) * r * 0.45 + 18 * u
+            if px2 then line(l, px2, py2, x, y) end
+            px2, py2 = x, y
+          end
+        end
+      end
+    end
     -- the haze over the water, lifted by the mids
-    K.haze(0, HZ - 14, 80, HZ + 2, 0.1 + mid * 0.9 + 0.3 * ap, 1 + mid * (fine and 2.5 or 2), T * 2)
+    K.haze(0, HZ - 14, 80, HZ + 2, fine and 0.08 + mid * 0.62 + 0.3 * ap or 0.1 + mid * 0.9 + 0.3 * ap, 1 + mid * (fine and 2.5 or 2), T * 2)
     if aa > 0.03 then
-      for k = 0, 5 do K.dashes(2.5 * aa, 14 + k * 4, 2, 8, T * 2 + k * 11, 0, 74) end
+      for k = 0, 5 do K.dashes((fine and 3.2 or 2.5) * aa, 14 + k * 4, fine and 1 or 2, 8, T * 2 + k * 11, 0, 74) end
     end
     -- dense: a far ship's lamps crawl along the horizon and foam breathes at the headland's foot
     if dense and fp then
@@ -357,6 +412,22 @@ return function(K)
       for i = 1, 5 do
         local fo = math.sin(T * (0.9 + 0.17 * i) + i * 2.4)
         if fo > 0.2 then put(1.8 * fo, 66 + i * 6, 58 + i % 2, 3, 1) end
+      end
+    end
+    -- dense: gorse along the crest, a path of lamps up from the cottage, and fine ripples between the swells
+    if dense then
+      for x = 67, 126, 3 do
+        local cy = CREST[x] - 2 * K.hash(x - x % 3, 2)
+        put(1.4 + 0.9 * K.hash(x, 51) + (fp and 0.5 * math.sin(T * 0.7 + x * 0.4) or 0), x, cy - 1, 1, 1)
+      end
+      for i = 0, 5 do
+        local px2 = 88 + i * 2 + (i % 2) * 3
+        put(1.6 + 1.2 * amp, px2, 37 - i * 1.6, 1, 1)
+      end
+      for k = 0, 6 do
+        local y = HZ + 4 + k * 3.4
+        local x1 = math.min(80, rock_x(y))
+        K.dashes(1 + 0.5 * mid, math.floor(y), 1, 6, (fp and T * (1.5 + k * 0.3) or 0) + k * 4, 0, x1)
       end
     end
     K.grain(function(u, v) return u * 76, HZ + 3 + v * 24 end, hi * 40, 7)

@@ -33,8 +33,9 @@ return function(K)
     return math.sqrt(t.wt * t.wt + t.k * d * d)
   end
 
-  -- the fades follow the trails setting; at fine it acts at half strength and never moves them by more than 15% or 10%
-  local function TR() return K.detail ~= "classic" and math.min(1.1, math.max(0.85, K.trail ^ 0.5)) or K.trail end
+  -- the fades follow the trails setting: at fine and dense at full strength (0.45..2, the kit holds it back
+  -- near the lit bound), so trails 0 is crisp and 100 leaves the floodlights and lamps lingering on the shells
+  local function TR() return K.detail ~= "classic" and math.min(2, math.max(0.45, K.trail)) or K.trail end
   local function fade(t, tau)
     local v = math.exp(-(K.NOW - t) / (tau * TR()))
     return v < 0.03 and 0 or v
@@ -179,11 +180,14 @@ return function(K)
     pdz = K.follow(pdz, K.env.pad, 0.25, DT)
     local kk, pf, bt = fade(kick_t, 0.3), fade(pump_t, 0.3), fade(bass_t, 0.3)
     local thick = clamp(0.35 + 0.5 * e + 0.5 * pdz + 0.3 * lo, 0, 1.4)
+    -- fine: a kickless stretch lets the steam take over: fuller, slower plumes that hang
+    local kl = fine and K.kickless or 0
+    if kl > 0 then thick = clamp(thick + 0.55 * kl, 0, 1.4) end
 
     -- the sky: a faint glow low over the plain, thicker with the level
     K.haze(0, 38, 128, GY, 0.1 + 0.3 * amp + 0.3 * pdz, 1.2 + pdz, T * 2)
     for y = 8, 36, 7 do
-      if amp > 0.2 then K.dashes(math.min(fine and 2.5 or 1.5, amp * (fine and 2.5 or 1.5)), y, 2, 11, y * 5 + T * 4, 0, 128) end
+      if amp > 0.2 then K.dashes(math.min(fine and 2.5 or 1.5, amp * (fine and 2.5 or 1.5)), y, fine and 1 or 2, 11, y * 5 + T * 4, 0, 128) end
     end
     -- the pad: a soft lamp-glow on the horizon under each note
     for i = 1, #pad_notes do
@@ -210,14 +214,27 @@ return function(K)
     for ti = 2, 1, -1 do
       local t = TW[ti]
       local sc = ti == 1 and 1 or 0.7
+      -- fine: the shell is a dark mass, hatched in vertical strokes down the concrete (the far tower
+      -- more sparsely), its right flank a shade lighter where the horizon's glow catches it
+      if fine then
+        local wr0 = hw(t, t.top)
+        for x = math.floor(t.cx - t.wb) + 1, math.floor(t.cx + t.wb) - 1, (ti == 1 or dense) and 2 or 3 do
+          local dx = math.abs(x - t.cx)
+          local d0 = math.sqrt(math.max(0, (dx * dx - t.wt * t.wt) / t.k))
+          local l = x > t.cx + 0.3 * t.wt and 1.6 + 0.6 * amp or 1
+          if dx < wr0 - 0.5 and t.thr - d0 > t.top + 1 then put(l, x, t.top + 1, 1, t.thr - d0 - t.top - 1) end
+          local y0 = math.max(t.top + 1, math.ceil(t.thr + d0))
+          if y0 < GY - 1 then put(l, x, y0, 1, GY - 1 - y0) end
+        end
+      end
       -- the shell: both outlines, the rim, faint ribs
       local lx, ly, rx, ry
       for y = t.top, GY, 3 do
         local yy = math.min(y, GY)
         local w = hw(t, yy)
         if lx then
-          line((fine and 2 or 2.4) + (fine and 2.6 or 1.5) * kk, lx, ly, t.cx - w, yy)
-          line((fine and 2.8 or 2.4) + (fine and 2.6 or 1.5) * kk, rx, ry, t.cx + w, yy)     -- fine: the horizon's glow on the right
+          line((fine and 1.6 or 2.4) + (fine and 2.6 or 1.5) * kk, lx, ly, t.cx - w, yy)
+          line((fine and 2.6 or 2.4) + (fine and 2.6 or 1.5) * kk, rx, ry, t.cx + w, yy)     -- fine: the horizon's glow on the right
         end
         lx, ly, rx, ry = t.cx - w, yy, t.cx + w, yy
       end
@@ -230,7 +247,7 @@ return function(K)
         local px, py = t.cx + f * wr, t.top + 2
         for y = t.top + 6, GY, 6 do
           local nx = t.cx + f * hw(t, y)
-          line(0.6 + (fine and 1.8 * mid + 0.9 * hi or 1.2 * mid), px, py, nx, y)
+          line(0.6 + (fine and 1.1 * mid + 0.6 * hi or 1.2 * mid), px, py, nx, y)
           px, py = nx, y
         end
       end
@@ -251,16 +268,18 @@ return function(K)
       -- the plume: puffs climbing from the rim, spreading and drifting
       local n = math.min(NP, 3 + math.floor(thick * 6))
       for k = 0, n - 1 do
-        local u = ((T * (0.05 + 0.04 * e) * sc + k / NP + ti * 0.31) % 1)
+        local u = ((T * (0.05 + 0.04 * e) * (1 - 0.4 * kl) * sc + k / NP + ti * 0.31) % 1)
         local y = t.top - 2 - u * 30 * (0.7 + 0.3 * thick)
         local r = (wr * 0.6 + 14 * u * (0.6 + 0.6 * thick)) * (1 - 0.5 * pf)
         local x = t.cx + math.sin(T * 0.4 + k * 1.7 + ti) * 5 * u + 12 * u * u
         local l = (2.2 + 2.4 * thick) * (1 - u * 0.6)
         if y > 0 and l > 0.5 then
           if fine then
-            -- the puff's grain slides on the sub-pixel
-            sdash(l * 1.1, y, 2, 3, k * 3 + T * 5, x - r, x + r)
-            sdash(l * 0.8, y + 2, 2, 3, k * 5 - T * 4, x - r * 0.7, x + r * 0.7)
+            -- the puff's grain slides on the sub-pixel; its body is a denser, brighter core, so the plume
+            -- reads as a mass of steam with ragged edges
+            sdash(l * 0.85, y, 2, 3, k * 3 + T * 5, x - r, x + r)
+            sdash(l * 0.7, y + 2, 2, 3, k * 5 - T * 4, x - r * 0.7, x + r * 0.7)
+            if K.playing then put(l * 1.1, x - r * 0.4, y + 1, r * 0.8, 1) end
           else
             K.dashes(l, y, 2, 3, k * 3 + T * 5, x - r, x + r)
             K.dashes(l * 0.7, y + 2, 2, 3, k * 5 - T * 4, x - r * 0.7, x + r * 0.7)
@@ -297,13 +316,19 @@ return function(K)
           local u = a / 0.7
           local y = t.top - 1 - u * 24
           local r = wr * (0.9 + 0.6 * u)
-          local l = (fine and 7.8 or 6) * (1 - u) * (g.tw == ti and 1 or 0.75)
+          local l = (fine and 8.5 or 6) * (1 - u) * (g.tw == ti and 1 or 0.75)
           if y > 0 then
             ring(math.max(1, l), t.cx + 12 * u * u, y, r)
             put(math.max(1, l * 0.4), t.cx - r - 3 + 12 * u * u, y, r * 2 + 7, 1)
           end
         end
       end
+    end
+
+    -- dense: a perimeter fence runs along the plain in front of the towers, its wire catching the level
+    if dense then
+      line(1.2 + 0.8 * amp, 0, GY + 1, 127, GY + 1)
+      for x = 2, 126, 5 do put(1.5, x, GY - 1, 1, 2) end
     end
 
     -- aircraft warning lights on the rims: the hats
@@ -423,7 +448,11 @@ return function(K)
         put(E(4 * f), v.x - 1, GY - 12 - a * 20, 3, 1)
         put(E(2.5 * f), v.x - 7, GY - 4 - a * 6, 15, 1)
         put(E(2 * f), v.x, GY - 22 - a * 20, 1, 8)
-        if fine then put(E(4 * f), v.x - 5, GY + 1, 11, 1); put(E(3 * f), v.x - 2, GY - 15 - a * 22, 5, 1); put(E(3.2 * f), v.x - 1, GY - 3, 3, 3) end
+        if fine then
+          put(E(4 * f), v.x - 5, GY + 1, 11, 1); put(E(3 * f), v.x - 2, GY - 15 - a * 22, 5, 1); put(E(3.2 * f), v.x - 1, GY - 3, 3, 3)
+          -- the vent's breath: a puff of lit vapour climbing above the jet
+          put(E(3.6 * f), v.x - 3, GY - 19 - a * 24, 7, 2)
+        end
       end
     end
   end

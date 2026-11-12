@@ -59,17 +59,18 @@ function O.setup_params(vport_names, vport_ids)
   params:add_separator("CC OUT")
   dev_param("cc", "cc_dev", "midi device")
   params:add_number("cc_ch", "channel", 1, 16, 16)
-  -- 0 = off
-  params:add_number("cc_energy", "energy cc", 0, 127, 0)
-  params:add_number("cc_dub", "dub cc", 0, 127, 0)
-  params:add_number("cc_tone", "tone cc", 0, 127, 0)
-  params:add_number("cc_phrase", "phrase pulse cc", 0, 127, 0)
-  params:add_number("cc_kickless", "kickless cc", 0, 127, 0)
+  -- 0 = off. the defaults are breakage's FOLLOW defaults, so picking a
+  -- device is all it takes for breakage to follow the arc and the key
+  params:add_number("cc_energy", "energy cc", 0, 127, 20)
+  params:add_number("cc_dub", "dub cc", 0, 127, 21)
+  params:add_number("cc_tone", "tone cc", 0, 127, 22)
+  params:add_number("cc_phrase", "phrase pulse cc", 0, 127, 23)
+  params:add_number("cc_kickless", "kickless cc", 0, 127, 24)
   -- the key as plain numbers: root and chord root 0-11 (C = 0), mode = its
   -- index in KEY > mode (1 aeolian, 2 dorian ...)
-  params:add_number("cc_key", "key root cc", 0, 127, 0)
-  params:add_number("cc_mode", "mode cc", 0, 127, 0)
-  params:add_number("cc_chord", "chord root cc", 0, 127, 0)
+  params:add_number("cc_key", "key root cc", 0, 127, 25)
+  params:add_number("cc_mode", "mode cc", 0, 127, 26)
+  params:add_number("cc_chord", "chord root cc", 0, 127, 27)
 end
 
 ------------------------------------------------------------------------
@@ -160,6 +161,14 @@ function O.bar(S, phrase_start)
   cc(params:get("cc_tone"), params:get("tone") * 1.27, true)
   cc(params:get("cc_phrase"), phrase_start and 127 or 0, true)
   cc(params:get("cc_kickless"), S.kickless and 127 or 0, true)
+  O.key(S)
+end
+
+-- the key, now: called on every bar and again the moment the key or mode
+-- moves (by hand, by input follow or by a new track), so a listener never
+-- plays a bar in the old key
+function O.key(S)
+  if not devs.cc then return end
   cc(params:get("cc_key"), S.root_pc % 12, true)
   cc(params:get("cc_mode"), S.mode or 1, true)
   cc(params:get("cc_chord"), (S.root_pc + (S.chord_root_pc or 0)) % 12, true)

@@ -110,6 +110,7 @@ function clock.get_beat_sec() return 60 / 128 end
 function clock.get_tempo() return 128 end
 
 -- misc -------------------------------------------------------------------
+cc_sent = {}
 midi = {vports = {{name = "fake synth"}}, connect = function()
   return {note_on = function(_, n, v, ch)
             calls.midi_on = (calls.midi_on or 0) + 1
@@ -119,6 +120,7 @@ midi = {vports = {{name = "fake synth"}}, connect = function()
           cc = function(_, num, val, ch)
             assert(num >= 0 and num <= 127 and val >= 0 and val <= 127 and ch >= 1 and ch <= 16)
             calls.midi_cc = (calls.midi_cc or 0) + 1
+            cc_sent[num] = {val = val, ch = ch}
           end,
           start = function() calls.midi_start = (calls.midi_start or 0) + 1 end,
           stop = function() calls.midi_stop = (calls.midi_stop or 0) + 1 end}
@@ -784,6 +786,21 @@ assert((evcalls.pad or 0) == calls.wash_chord,
 print(string.format("pad events %d == wash_chord calls %d", evcalls.pad, calls.wash_chord))
 assert((calls.bass_glide or 0) > 0, "no bass glides")
 assert((calls.tom or 0) > 0, "no toms")
+-- breakage key sync: the default cc numbers are breakage's follow defaults,
+-- and a key / mode change goes out at once, not on the next bar
+assert(params:get("cc_key") == 25 and params:get("cc_mode") == 26 and params:get("cc_chord") == 27,
+  "cc out defaults must match breakage's follow defaults")
+params:set("cc_dev", 2)
+cc_sent = {}
+params:set("root", 3)    -- D
+assert(cc_sent[25] and cc_sent[25].val == 2 and cc_sent[25].ch == 16, "key root not sent on change")
+assert(cc_sent[27], "chord root not sent on a key change")
+cc_sent = {}
+params:set("mode", 2)    -- dorian
+assert(cc_sent[26] and cc_sent[26].val == 2, "mode not sent on change")
+assert(cc_sent[25] and cc_sent[25].val == 2, "key root not resent with the mode")
+print("breakage key sync ok")
+
 local keys = {}
 for k in pairs(calls) do keys[#keys+1] = k end
 table.sort(keys)

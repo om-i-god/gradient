@@ -554,6 +554,7 @@ local function listen_loop()
           S.root_pc = pc
           C.update_chord(S)
           params:set("root", pc + 1, true)
+          O.key(S)
           flash("in key " .. T.name(pc, S.mode))
         end
       end
@@ -1062,9 +1063,9 @@ local function setup_params()
 
   params:add_separator("KEY")
   params:add_option("root", "root", T.NOTE_NAMES, 10)
-  params:set_action("root", function(v) S.root_pc = v - 1; C.update_chord(S) end)
+  params:set_action("root", function(v) S.root_pc = v - 1; C.update_chord(S); O.key(S) end)
   params:add_option("mode", "mode", T.MODE_NAMES, 1)
-  params:set_action("mode", function(v) S.mode = v; C.update_chord(S) end)
+  params:set_action("mode", function(v) S.mode = v; C.update_chord(S); O.key(S) end)
   params:add_option("harmony", "harmony", H.NAMES, 3)
   params:set_action("harmony", function(v) S.harmony = v; C.reharm(S) end)
   local vnames = {table.unpack(T.VOICING_NAMES)}

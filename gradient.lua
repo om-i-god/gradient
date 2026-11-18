@@ -80,6 +80,19 @@ local note_id  = 0
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 local function mtof(n) return 440 * 2 ^ ((n - 69) / 12) end
 
+-- octave: the master "octave" plus a part's own (chord / wash / arp; the
+-- bass keeps its absolute "bass octave"), applied only where notes leave
+-- for the engine, midi and crow. the harmony and the picture never see it.
+-- folded back by octaves into 12..120 so nothing falls off either end
+local function oct(part)
+  return 12 * (params:get("octave") + (part and params:get(part .. "_oct") or 0))
+end
+local function fold(n)
+  while n < 12 do n = n + 12 end
+  while n > 120 do n = n - 12 end
+  return n
+end
+
 -- VISUALS > theme cycle: a new random theme on a bar edge / phrase / track
 local function cycle_theme(edge)
   if params:get("vis_cycle") ~= edge or #VIS.names < 2 then return end
@@ -204,8 +217,9 @@ local function apply_bar()
 
   if S.chord_changed then
     S.chord_changed = false
-    local c = S.chord
-    engine.wash_chord(mtof(c[1] - 12), mtof(c[2] - 12), mtof(c[3]), mtof(c[4]))
+    local c, w = S.chord, oct("wash")
+    engine.wash_chord(mtof(fold(c[1] - 12 + w)), mtof(fold(c[2] - 12 + w)),
+                      mtof(fold(c[3] + w)), mtof(fold(c[4] + w)))
     VIS.event("pad", {c[1] - 12, c[2] - 12, c[3], c[4]})
   end
 end
@@ -442,15 +456,16 @@ local function play_step()
     local amp = cv * cg * 0.32
     local dur = 0.1 + (1 - e) * 0.25
     local internal, ext = routes("chord")
-    local c = S.chord
+    local c, sh = S.chord, oct("chord")
+    local o = {fold(c[1] + sh), fold(c[2] + sh), fold(c[3] + sh), fold(c[4] + sh)}
     if internal then
-      engine.chord(mtof(c[1]), mtof(c[2]), mtof(c[3]), mtof(c[4]), amp, dur)
+      engine.chord(mtof(o[1]), mtof(o[2]), mtof(o[3]), mtof(o[4]), amp, dur)
     end
     if ext then
-      for i = 1, 4 do midi_note("chord", c[i], cv * cg, beat * 0.5) end
+      for i = 1, 4 do midi_note("chord", o[i], cv * cg, beat * 0.5) end
     end
     VIS.event("stab", c)
-    O.note("chord", 48 + S.root_pc + S.chord_root_pc, dur)
+    O.note("chord", 48 + S.root_pc + S.chord_root_pc + sh, dur)
   end
 
   -- bass: chord root, its 3rd / 5th, or a tonic pedal (lib/harmony), on
@@ -479,15 +494,17 @@ local function play_step()
       local dur = beat * 0.25 * (1.2 + (1 - e) * 1.2)
       if S.pat.bass.kind == "slide" then dur = dur * 2.5 end
       local internal, ext = routes("bass")
+      local sh = oct()
+      local out = fold(note + sh)
       if internal then
         if slide and S.last_bass and S.last_bass ~= note then
-          engine.bass_glide(mtof(note), vel * bg * 0.55, dur, mtof(S.last_bass), beat * 0.15)
+          engine.bass_glide(mtof(out), vel * bg * 0.55, dur, mtof(fold(S.last_bass + sh)), beat * 0.15)
         else
-          engine.bass(mtof(note), vel * bg * 0.55, dur)
+          engine.bass(mtof(out), vel * bg * 0.55, dur)
         end
       end
-      if ext then midi_note("bass", note, vel * bg, dur) end
-      O.note("bass", note, dur)
+      if ext then midi_note("bass", out, vel * bg, dur) end
+      O.note("bass", out, dur)
       VIS.event("bass", note)
       S.last_bass = note
     end
@@ -511,17 +528,18 @@ local function play_step()
         local cut  = l.cutoff * (0.4 + tone * 1.2) * (0.65 + 0.35 * lfo) * (0.6 + e * 0.6)
         local vel = g * (0.7 + math.random() * 0.3)
         local dur = l.decay * (0.6 + e * 0.6)
-        O.note("lead", note, dur, i)
+        local out = fold(note + oct("arp"))
+        O.note("lead", out, dur, i)
         VIS.event("arp", i, note, l.pos)
         local ext = arp_ext and (arp_sel == 1 or arp_sel == 6 or arp_sel == i + 1)
         if ext then
           local ch = (arp_sel == 6) and math.min(16, params:get("arp_ch") + i - 1) or nil
-          midi_note("arp", note, vel, dur, ch)
+          midi_note("arp", out, vel, dur, ch)
         end
         -- lanes not picked for midi keep sounding on norns
         if arp_int or not ext then
           local v = params:get("lane" .. i .. "_voice")
-          engine.arp(mtof(note), 0.13 * vel, dur, clamp(cut, 150, 12000), l.pan, l.shapeX,
+          engine.arp(mtof(out), 0.13 * vel, dur, clamp(cut, 150, 12000), l.pan, l.shapeX,
             v == 1 and ((S.timbre and S.timbre.lane[i]) or l.voice or 1) or v - 1)
         end
       end
@@ -1073,6 +1091,15 @@ local function setup_params()
   params:add_option("voicing", "chord voicing", vnames, H.AUTO)
   params:set_action("voicing", function(v) S.voicing = v; C.reharm(S) end)
   params:add_number("bass_oct", "bass octave", 0, 2, 1)
+  -- octaves: the master moves every pitched part; each part's own adds on
+  -- top (the wash re-voices at the next bar, the rest from the next note)
+  local function signed(p) local v = p:get(); return v > 0 and "+" .. v or tostring(v) end
+  params:add_number("octave", "octave", -2, 2, 0, signed)
+  params:set_action("octave", function() S.chord_changed = true end)
+  params:add_number("chord_oct", "chord octave", -2, 2, 0, signed)
+  params:add_number("wash_oct", "wash octave", -2, 2, 0, signed)
+  params:set_action("wash_oct", function() S.chord_changed = true end)
+  params:add_number("arp_oct", "arp octave", -2, 2, 0, signed)
 
   params:add_separator("LISTEN")
   params:add_option("listen_on", "follow input key", {"off", "on"}, 1)

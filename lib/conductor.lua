@@ -134,7 +134,7 @@ end
 
 local function track_total(S)
   -- minutes -> bars at current tempo, rounded to phrases
-  local bars = S.track_minutes * clock.get_tempo() / 4
+  local bars = S.track_minutes * clock.get_tempo() / (S.tmul or 1) / 4
   local P = plen(S)
   return math.max(P * 6, math.floor(bars / P + 0.5) * P)
 end

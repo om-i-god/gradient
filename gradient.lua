@@ -46,6 +46,7 @@ local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft", "glass", "re
 ------------------------------------------------------------------------
 
 local S = {
+  tmul = 1,
   playing = false, step = 0, track_bar = 0,
   energy = 0, nudge = 0, dub = 0.5,
   section = "-", progress = 0, total_bars = nil,
@@ -62,6 +63,12 @@ local S = {
   follow = false, pending_root = nil,
   mute = {}, solo = {}, hand_throw = 0, lead_throw = 0,
 }
+
+-- time feel: 1 normal, 2 half time, 0.5 double time. the script's own beat
+-- is the clock's beat x tmul, so the grid, note lengths, echo and track
+-- length all follow; the clock (and anything else synced to it) doesn't
+local TIME_NAMES, TIME_MUL = {"normal", "half time", "double time"}, {1, 2, 0.5}
+local function beat_sec() return clock.get_beat_sec() * S.tmul end
 
 local main_clock, draw_clock, listen_clock
 local in_key, in_amp = nil, 0
@@ -171,7 +178,8 @@ local function apply_bar()
   local dub  = params:get("dub") / 100
   local tone = params:get("tone") / 100
   S.dub = dub
-  local beat = clock.get_beat_sec()
+  local beat = beat_sec()
+  S.tempo = clock.get_tempo() / S.tmul    -- the picture pulses with the felt beat
 
   local throwing = S.throw or S.hand_throw > 0
   tweak("echo_time", ECHO_DIVS[params:get("echo_div")] * beat)
@@ -234,7 +242,7 @@ local start, stop
 -- slice and length in 16ths. the engine caps a glitch at 1.5 s
 local GLITCH_NAMES = {"stutter", "tape stop", "reverse", "chop", "crush"}
 local function glitch(mode, slice16, len16)
-  local q = clock.get_beat_sec() / 4
+  local q = beat_sec() / 4
   -- a reverse reads back at twice the time, into a 2 s line: at most 1 s
   local dur = math.min(mode == 3 and 1 or 1.5, len16 * q)
   local mix = params:get("glitch_mix") / 100
@@ -285,7 +293,7 @@ local function play_step()
   end
 
   local e    = S.energy
-  local beat = clock.get_beat_sec()
+  local beat = beat_sec()
   local fill = S.fill
   -- gap fill: drums and bass sit out the end of the bar, the pump goes on
   local gap  = fill == "gap" and s >= (S.fill_from or 13) + n - 16
@@ -585,15 +593,15 @@ end
 ------------------------------------------------------------------------
 
 local function loop(my)
-  clock.sync(4)
+  clock.sync(4 * S.tmul)
   if S.playing and my == loop_gen then O.start() end
   S.step = 0
   S.bar_step = 1
   while true do
-    clock.sync(1 / 4)
+    clock.sync(1 / 4 * S.tmul)
     local swing = params:get("swing") / 100
     if S.step % 2 == 1 and swing > 0 then
-      clock.sleep(clock.get_beat_sec() * 0.25 * swing)
+      clock.sleep(beat_sec() * 0.25 * swing)
     end
     if not S.playing or my ~= loop_gen then return end
     play_step()
@@ -1116,6 +1124,8 @@ local function setup_params()
   params:add_number("dub", "dub", 0, 100, 50)
   params:add_number("tone", "tone", 0, 100, 50)
   params:add_option("echo_div", "echo time", ECHO_DIV_NAMES, 2)
+  params:add_option("time", "time feel", TIME_NAMES, 1)
+  params:set_action("time", function(v) S.tmul = TIME_MUL[v] end)
   params:add_number("swing", "swing %", 0, 50, 6)
   params:add_number("pump_depth", "pump depth", 0, 100, 55)
   params:add_control("level", "level", controlspec.new(0, 1, "lin", 0.01, 0.8))

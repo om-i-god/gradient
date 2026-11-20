@@ -801,6 +801,40 @@ assert(cc_sent[26] and cc_sent[26].val == 2, "mode not sent on change")
 assert(cc_sent[25] and cc_sent[25].val == 2, "key root not resent with the mode")
 print("breakage key sync ok")
 
+-- K1+K3: the voices screen. holding K1 and K3 (either first) is never a K3
+-- tap, the screen names the voices in use, and K1 alone still turns themes
+do
+  local function up(name)
+    for j = 1, 200 do
+      local n, v = debug.getupvalue(key, j)
+      if not n then break end
+      if n == name then return v end
+    end
+  end
+  local texts = {}
+  local real = screen
+  screen = setmetatable({text = function(s) texts[#texts + 1] = s end,
+    text_extents = function() return 20, 6 end}, {__index = function() return function() end end})
+  key(1, 1); key(3, 1)
+  assert(up("k3_used") == true, "K1 then K3: the K3 release would be a tap")
+  tick_all()   -- the draw loop draws a frame
+  local shown = table.concat(texts, "|")
+  for _, want in ipairs({"bass ", "hat ", "stab ", "pad ", "kick ", "clap ", "arp1 ", "arp4 "}) do
+    assert(shown:find(want, 1, true), "voices screen: no '" .. want .. "' in " .. shown)
+  end
+  assert(not shown:find("?", 1, true), "voices screen: an unknown voice in " .. shown)
+  key(3, 0); key(1, 0)
+  key(3, 1); key(1, 1)
+  assert(up("k3_used") == true, "K3 then K1: the K3 release would be a tap")
+  key(1, 0); key(3, 0)
+  local th = params:get("theme")
+  key(1, 1); enc(1, th > 1 and -1 or 1); key(1, 0)   -- toward the middle: the ends clamp
+  assert(params:get("theme") ~= th, "K1+E1 no longer turns the theme")
+  params:set("theme", th)
+  screen = real
+  print("voices screen ok")
+end
+
 local keys = {}
 for k in pairs(calls) do keys[#keys+1] = k end
 table.sort(keys)

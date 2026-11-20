@@ -108,6 +108,7 @@ new tracks (and next-track key moves) mostly land on aeolian, dorian or phrygian
 | **hold K3** + E2 / E3 | tempo / set ↔ track |
 | **hold K1** + E1 | visual theme |
 | **hold K1** + E2 | encoder page |
+| **hold K1 + K3** | the voice each part is using right now: bass, stab, hat and pad type, kick, clap and the four arp lanes. auto picks move at phrase edges; a part set by hand in PARAMS > SOUND is marked `*`, a silent part is dim |
 
 **encoder pages**
 

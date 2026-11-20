@@ -13,6 +13,7 @@
 -- hold K2: E2 key  E3 mode
 -- hold K3: E2 bpm  E3 set/track
 -- hold K1: E1 visual theme  E2 page
+-- hold K1+K3: the voices in use
 -- grid: see lib/gridui.lua
 --
 -- params > LISTEN > follow input key:
@@ -40,6 +41,13 @@ local LEAD_DIVS      = {0.25, 1/3, 0.5, 0.75, 2/3, 1, 1.5, 2}
 local LEAD_DIV_NAMES = {"1/16", "1/8T", "1/8", "3/16", "1/4T", "1/4", "3/8", "1/2"}
 local OUT_NAMES      = {"internal", "midi", "both"}
 local VOICE_NAMES    = {"auto", "classic", "bell", "pluck", "soft", "glass", "reed", "kalimba", "marimba", "steel", "bowed"}
+-- the SOUND type params (1 = auto, then the engine's types in order)
+local TYPE_NAMES = {
+  bass  = {"auto", "sub", "reese", "rubber", "fm sub", "tape"},
+  chord = {"auto", "dub", "felt", "organ", "glass", "rhodes", "choir", "strings"},
+  hat   = {"auto", "noise", "metal", "dust", "tape"},
+  pad   = {"auto", "wash", "choir", "strings", "drone", "glass", "tape loop"},
+}
 
 ------------------------------------------------------------------------
 -- state
@@ -772,6 +780,7 @@ local function on_parts() return PAGES[page].name == "parts" end
 function key(n, z)
   if n == 1 then
     k1 = z == 1
+    if k1 and k3 then k3_used = true end
   elseif n == 2 then
     if z == 1 then
       k2, k2_used = true, false
@@ -788,6 +797,7 @@ function key(n, z)
   elseif n == 3 then
     if z == 1 then
       k3, k3_used = true, false
+      if k1 then k3_used = true end   -- K1+K3: the voices screen, not a tap
       if k2 then
         if S.playing then stop() else start() end
         k2_used, k3_used = true, true
@@ -802,7 +812,9 @@ function key(n, z)
 end
 
 function enc(n, d)
-  if k1 and n == 1 then
+  if k1 and k3 then
+    return
+  elseif k1 and n == 1 then
     params:delta("theme", d)
   elseif k1 and n == 2 then
     page = clamp(page + d, 1, #PAGES)
@@ -860,7 +872,46 @@ local function text_box(x, y, s, lvl, right)
   screen.text(s)
 end
 
+-- held K1+K3: the voice each part is using right now. "*" marks a part set
+-- by hand in PARAMS > SOUND (auto picks move at phrase edges); a part that
+-- is silent right now is drawn dim
+local function draw_voices()
+  screen.level(0)
+  screen.rect(0, 0, 128, 64)
+  screen.fill()
+  local any_hand = false
+  local function cell(x, y, label, name, hand, key)
+    any_hand = any_hand or hand
+    screen.level(((S.gain[key] or 1) > 0.01) and 15 or 5)
+    screen.move(x, y)
+    screen.text(label .. " " .. name .. (hand and "*" or ""))
+  end
+  local function typed(x, y, label, part, id, key)
+    local v = params:get(id)
+    cell(x, y, label, TYPE_NAMES[part][TB.resolve(S, part, v) + 1] or "?", v > 1, key)
+  end
+  typed(1, 15, "bass", "bass", "bass_type", "bass")
+  typed(65, 15, "hat", "hat", "hat_type", "hats")
+  typed(1, 23, "stab", "chord", "chord_type", "chords")
+  typed(1, 31, "pad", "pad", "pad_type", "wash")
+  cell(1, 39, "kick", params:string("kick_type"), false, "kick")
+  local ck = params:get("clap_kind")
+  local kind = ck == 1 and (S.pat and S.pat.clap and S.pat.clap.kind or 1) or ck - 1
+  cell(65, 39, "clap", ({"clap", "snare", "snap"})[kind] or "?", ck > 1, "clap")
+  for i = 1, 4 do
+    local v = params:get("lane" .. i .. "_voice")
+    local l = S.lanes and S.lanes[i] or {}
+    local idx = v == 1 and ((S.timbre and S.timbre.lane[i]) or l.voice or 1) or v - 1
+    cell(i % 2 == 1 and 1 or 65, 47 + math.floor((i - 1) / 2) * 8, "arp" .. i,
+      VOICE_NAMES[idx + 1] or "?", v > 1, "lane" .. i)
+  end
+  screen.level(15)
+  screen.move(1, 7)
+  screen.text("voices" .. (any_hand and "  * set by hand" or ""))
+end
+
 local function draw_hud()
+  if k1 and k3 then return draw_voices() end
   -- overlay: 1 full, 2 minimal (key + chord), 3 off (hints and messages only)
   local hud = params:get("hud")
 
@@ -1201,10 +1252,10 @@ local function setup_params()
   params:set_action("chord_detune", function(v) engine.tweak("chord_detune", v) end)
   params:add_number("bass_cutoff", "bass cutoff", 80, 1200, 260)
   for _, o in ipairs({
-    {"bass_type", "bass type", {"auto", "sub", "reese", "rubber", "fm sub", "tape"}},
-    {"chord_type", "stab type", {"auto", "dub", "felt", "organ", "glass", "rhodes", "choir", "strings"}},
-    {"hat_type", "hat type", {"auto", "noise", "metal", "dust", "tape"}},
-    {"pad_type", "pad type", {"auto", "wash", "choir", "strings", "drone", "glass", "tape loop"}},
+    {"bass_type", "bass type", TYPE_NAMES.bass},
+    {"chord_type", "stab type", TYPE_NAMES.chord},
+    {"hat_type", "hat type", TYPE_NAMES.hat},
+    {"pad_type", "pad type", TYPE_NAMES.pad},
   }) do
     params:add_option(o[1], o[2], o[3], 1)
     params:set_action(o[1], function()
@@ -1263,9 +1314,12 @@ end
 local saved_screensaver_event
 
 function init()
-  saved_screensaver_event = metro[36].event
-  metro[36].event = function() end
-  metro[36]:stop()
+  local ss = metro and metro[36]
+  if ss then
+    saved_screensaver_event = ss.event
+    ss.event = function() end
+    ss:stop()
+  end
   setup_params()
   params:bang()
   tweak_cache, pad_sent = {}, nil
